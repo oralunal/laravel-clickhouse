@@ -722,6 +722,24 @@ dictionary in the ClickHouse database, in an order ClickHouse accepts, on every
 node. Views are dropped even without `--drop-views`: the dump and the
 migrations recreate them, and that would fail while they still exist.
 
+**Parallel tests.** With `php artisan test --parallel` or `pest --parallel`,
+each test process gets its own database on every secondary ClickHouse
+connection, the way Laravel does it for the default connection. The database
+is named `<database>_test_<token>`, for example `analytics_test_1`. A process
+creates it for its first test case that uses `RefreshDatabase`,
+`LazilyRefreshDatabase`, `DatabaseMigrations`, `DatabaseTransactions` or
+`DatabaseTruncation`, and all of that process's test cases use it. So the
+`migrate:fresh` of one process never drops the tables of another.
+
+- `--recreate-databases` drops these databases before the run, and
+  `--drop-databases` drops them after it.
+- `--without-databases` keeps the configured database.
+- When ClickHouse is the primary connection, Laravel itself switches it to
+  `<database>_test_<token>`.
+
+The ClickHouse user needs permission to create and drop databases. Test runs
+without `--parallel` use the configured database.
+
 ## Credits
 
 This package bundles code from these MIT-licensed projects. Each bundled
