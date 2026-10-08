@@ -10,7 +10,6 @@ class MultiInstancesTest extends TestCase
     {
         Example2::truncate();
         Example2::insertAssoc([['f_int' => 1, 'f_int2' => 2, 'f_string' => 'a']]);
-        usleep(3e4); // some lag in clickhouse server
         $rows = Example2::where('f_int', 1)->getRows();
         $this->assertCount(1, $rows);
         $this->assertEquals(2, $rows[0]['f_int2']);
