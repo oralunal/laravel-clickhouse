@@ -38,9 +38,11 @@ is unclear.
 ## Step 1: Assess
 
 1. Read `composer.json` and run `composer show oralunal/phpclickhouse-laravel`
-   to see the required and installed versions. The target is 2.0.1 or later.
+   to see the required and installed versions. The target is 2.0.2 or later.
    2.0.0 lacks the bundled schema builder, so treat an installed 2.0.0 like
-   1.x and do every step.
+   1.x and do every step. With 2.0.1 installed, parallel test processes drop
+   each other's ClickHouse tables: do step 2 to update and step 7, and the
+   other steps only for what step 1's searches find.
 2. Check `git status`. If the tree has uncommitted changes that are not yours,
    tell the user and suggest committing them or working on a new branch before
    you continue.
@@ -78,7 +80,7 @@ is unclear.
 1. Set the constraint and update:
 
    ```bash
-   composer require oralunal/phpclickhouse-laravel:^2.0.1 --with-all-dependencies
+   composer require oralunal/phpclickhouse-laravel:^2.0.2 --with-all-dependencies
    ```
 
 2. Remove these packages if `composer.json` requires them directly. The bundled
@@ -228,6 +230,11 @@ Do not change code for this. Instead:
    If any of them looks shared or important, for example the same database as
    local development or production, warn them clearly and suggest a dedicated
    test database. Do not run `migrate:fresh` yourself.
+4. If the tests run in parallel (`--parallel` in `composer.json` scripts or
+   CI, or paratest), tell the user that each test process empties its own
+   database, `<database>_test_<token>` (for example `analytics_test_1`),
+   rather than the configured one. The ClickHouse user of the test
+   environment must be allowed to create and drop databases.
 
 ## Step 8: Verify
 

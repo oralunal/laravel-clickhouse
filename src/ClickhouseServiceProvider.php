@@ -9,6 +9,7 @@ use Illuminate\Database\Console\Migrations\FreshCommand;
 use Illuminate\Database\Events\SchemaDumped;
 use Illuminate\Database\Events\SchemaLoaded;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Testing\ParallelTesting;
 
 /**
  * Service provider to connect Clickhouse driver in Laravel.
@@ -54,6 +55,12 @@ class ClickhouseServiceProvider extends ServiceProvider
         $this->app->extend(
             FreshCommand::class,
             fn (FreshCommand $command, $app) => new Console\FreshCommand($app['migrator'])
+        );
+
+        // Parallel test processes each get their own database on those connections.
+        $this->app->afterResolving(
+            ParallelTesting::class,
+            fn (ParallelTesting $parallelTesting, $app) => (new Testing\ParallelTestDatabases($app))->register($parallelTesting)
         );
     }
 

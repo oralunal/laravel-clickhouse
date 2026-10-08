@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Parallel test runs (`php artisan test --parallel`, `pest --parallel`) no longer let one process drop the ClickHouse tables of another. Since 2.0.1, `migrate:fresh`, and with it `RefreshDatabase` and `LazilyRefreshDatabase`, also empties secondary ClickHouse connections. Every process used the same ClickHouse database, so tests failed at random with `TABLE_ALREADY_EXISTS` or `UNKNOWN_TABLE`. Now each process gets its own database on every secondary ClickHouse connection, named `<database>_test_<token>` like Laravel's per-process database for the default connection.
+  - A process creates the database for its first test case that uses a database testing trait, and keeps using it for its other test cases.
+  - `--recreate-databases` drops it before the run, `--drop-databases` drops it after the run, and `--without-databases` keeps the configured database.
+  - Test runs without `--parallel` are unchanged.
+- Parallel test runs with ClickHouse as the default connection failed in every database test with `Database <database>_test_<token> does not exist. (UNKNOWN_DATABASE)`. The ClickHouse schema builder now supports `Schema::createDatabase()` and `Schema::dropDatabaseIfExists()`. It also reports a failed `Schema::hasTable()` as an `Illuminate\Database\QueryException`, so Laravel creates the per-process database as it does for other drivers.
+
 ## [2.0.1] - 2026-10-08
 
 2.0.1 completes the 2.0 release. 2.0.0 was tagged from an earlier commit, before the schema builder and the enum base class were bundled, and was only available for a few hours. If you are upgrading from 1.x, go straight to 2.0.1 and follow [UPGRADE.md](UPGRADE.md). Apart from Laravel, the only remaining dependency is `smi2/phpclickhouse`.

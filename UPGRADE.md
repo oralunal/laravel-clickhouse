@@ -4,8 +4,10 @@
 
 PHP (`^8.5`) and Laravel (`^13`) requirements are unchanged.
 
-Upgrade to **2.0.1 or later**. 2.0.0 was tagged before the schema builder and
-the enum base class were bundled.
+Upgrade to **2.0.2 or later**. 2.0.0 was tagged before the schema builder and
+the enum base class were bundled. In 2.0.1, parallel test processes drop each
+other's ClickHouse tables (see
+[step 7](#7-migratefresh-also-empties-secondary-clickhouse-connections)).
 
 2.0 bundles the libraries this package used to pull in:
 
@@ -40,7 +42,7 @@ other agents that read `AGENTS.md`. Nothing else needs to be installed.
 1. Update the package:
 
    ```sh
-   composer require oralunal/phpclickhouse-laravel:^2.0.1 --with-all-dependencies
+   composer require oralunal/phpclickhouse-laravel:^2.0.2 --with-all-dependencies
    ```
 
 2. Install the skill:
@@ -94,7 +96,7 @@ grep -rnE 'Tinderbox\\ClickhouseBuilder|PhpClickHouseSchemaBuilder|MyCLabs\\Enum
 ### 1. Update the dependency
 
 ```sh
-composer require oralunal/phpclickhouse-laravel:^2.0.1
+composer require oralunal/phpclickhouse-laravel:^2.0.2
 ```
 
 If your `composer.json` lists `oralunal/clickhouse-builder` or
@@ -232,7 +234,19 @@ In 2.0, `migrate:fresh` also empties these ClickHouse connections:
 - every ClickHouse connection that has a dump in `database/schema`.
 
 ClickHouse connections that no migration or dump refers to are left alone. The
-command still asks for confirmation in production. See
+command still asks for confirmation in production.
+
+`RefreshDatabase` and the other database test traits run `migrate:fresh` too.
+If you run your tests with `--parallel`, use 2.0.2 or later. From 2.0.2 on,
+each test process gets its own database on these ClickHouse connections,
+`<database>_test_<token>` (for example `analytics_test_1`), just as Laravel
+does for the default connection. In 2.0.1 every process shared the configured
+ClickHouse database, so one process's `migrate:fresh` dropped the tables that
+another process was using. The ClickHouse user needs permission to create and
+drop databases. Test runs without `--parallel` keep using the configured
+database.
+
+See
 [Which connection holds the `migrations` table](README.md#which-connection-holds-the-migrations-table).
 
 ### 8. Enums extend the bundled `Enum` class

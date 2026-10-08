@@ -4,16 +4,57 @@ declare(strict_types=1);
 
 namespace PhpClickHouseLaravel;
 
+use ClickHouseDB\Exception\DatabaseException;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Builder as BaseBuilder;
 
 class SchemaBuilder extends BaseBuilder
 {
-    /** @inheritDoc */
+    /**
+     * Determine if the given table exists.
+     *
+     * A ClickHouse error, such as an unknown database, is rethrown as a
+     * QueryException; Laravel's parallel testing relies on that to create the
+     * per-process test database.
+     *
+     * @param string $table
+     * @return bool
+     */
     public function hasTable($table): bool
     {
-        return count($this->connection->select(
-                $this->grammar->compileTableExists($this->connection->getDatabaseName(), $table)
-            )) > 0;
+        $sql = $this->grammar->compileTableExists($this->connection->getDatabaseName(), $table);
+
+        try {
+            return count($this->connection->select($sql)) > 0;
+        } catch (DatabaseException $e) {
+            throw new QueryException($this->connection->getName(), $sql, [], $e);
+        }
+    }
+
+    /**
+     * Create a database on every node.
+     *
+     * @param string $name
+     * @return bool
+     */
+    public function createDatabase($name): bool
+    {
+        $this->connection->getCluster()->write('CREATE DATABASE IF NOT EXISTS ' . SchemaGrammar::quoteIdentifier($name));
+
+        return true;
+    }
+
+    /**
+     * Drop a database on every node, if it exists.
+     *
+     * @param string $name
+     * @return bool
+     */
+    public function dropDatabaseIfExists($name): bool
+    {
+        $this->connection->getCluster()->write('DROP DATABASE IF EXISTS ' . SchemaGrammar::quoteIdentifier($name) . ' SYNC');
+
+        return true;
     }
 
     /**
