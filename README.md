@@ -4,13 +4,11 @@
 
 # phpClickHouse-laravel
 
-Laravel adapter for PHP ClickHouse tooling:
-
-- https://github.com/smi2/phpClickHouse — HTTP transport and query execution
-- A bundled fluent query builder under `PhpClickHouseLaravel\ClickhouseBuilder`.
-  It started as `the-tinderbox/ClickhouseBuilder` and continued through the
-  `glushkovds` and `oralunal` forks. Since 2.0 it ships inside this package
-  instead of as a separate dependency (see `src/ClickhouseBuilder/LICENSE`).
+Laravel adapter for ClickHouse, built on
+[smi2/phpClickHouse](https://github.com/smi2/phpClickHouse) for HTTP transport
+and query execution. Apart from Laravel, that is the only dependency. The query
+builder, the schema builder and the enum base class it uses are bundled under
+this package's namespace; see [Credits](#credits).
 
 ## Features
 
@@ -163,8 +161,8 @@ Or use the Schema Builder:
 ```php
 <?php
 
-use PhpClickHouseSchemaBuilder\Expression;
-use PhpClickHouseSchemaBuilder\Tables\MergeTree;
+use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Expression;
+use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree;
 
 class CreateMyTable extends \PhpClickHouseLaravel\Migration
 {
@@ -722,6 +720,20 @@ or loaded.
 dictionary in the ClickHouse database, in an order ClickHouse accepts, on every
 node. Views are dropped even without `--drop-views`: the dump and the
 migrations recreate them, and that would fail while they still exist.
+
+## Credits
+
+This package bundles code from these MIT-licensed projects. Each bundled
+directory keeps the original license next to the code.
+
+| Bundled as | Origin | License |
+| --- | --- | --- |
+| `PhpClickHouseLaravel\ClickhouseBuilder` (`src/ClickhouseBuilder`) | [the-tinderbox/ClickhouseBuilder](https://github.com/the-tinderbox/ClickhouseBuilder), via the [glushkovds](https://github.com/glushkovds/ClickhouseBuilder) and [oralunal](https://github.com/oralunal/ClickhouseBuilder) forks (v1.0.0) | `src/ClickhouseBuilder/LICENSE` |
+| `PhpClickHouseLaravel\ClickhouseSchemaBuilder` (`src/ClickhouseSchemaBuilder`) | [glushkovds/php-clickhouse-schema-builder](https://github.com/glushkovds/php-clickhouse-schema-builder) v1.1.1 by Denis Glushkov | `src/ClickhouseSchemaBuilder/LICENSE` |
+| `PhpClickHouseLaravel\Enum\Enum` (`src/Enum`) | [myclabs/php-enum](https://github.com/myclabs/php-enum) 1.8.5 by My C-Labs | `src/Enum/LICENSE` |
+
+The package itself is a fork of
+[glushkovds/phpclickhouse-laravel](https://github.com/glushkovds/phpclickhouse-laravel).
 
 ## Contributing
 

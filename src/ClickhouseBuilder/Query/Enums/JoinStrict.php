@@ -2,7 +2,7 @@
 
 namespace PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums;
 
-use MyCLabs\Enum\Enum;
+use PhpClickHouseLaravel\Enum\Enum;
 
 /**
  * Join strictness.

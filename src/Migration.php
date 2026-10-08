@@ -7,7 +7,7 @@ namespace PhpClickHouseLaravel;
 use ClickHouseDB\Statement;
 use ClickHouseDB\Transport\CurlerRequest;
 use Illuminate\Database\Migrations\Migration as BaseMigration;
-use PhpClickHouseSchemaBuilder\Tables\MergeTree;
+use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree;
 use Symfony\Component\Console\Output\ConsoleOutput;
 
 class Migration extends BaseMigration

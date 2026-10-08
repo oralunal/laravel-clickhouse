@@ -24,9 +24,7 @@
     "require": {
         "php": "^8.5",
         "smi2/phpclickhouse": "^1.26",
-        "myclabs/php-enum": "^1.5",
-        "laravel/framework": "^13",
-        "glushkovds/php-clickhouse-schema-builder": "^1.1"
+        "laravel/framework": "^13"
     },
     "require-dev": {
         "orchestra/testbench": "^11.0",
