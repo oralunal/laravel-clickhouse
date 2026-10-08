@@ -4,20 +4,33 @@
 
 PHP (`^8.5`) and Laravel (`^13`) requirements are unchanged.
 
-2.0 brings the query builder into this package. It used to come from the
-separate `oralunal/clickhouse-builder` package. The SQL it generates is the
-same, but its classes and helper functions are in a new namespace.
+2.0 bundles the libraries this package used to pull in:
 
-**Do you need to change anything?** Only if your code mentions
-`Tinderbox\ClickhouseBuilder`, calls `raw()`, `tp()` or `array_flatten()`, or
-uses the old builder's file and temporary-table API. Apps that only use
-`BaseModel`, `Migration`, `RawColumn` and `DB::connection('clickhouse')` keep
-working without changes.
+- the query builder (`oralunal/clickhouse-builder`);
+- the schema builder behind `Migration::createMergeTree()`
+  (`glushkovds/php-clickhouse-schema-builder`);
+- the enum base class (`myclabs/php-enum`).
+
+They generate the same SQL as before, but their classes are in this package's
+namespaces now. Apart from Laravel, the only remaining dependency is
+`smi2/phpclickhouse`.
+
+**Do you need to change anything?** Only in these cases:
+
+- Your code or migrations mention `Tinderbox\ClickhouseBuilder`,
+  `PhpClickHouseSchemaBuilder` or `MyCLabs\Enum`.
+- Your code calls `raw()`, `tp()` or `array_flatten()`.
+- Your code uses the old builder's file and temporary-table API.
+- You run `migrate:fresh` while MySQL or PostgreSQL holds the `migrations`
+  table (see [step 7](#7-migratefresh-also-empties-secondary-clickhouse-connections)).
+
+Apps that only use `BaseModel`, `Migration::write()`, `RawColumn` and
+`DB::connection('clickhouse')` keep working without changes.
 
 To find what needs changing, run:
 
 ```sh
-grep -rnE 'Tinderbox\\ClickhouseBuilder|[^>:$a-zA-Z_]raw\(|array_flatten\(|[^a-zA-Z_]tp\(|into_memory_table|file_from|addFile\(|getFiles\(' \
+grep -rnE 'Tinderbox\\ClickhouseBuilder|PhpClickHouseSchemaBuilder|MyCLabs\\Enum|[^>:$a-zA-Z_]raw\(|array_flatten\(|[^a-zA-Z_]tp\(|into_memory_table|file_from|addFile\(|getFiles\(' \
   app config database routes tests
 ```
 
@@ -27,20 +40,23 @@ grep -rnE 'Tinderbox\\ClickhouseBuilder|[^>:$a-zA-Z_]raw\(|array_flatten\(|[^a-z
 composer require oralunal/phpclickhouse-laravel:^2.0
 ```
 
-If your `composer.json` lists `oralunal/clickhouse-builder` directly, remove it.
-The bundled copy replaces it:
+If your `composer.json` lists `oralunal/clickhouse-builder` or
+`glushkovds/php-clickhouse-schema-builder` directly, remove them. The bundled
+copies replace them:
 
 ```sh
-composer remove oralunal/clickhouse-builder
+composer remove oralunal/clickhouse-builder glushkovds/php-clickhouse-schema-builder
 ```
 
-`the-tinderbox/clickhouse-php-client` is no longer installed either. If your
-code uses it directly, require it yourself.
+`the-tinderbox/clickhouse-php-client` and `myclabs/php-enum` are no longer
+installed either. If your own code uses one of them, require it yourself.
 
-### 2. Rename the `Tinderbox\ClickhouseBuilder` namespace
+### 2. Rename the bundled namespaces
 
-The builder classes are in `PhpClickHouseLaravel\ClickhouseBuilder` now. Only
-the namespace prefix changes; class names and the folder layout are the same.
+The builder classes are in `PhpClickHouseLaravel\ClickhouseBuilder` now, and
+the schema builder classes are in `PhpClickHouseLaravel\ClickhouseSchemaBuilder`.
+Only the namespace prefix changes; class names and the folder layout are the
+same.
 
 | 1.x | 2.0 |
 | --- | --- |
@@ -50,12 +66,20 @@ the namespace prefix changes; class names and the folder layout are the same.
 | `Tinderbox\ClickhouseBuilder\Query\BaseBuilder` | `PhpClickHouseLaravel\ClickhouseBuilder\Query\BaseBuilder` |
 | `Tinderbox\ClickhouseBuilder\Query\Grammar` | `PhpClickHouseLaravel\ClickhouseBuilder\Query\Grammar` |
 | `Tinderbox\ClickhouseBuilder\Exceptions\*` | `PhpClickHouseLaravel\ClickhouseBuilder\Exceptions\*` |
+| `PhpClickHouseSchemaBuilder\Tables\MergeTree` | `PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree` |
+| `PhpClickHouseSchemaBuilder\Expression` | `PhpClickHouseLaravel\ClickhouseSchemaBuilder\Expression` |
+| `PhpClickHouseSchemaBuilder\Engine`, `Column`, `TTL`, `Exceptions\*` | `PhpClickHouseLaravel\ClickhouseSchemaBuilder\Engine`, `Column`, `TTL`, `Exceptions\*` |
+
+Your migration files count too. A migration that still imports
+`PhpClickHouseSchemaBuilder\Tables\MergeTree` fails with `Class not found`
+the next time it runs, for example on a fresh install or in CI.
 
 To replace them across your app (GNU sed; on macOS use `sed -i ''`):
 
 ```sh
-grep -rlF 'Tinderbox\ClickhouseBuilder' app config database routes tests \
-  | xargs sed -i 's/Tinderbox\\ClickhouseBuilder/PhpClickHouseLaravel\\ClickhouseBuilder/g'
+grep -rlE 'Tinderbox\\ClickhouseBuilder|PhpClickHouseSchemaBuilder\\' app config database routes tests \
+  | xargs sed -i -e 's/Tinderbox\\ClickhouseBuilder/PhpClickHouseLaravel\\ClickhouseBuilder/g' \
+                 -e 's/PhpClickHouseSchemaBuilder\\/PhpClickHouseLaravel\\ClickhouseSchemaBuilder\\/g'
 ```
 
 ### 3. Import the helper functions
@@ -132,3 +156,28 @@ their return type. In 1.x they declared the Tinderbox-client `Query\Builder`,
 which made column sub-queries built from this package's `Builder` throw a
 `TypeError`. Only code that type-checks the return value against the old class
 needs a change.
+
+### 7. `migrate:fresh` also empties secondary ClickHouse connections
+
+This step only applies when MySQL or PostgreSQL holds the `migrations` table
+and some migrations write to ClickHouse. In 1.x, `migrate:fresh` emptied only
+the MySQL or PostgreSQL database and left ClickHouse as it was. Migrations
+written with `CREATE TABLE IF NOT EXISTS` therefore kept their ClickHouse data
+across `migrate:fresh`.
+
+In 2.0, `migrate:fresh` also empties these ClickHouse connections:
+
+- every ClickHouse connection that a migration targets;
+- every ClickHouse connection that has a dump in `database/schema`.
+
+ClickHouse connections that no migration or dump refers to are left alone. The
+command still asks for confirmation in production. See
+[Which connection holds the `migrations` table](README.md#which-connection-holds-the-migrations-table).
+
+### 8. Enums extend the bundled `Enum` class
+
+`Operator`, `Format`, `JoinType`, `JoinStrict` and `OrderDirection` now extend
+`PhpClickHouseLaravel\Enum\Enum` instead of `MyCLabs\Enum\Enum`. Their constants
+and methods (`isValid()`, `getValue()`, `Operator::EQUALS()` and so on) are
+unchanged. Only code that type-checks against `MyCLabs\Enum\Enum` needs to
+change.

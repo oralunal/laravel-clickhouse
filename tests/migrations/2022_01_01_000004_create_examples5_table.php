@@ -1,7 +1,7 @@
 <?php
 
-use PhpClickHouseSchemaBuilder\Expression;
-use PhpClickHouseSchemaBuilder\Tables\MergeTree;
+use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Expression;
+use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree;
 
 return new class extends \PhpClickHouseLaravel\Migration {
     /**

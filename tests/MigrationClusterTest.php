@@ -5,7 +5,7 @@ namespace Tests;
 use ClickHouseDB\Statement;
 use Illuminate\Support\Facades\DB;
 use PhpClickHouseLaravel\Migration;
-use PhpClickHouseSchemaBuilder\Tables\MergeTree;
+use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree;
 
 class MigrationClusterTest extends TestCase
 {
