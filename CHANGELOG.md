@@ -5,18 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2026-10-08
+## [2.0.1] - 2026-10-08
 
-Everything the package used to pull in from other ClickHouse and enum
-libraries now ships inside it, under its own namespaces. Apart from Laravel,
-the only remaining dependency is `smi2/phpclickhouse`.
+2.0.1 completes the 2.0 release. 2.0.0 was tagged from an earlier commit, before the schema builder and the enum base class were bundled, and was only available for a few hours. If you are upgrading from 1.x, go straight to 2.0.1 and follow [UPGRADE.md](UPGRADE.md). Apart from Laravel, the only remaining dependency is `smi2/phpclickhouse`.
 
 ### Changed
 
-- **Breaking:** The query builder now ships inside this package under the `PhpClickHouseLaravel\ClickhouseBuilder` namespace. It no longer comes from the `oralunal/clickhouse-builder` dependency, and the `Tinderbox\ClickhouseBuilder` namespace is gone. The SQL it generates is unchanged.
 - **Breaking:** The schema builder used by `Migration::createMergeTree()` now ships inside this package under the `PhpClickHouseLaravel\ClickhouseSchemaBuilder` namespace. It is copied from `glushkovds/php-clickhouse-schema-builder` 1.1.1, which is no longer installed. The DDL it generates is unchanged. Migrations that import `PhpClickHouseSchemaBuilder\Tables\MergeTree` or `PhpClickHouseSchemaBuilder\Expression` must switch to the new namespace.
 - **Breaking:** The builder's enums (`Operator`, `Format`, `JoinType`, `JoinStrict`, `OrderDirection`) now extend `PhpClickHouseLaravel\Enum\Enum`, which is copied from `myclabs/php-enum` 1.8.5. They used to extend `MyCLabs\Enum\Enum`, and `myclabs/php-enum` is no longer installed. Their constants and methods are unchanged.
-- **Breaking:** The helper functions `raw()`, `tp()` and `array_flatten()` are no longer global. They now live in the `PhpClickHouseLaravel\ClickhouseBuilder` namespace.
 - **Behavior change:** if MySQL or PostgreSQL holds the `migrations` table, `migrate:fresh` now also empties the ClickHouse databases your migrations write to, along with any ClickHouse database that has a dump in `database/schema`. Before, it left them untouched. Migrations written with `CREATE TABLE IF NOT EXISTS` therefore kept their ClickHouse data across `migrate:fresh`; that data is now dropped. The command keeps its production confirmation.
 
 ### Added
@@ -35,21 +31,40 @@ the only remaining dependency is `smi2/phpclickhouse`.
 
 ### Removed
 
-- **Breaking:** The parts of the old builder that needed the `the-tinderbox/clickhouse-php-client` HTTP client are not included, and that client is no longer installed. This removes `BaseBuilder::addFile()`, `values()`, `getValues()` and `getFiles()`, the `into_memory_table()` and `file_from()` helpers, the client-based `Query\Builder`, and the old builder's Laravel integration. This package's own `Builder` never sent those files to ClickHouse, so these methods could not work here. `whereIn()`, `preWhereIn()`, `whereGlobalIn()` and `havingIn()` used to turn a string that matched a temporary file into a table reference. They now always treat a string as a value. Because no file could be added, that branch never ran.
-- The old builder's auto-discovered `ClickhouseServiceProvider` no longer gets installed. It registered a second `clickhouse` database driver with its own `Connection` class. This package's driver only took effect because its provider happened to boot later.
-- The `oralunal/clickhouse-builder`, `glushkovds/php-clickhouse-schema-builder` and `myclabs/php-enum` dependencies.
+- The `glushkovds/php-clickhouse-schema-builder` and `myclabs/php-enum` dependencies.
 
 ### Fixed
 
 - `DB::connection('<name>')->table(...)` on a ClickHouse connection other than `clickhouse` ran its queries against the `clickhouse` connection. Models with a non-default `$connection` logged their queries there as well. Because of this, `migrate --database=<name>` read and wrote the wrong `migrations` table. Query builders are now bound to the connection that created them.
+
+### Upgrade note
+
+- From 1.x: see [UPGRADE.md](UPGRADE.md), or run `php artisan clickhouse:install-skills` and then `/plc-upgrade-1x-to-2x` in your coding agent.
+- From 2.0.0: replace `PhpClickHouseSchemaBuilder\` with `PhpClickHouseLaravel\ClickhouseSchemaBuilder\` in your migrations. If your own code uses `myclabs/php-enum`, require it yourself.
+
+## [2.0.0] - 2026-10-08
+
+2.0.0 was tagged before the schema builder and the enum base class were bundled. If you are upgrading from 1.x, go straight to 2.0.1.
+
+### Changed
+
+- **Breaking:** The query builder now ships inside this package under the `PhpClickHouseLaravel\ClickhouseBuilder` namespace. It no longer comes from the `oralunal/clickhouse-builder` dependency, and the `Tinderbox\ClickhouseBuilder` namespace is gone. The SQL it generates is unchanged.
+- **Breaking:** The helper functions `raw()`, `tp()` and `array_flatten()` are no longer global. They now live in the `PhpClickHouseLaravel\ClickhouseBuilder` namespace.
+
+### Removed
+
+- **Breaking:** The parts of the old builder that needed the `the-tinderbox/clickhouse-php-client` HTTP client are not included, and that client is no longer installed. This removes `BaseBuilder::addFile()`, `values()`, `getValues()` and `getFiles()`, the `into_memory_table()` and `file_from()` helpers, the client-based `Query\Builder`, and the old builder's Laravel integration. This package's own `Builder` never sent those files to ClickHouse, so these methods could not work here. `whereIn()`, `preWhereIn()`, `whereGlobalIn()` and `havingIn()` used to turn a string that matched a temporary file into a table reference. They now always treat a string as a value. Because no file could be added, that branch never ran.
+- The old builder's auto-discovered `ClickhouseServiceProvider` no longer gets installed. It registered a second `clickhouse` database driver with its own `Connection` class. This package's driver only took effect because its provider happened to boot later.
+
+### Fixed
+
 - `Column::subQuery()` and `Column::getSubQuery()` declared the client-based `Query\Builder` as their return type. Building a column sub-query from this package's `Builder` therefore threw a `TypeError`. They now return `BaseBuilder`.
 
 ### Upgrade note
 
-- See [UPGRADE.md](UPGRADE.md) for the full guide.
-- Replace `Tinderbox\ClickhouseBuilder\` with `PhpClickHouseLaravel\ClickhouseBuilder\`, and `PhpClickHouseSchemaBuilder\` with `PhpClickHouseLaravel\ClickhouseSchemaBuilder\`, in your `use` statements and migrations.
+- Replace `Tinderbox\ClickhouseBuilder\` with `PhpClickHouseLaravel\ClickhouseBuilder\` in your `use` statements, for example `Query\Expression`, `Query\Enums\Operator` and `Query\TwoElementsLogicExpression`.
 - If you called the global `raw()`, import it with `use function PhpClickHouseLaravel\ClickhouseBuilder\raw;`, or use `new RawColumn(...)` or `new Expression(...)` instead.
-- If your app requires `oralunal/clickhouse-builder` or `glushkovds/php-clickhouse-schema-builder` directly, remove it; the bundled copies replace them. If your own code uses `myclabs/php-enum`, require it yourself.
+- If your app requires `oralunal/clickhouse-builder` directly, remove it. The bundled copy replaces it.
 
 ## [1.5.0] - 2026-10-08
 
@@ -128,7 +143,8 @@ the only remaining dependency is `smi2/phpclickhouse`.
 - Forked from [glushkovds/phpclickhouse-laravel](https://github.com/glushkovds/phpclickhouse-laravel) at 2.5.2.
 - Minimum PHP 8.5, Laravel 13+ only.
 
-[Unreleased]: https://github.com/oralunal/phpclickhouse-laravel/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/oralunal/phpclickhouse-laravel/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/oralunal/phpclickhouse-laravel/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.5.0...v2.0.0
 [1.5.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.3.0...v1.4.0
