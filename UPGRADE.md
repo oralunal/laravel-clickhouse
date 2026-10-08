@@ -27,6 +27,60 @@ namespaces now. Apart from Laravel, the only remaining dependency is
 Apps that only use `BaseModel`, `Migration::write()`, `RawColumn` and
 `DB::connection('clickhouse')` keep working without changes.
 
+### Let your coding agent do it
+
+The package ships an agent skill that performs this whole upgrade and checks
+the result. It works with Claude Code, Cursor, GitHub Copilot, Codex, Junie,
+OpenCode, Amp, Gemini/Antigravity, Kiro, Pi, Zed, Grok Build, Factory Droid and
+other agents that read `AGENTS.md`. Nothing else needs to be installed.
+
+1. Update the package:
+
+   ```sh
+   composer require oralunal/phpclickhouse-laravel:^2.0 --with-all-dependencies
+   ```
+
+2. Install the skill:
+
+   ```sh
+   php artisan clickhouse:install-skills
+   ```
+
+   The command looks for each agent's files in your project (`.claude/`,
+   `.cursor/`, `.github/copilot-instructions.md`, `AGENTS.md`, …) and writes
+   the skill to that agent's skills directory, for example
+   `.claude/skills/plc-upgrade-1x-to-2x/SKILL.md`. To choose the agents
+   yourself, pass `--agent=claude_code --agent=cursor`. Run
+   `php artisan clickhouse:install-skills --help` for the list of names.
+
+3. In your agent, run:
+
+   ```text
+   /plc-upgrade-1x-to-2x
+   ```
+
+   If your agent does not offer skills as slash commands, ask it to
+   "upgrade phpclickhouse-laravel to 2.x". The skill is picked up from its
+   description.
+
+The agent then follows every step below. It stops to ask you before changing
+code whose meaning it cannot decide alone, such as uses of the removed
+file/temporary-table API. At the end it reports what it changed and how the
+test suite compares with the run before the upgrade.
+
+If `php artisan` fails right after step 1 with
+`Class "Tinderbox\ClickhouseBuilder\...\ClickhouseServiceProvider" not found`,
+delete `bootstrap/cache/packages.php` and `bootstrap/cache/services.php` and
+try again. If the app still does not boot, copy the skill by hand, for
+example:
+
+```sh
+mkdir -p .claude/skills
+cp -r vendor/oralunal/phpclickhouse-laravel/resources/skills/plc-upgrade-1x-to-2x .claude/skills/
+```
+
+### Or upgrade by hand
+
 To find what needs changing, run:
 
 ```sh
@@ -124,10 +178,14 @@ did anything useful here. They are no longer included:
 
 If you registered the old `ClickhouseServiceProvider` yourself in
 `bootstrap/providers.php` or `config/app.php`, remove it. The class no longer
-exists, so the app fails to boot while it is still listed. If an error still
-mentions a `Tinderbox` provider after upgrading, run
-`php artisan package:discover` (or `php artisan optimize:clear`) to rebuild
-the cached provider list.
+exists, so the app fails to boot while it is still listed.
+
+If every artisan command, `package:discover` included, fails with
+`Class "Tinderbox\ClickhouseBuilder\Integrations\Laravel\ClickhouseServiceProvider" not found`,
+Laravel's cached package manifest still lists the 1.x provider. This happens
+when Composer ran with `--no-scripts`. Delete `bootstrap/cache/packages.php`
+and `bootstrap/cache/services.php`; Laravel regenerates them on the next
+`php artisan package:discover`.
 
 ### 5. `whereIn()` with a string value
 

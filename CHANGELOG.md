@@ -21,6 +21,11 @@ the only remaining dependency is `smi2/phpclickhouse`.
 
 ### Added
 
+- `php artisan clickhouse:install-skills` installs the package's coding-agent skills into every agent it finds in the project.
+  - It detects agents from their project files (`.claude/`, `.cursor/`, `.github/copilot-instructions.md`, `AGENTS.md`, …).
+  - It writes `SKILL.md` to each agent's skills directory.
+  - `--agent=` chooses the agents explicitly.
+  - The first skill is `plc-upgrade-1x-to-2x`. Running `/plc-upgrade-1x-to-2x` in Claude Code, Cursor, Copilot, Codex and the other agents makes the agent carry out this upgrade and verify it.
 - `php artisan migrate:fresh` and `php artisan db:wipe` now work on ClickHouse connections. Previously they failed with `This database driver does not support dropping all tables`. `Schema::dropAllTables()` drops every table, materialized view, view and dictionary on every node, ordering the drops so that ClickHouse accepts them. Views are dropped too, so the dump and the migrations can recreate them. `Schema::dropAllViews()` drops only views and materialized views.
 - Secondary ClickHouse connections now follow the connection that holds the `migrations` table. A ClickHouse connection is secondary when a migration in the migrator's paths targets it or when `database/schema` has a dump for it.
   - `schema:dump` also writes `database/schema/<connection>-schema.sql` for each secondary connection.
