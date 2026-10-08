@@ -7,6 +7,7 @@ namespace PhpClickHouseLaravel;
 use ClickHouseDB\Client;
 use Closure;
 use Illuminate\Database\Connection as BaseConnection;
+use Illuminate\Filesystem\Filesystem;
 
 class Connection extends BaseConnection
 {
@@ -63,6 +64,18 @@ class Connection extends BaseConnection
         }
 
         return new SchemaBuilder($this);
+    }
+
+    /**
+     * Get the schema state for the connection, used by `schema:dump` and `migrate`.
+     *
+     * @param Filesystem|null $files
+     * @param callable|null $processFactory
+     * @return SchemaState
+     */
+    public function getSchemaState(?Filesystem $files = null, ?callable $processFactory = null): SchemaState
+    {
+        return new SchemaState($this, $files, $processFactory);
     }
 
     /** @inheritDoc */
