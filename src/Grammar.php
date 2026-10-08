@@ -3,7 +3,7 @@
 namespace PhpClickHouseLaravel;
 
 
-class Grammar extends \Tinderbox\ClickhouseBuilder\Query\Grammar
+class Grammar extends \PhpClickHouseLaravel\ClickhouseBuilder\Query\Grammar
 {
     public function __construct()
     {

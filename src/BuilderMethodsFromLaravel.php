@@ -3,7 +3,7 @@
 namespace PhpClickHouseLaravel;
 
 use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
-use Tinderbox\ClickhouseBuilder\Query\Expression;
+use PhpClickHouseLaravel\ClickhouseBuilder\Query\Expression;
 
 trait BuilderMethodsFromLaravel
 {

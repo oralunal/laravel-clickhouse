@@ -13,8 +13,8 @@ use PhpClickHouseLaravel\Concerns\HasEvents;
 use Illuminate\Database\Eloquent\Concerns\HidesAttributes;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Tinderbox\ClickhouseBuilder\Query\Enums\Operator;
-use Tinderbox\ClickhouseBuilder\Query\TwoElementsLogicExpression;
+use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Operator;
+use PhpClickHouseLaravel\ClickhouseBuilder\Query\TwoElementsLogicExpression;
 
 class BaseModel
 {
