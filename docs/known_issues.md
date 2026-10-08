@@ -50,9 +50,9 @@ $rows = DB::table('my-table')
 
 ### Why not use `\Illuminate\Database\Query\Builder`
 
-This library uses [oralunal/clickhouse-builder](https://github.com/oralunal/clickhouse-builder)
-(a fork of `glushkovds/ClickhouseBuilder`, itself a fork of
-`the-tinderbox/ClickhouseBuilder`), which provides its own builder
-with ClickHouse-specific methods that the standard builder cannot
-represent, and vice versa.
+This library uses its own bundled builder,
+`PhpClickHouseLaravel\ClickhouseBuilder` (originally
+`the-tinderbox/ClickhouseBuilder`, via the `glushkovds` and `oralunal`
+forks). It has ClickHouse-specific methods that the standard builder
+cannot represent, and vice versa.
 

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace PhpClickHouseLaravel;
 
-use Tinderbox\ClickhouseBuilder\Query\Expression;
+use PhpClickHouseLaravel\ClickhouseBuilder\Query\Expression;
 
 class RawColumn extends Expression
 {

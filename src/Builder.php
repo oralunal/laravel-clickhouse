@@ -10,7 +10,7 @@ use Closure;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
 use PhpClickHouseLaravel\Exceptions\QueryException;
-use Tinderbox\ClickhouseBuilder\Query\BaseBuilder;
+use PhpClickHouseLaravel\ClickhouseBuilder\Query\BaseBuilder;
 
 class Builder extends BaseBuilder
 {

@@ -24,7 +24,7 @@
     "require": {
         "php": "^8.5",
         "smi2/phpclickhouse": "^1.26",
-        "oralunal/clickhouse-builder": "^1",
+        "myclabs/php-enum": "^1.5",
         "laravel/framework": "^13",
         "glushkovds/php-clickhouse-schema-builder": "^1.1"
     },
@@ -36,7 +36,10 @@
     "autoload": {
         "psr-4": {
             "PhpClickHouseLaravel\\": "src/"
-        }
+        },
+        "files": [
+            "src/ClickhouseBuilder/functions.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {

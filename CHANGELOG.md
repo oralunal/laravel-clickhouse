@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** The query builder now ships inside this package under the `PhpClickHouseLaravel\ClickhouseBuilder` namespace. It no longer comes from the `oralunal/clickhouse-builder` dependency, and the `Tinderbox\ClickhouseBuilder` namespace is gone. The SQL it generates is unchanged.
+- **Breaking:** The helper functions `raw()`, `tp()` and `array_flatten()` are no longer global. They now live in the `PhpClickHouseLaravel\ClickhouseBuilder` namespace.
+
+### Removed
+
+- **Breaking:** The parts of the old builder that needed the `the-tinderbox/clickhouse-php-client` HTTP client are not included, and that client is no longer installed. This removes `BaseBuilder::addFile()`, `values()`, `getValues()` and `getFiles()`, the `into_memory_table()` and `file_from()` helpers, the client-based `Query\Builder`, and the old builder's Laravel integration. This package's own `Builder` never sent those files to ClickHouse, so these methods could not work here. `whereIn()`, `preWhereIn()`, `whereGlobalIn()` and `havingIn()` used to turn a string that matched a temporary file into a table reference. They now always treat a string as a value. Because no file could be added, that branch never ran.
+- The old builder's auto-discovered `ClickhouseServiceProvider` no longer gets installed. It registered a second `clickhouse` database driver with its own `Connection` class. This package's driver only took effect because its provider happened to boot later.
+
+### Fixed
+
+- `Column::subQuery()` and `Column::getSubQuery()` declared the client-based `Query\Builder` as their return type. Building a column sub-query from this package's `Builder` therefore threw a `TypeError`. They now return `BaseBuilder`.
+
+### Upgrade note
+
+- Replace `Tinderbox\ClickhouseBuilder\` with `PhpClickHouseLaravel\ClickhouseBuilder\` in your `use` statements, for example `Query\Expression`, `Query\Enums\Operator` and `Query\TwoElementsLogicExpression`.
+- If you called the global `raw()`, import it with `use function PhpClickHouseLaravel\ClickhouseBuilder\raw;`, or use `new RawColumn(...)` or `new Expression(...)` instead.
+- If your app requires `oralunal/clickhouse-builder` directly, remove it. The bundled copy replaces it.
+
 ## [1.5.0] - 2026-10-08
 
 ### Added

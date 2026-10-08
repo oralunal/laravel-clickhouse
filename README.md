@@ -7,9 +7,10 @@
 Laravel adapter for PHP ClickHouse tooling:
 
 - https://github.com/smi2/phpClickHouse — HTTP transport and query execution
-- https://github.com/oralunal/clickhouse-builder — fluent query builder
-  (fork of `glushkovds/ClickhouseBuilder`, itself a fork of
-  `the-tinderbox/ClickhouseBuilder`)
+- A bundled fluent query builder under `PhpClickHouseLaravel\ClickhouseBuilder`.
+  It started as `the-tinderbox/ClickhouseBuilder` and continued through the
+  `glushkovds` and `oralunal` forks. Since 2.0 it ships inside this package
+  instead of as a separate dependency (see `src/ClickhouseBuilder/LICENSE`).
 
 ## Features
 
