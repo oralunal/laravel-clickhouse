@@ -1,15 +1,14 @@
 ---
 name: plc-upgrade-1x-to-2x
-description: Upgrades a Laravel application from oralunal/phpclickhouse-laravel 1.x to 2.x, which is published as oralunal/laravel-clickhouse. Switches the dependency, renames the bundled namespaces (Tinderbox\ClickhouseBuilder, PhpClickHouseSchemaBuilder, MyCLabs\Enum), imports the helper functions that are no longer global, replaces removed APIs, and verifies the result. Use when the user runs /plc-upgrade-1x-to-2x or asks to upgrade phpclickhouse-laravel or laravel-clickhouse to version 2.
+description: Upgrades a Laravel application from oralunal/phpclickhouse-laravel 1.x to 2.x, the first half of the way to oralunal/laravel-clickhouse 3.x. Updates the dependency, renames the bundled namespaces (Tinderbox\ClickhouseBuilder, PhpClickHouseSchemaBuilder, MyCLabs\Enum), imports the helper functions that are no longer global, replaces removed APIs, and verifies the result. Use when the user runs /plc-upgrade-1x-to-2x or asks to upgrade phpclickhouse-laravel to version 2.
 ---
 
-# phpclickhouse-laravel 1.x → laravel-clickhouse 2.x upgrade
+# phpclickhouse-laravel 1.x → 2.x upgrade
 
 You are upgrading this Laravel application from `oralunal/phpclickhouse-laravel`
-1.x to 2.x. From 2.0.3 on, the package is published as
-`oralunal/laravel-clickhouse`; its namespaces stay `PhpClickHouseLaravel\…`.
-The SQL and DDL that the package generates do not change. What changes is where
-the classes live, because 2.0 bundles the libraries it used to depend on:
+1.x to 2.x. The SQL and DDL that the package generates do not change. What
+changes is where the classes live, because 2.0 bundles the libraries it used to
+depend on:
 
 | 1.x dependency | 2.x namespace inside the package |
 | --- | --- |
@@ -17,10 +16,16 @@ the classes live, because 2.0 bundles the libraries it used to depend on:
 | `glushkovds/php-clickhouse-schema-builder` (`PhpClickHouseSchemaBuilder\…`) | `PhpClickHouseLaravel\ClickhouseSchemaBuilder\…` |
 | `myclabs/php-enum` (`MyCLabs\Enum\Enum`, used by the builder enums) | `PhpClickHouseLaravel\Enum\Enum` |
 
+This is the first of two upgrades. 2.0.2 is the last release of
+`oralunal/phpclickhouse-laravel`; from 3.0 on, the package is
+`oralunal/laravel-clickhouse` and its namespace is `Oralunal\LaravelClickHouse`.
+Once this upgrade is verified, the `/lc-upgrade-2x-to-3x` skill takes the
+application to 3.x.
+
 Work through the steps in order. Do not skip the checks, and do not stop at the
 first file you fix: the goal is zero remaining references. If the package is
 installed, the full human-readable guide is in
-`vendor/oralunal/laravel-clickhouse/UPGRADE.md`; read it when something here
+`vendor/oralunal/phpclickhouse-laravel/UPGRADE.md`; read it when something here
 is unclear.
 
 ## Rules
@@ -38,15 +43,12 @@ is unclear.
 
 ## Step 1: Assess
 
-1. Read `composer.json` and run `composer show 'oralunal/*'` to see the
-   required and installed versions. The target is `oralunal/laravel-clickhouse`
-   2.0.3 or later. Up to 2.0.2 the package was `oralunal/phpclickhouse-laravel`.
-   - 2.0.0 lacks the bundled schema builder, so treat it like 1.x and do every
-     step.
-   - With 2.0.1, parallel test processes drop each other's ClickHouse tables:
-     do step 2 and step 7, and the other steps only for what the searches
-     below find.
-   - With 2.0.2, only the package name changes: do step 2, then step 8.
+1. Read `composer.json` and run `composer show oralunal/phpclickhouse-laravel`
+   to see the required and installed versions. The target is 2.0.2 or later.
+   2.0.0 lacks the bundled schema builder, so treat an installed 2.0.0 like
+   1.x and do every step. With 2.0.1 installed, parallel test processes drop
+   each other's ClickHouse tables: do step 2 to update and step 7, and the
+   other steps only for what step 1's searches find.
 2. Check `git status`. If the tree has uncommitted changes that are not yours,
    tell the user and suggest committing them or working on a new branch before
    you continue.
@@ -72,7 +74,7 @@ is unclear.
      removed helpers and builder methods.
    - `(where|orWhere|preWhere|orPreWhere|having|orHaving)(Global)?(Not)?In\(`:
      `IN` conditions to inspect in step 6.
-   - `oralunal/phpclickhouse-laravel|oralunal/clickhouse-builder|glushkovds/php-clickhouse-schema-builder|myclabs/php-enum|the-tinderbox/clickhouse-php-client`:
+   - `oralunal/clickhouse-builder|glushkovds/php-clickhouse-schema-builder|myclabs/php-enum|the-tinderbox/clickhouse-php-client`:
      direct requirements in `composer.json`.
 
    `raw(` preceded by `->`, `::` or `$`, such as `DB::raw()` or
@@ -81,12 +83,13 @@ is unclear.
 
 ## Step 2: Update the dependency
 
-1. Switch to the new package name and update. Skip the `composer remove`
-   line if `composer.json` no longer requires `oralunal/phpclickhouse-laravel`:
+1. Set the constraint and update. If `composer.json` already requires
+   `oralunal/laravel-clickhouse` (3.x was installed on top of 1.x code), remove
+   it first with `composer remove oralunal/laravel-clickhouse --no-update`:
+   this skill brings the code to 2.x, and the next one brings it to 3.x.
 
    ```bash
-   composer remove oralunal/phpclickhouse-laravel --no-update
-   composer require oralunal/laravel-clickhouse:^2.0.3 --with-all-dependencies
+   composer require oralunal/phpclickhouse-laravel:^2.0.2 --with-all-dependencies
    ```
 
 2. Remove these packages if `composer.json` requires them directly. The bundled
@@ -268,11 +271,12 @@ Run all of these and fix what they report:
 
 End with a short summary for the user:
 
-- the package and version change in `composer.json` (from
-  `oralunal/phpclickhouse-laravel` to `oralunal/laravel-clickhouse`), and the
-  packages you added or removed;
+- the version change in `composer.json`, and the packages you added or
+  removed;
 - how many files changed in each step, with the file list;
 - every question you asked and the decision taken;
 - the `migrate:fresh` notice from step 7, if it applies;
 - the test results compared with the baseline, and any failures that already
-  existed.
+  existed;
+- the next step: run `/lc-upgrade-2x-to-3x` to move to
+  `oralunal/laravel-clickhouse` 3.x.

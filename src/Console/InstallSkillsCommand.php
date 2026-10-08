@@ -10,7 +10,7 @@ use Illuminate\Filesystem\Filesystem;
 use function Laravel\Prompts\multiselect;
 
 /**
- * Installs the package's AI agent skills, such as `/plc-upgrade-1x-to-2x`,
+ * Installs the package's AI agent skills, such as `/lc-upgrade-2x-to-3x`,
  * into the skills directory of every coding agent used in the project.
  *
  * Skills follow the SKILL.md format that these agents load from their skills
@@ -54,7 +54,7 @@ class InstallSkillsCommand extends Command
     /**
      * @var string
      */
-    protected $description = 'Install the laravel-clickhouse AI agent skills, such as /plc-upgrade-1x-to-2x';
+    protected $description = 'Install the laravel-clickhouse AI agent skills, such as /lc-upgrade-2x-to-3x';
 
     public function __construct(
         protected Filesystem $files,
@@ -123,7 +123,8 @@ class InstallSkillsCommand extends Command
 
         $this->newLine();
         $this->components->info(
-            'Skills installed. Ask your agent to run /plc-upgrade-1x-to-2x to upgrade from 1.x to 2.x.'
+            'Skills installed. Ask your agent to run /lc-upgrade-2x-to-3x to upgrade from 2.x to 3.x.'
+            . ' On 1.x, run /plc-upgrade-1x-to-2x first.'
         );
 
         return self::SUCCESS;
