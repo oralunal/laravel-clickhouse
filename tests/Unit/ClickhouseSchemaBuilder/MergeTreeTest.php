@@ -128,6 +128,26 @@ class MergeTreeTest extends TestCase
         );
     }
 
+    /**
+     * Migration::createMergeTree() makes the engine replicated on a cluster
+     * connection before the callback sets the engine type.
+     */
+    public function testEngineTypeKeepsReplication()
+    {
+        $table = (new MergeTree('some_table'))->dbName('some_db');
+        $table->getEngine()->replicated();
+
+        $this->assertMergeTree(
+            $table
+                ->columns(fn(MergeTree $t) => [
+                    $t->string('col_one'),
+                ])
+                ->orderBy('col_one')
+                ->engine(Engine::REPLACING_MERGE_TREE, 'col_one'),
+            'table_replicated_replacing_merge_tree'
+        );
+    }
+
     public function testPartitioned()
     {
         $this->assertMergeTree(

@@ -187,6 +187,26 @@ class CreateMyTable extends \PhpClickHouseLaravel\Migration
 }
 ```
 
+For another engine of the MergeTree family, such as `ReplacingMergeTree`,
+pass its name and parameters to `engine()`:
+
+```php
+use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Engine;
+
+static::createMergeTree('my_table', fn(MergeTree $table) => $table
+    ->columns([
+        $table->uInt32('id'),
+        $table->uInt64('version'),
+    ])
+    ->orderBy('id')
+    ->engine(Engine::REPLACING_MERGE_TREE, 'version')
+);
+```
+
+On a [`cluster`](#cluster-mode) connection the engine becomes
+`ReplicatedReplacingMergeTree`. Read the deduplicated rows with
+`MyTable::select()->final()`, or merge them with `MyTable::optimize(true)`.
+
 **3.** Insert data.
 
 One row:

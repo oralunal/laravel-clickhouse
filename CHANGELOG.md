@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- On a `cluster` connection, `Migration::createMergeTree()` created a table that was not replicated when the callback set the engine by name, for example `->engine(Engine::REPLACING_MERGE_TREE, 'version')`. The table became `ReplacingMergeTree` instead of `ReplicatedReplacingMergeTree`, so its rows were not replicated between the nodes. Setting the engine by name now keeps the replication. An `Engine` instance passed to `engine()` is still used as given. Existing tables are not changed, but wherever the migration runs again (a fresh install, CI, `migrate:fresh`) it now creates the replicated table.
+
 ## [2.0.2] - 2026-10-08
 
 ### Fixed
