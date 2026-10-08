@@ -127,7 +127,7 @@ class Connection extends BaseConnection
     public function query()
     {
         if ($this->config['fix_default_query_builder'] ?? false) {
-            return new Builder();
+            return new Builder($this->getClient(), $this->getName());
         }
         return parent::query();
     }

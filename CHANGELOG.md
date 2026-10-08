@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `php artisan migrate:fresh` and `php artisan db:wipe` now work on ClickHouse connections. Previously they failed with `This database driver does not support dropping all tables`. `Schema::dropAllTables()` drops every table, materialized view, view and dictionary on every node, ordering the drops so that ClickHouse accepts them. Views are dropped too, so the dump and the migrations can recreate them. `Schema::dropAllViews()` drops only views and materialized views.
+- Secondary ClickHouse connections now follow the connection that holds the `migrations` table. A ClickHouse connection is secondary when a migration in the migrator's paths targets it or when `database/schema` has a dump for it.
+  - `schema:dump` also writes `database/schema/<connection>-schema.sql` for each secondary connection.
+  - When `migrate` loads the primary dump, each empty secondary connection is loaded from its own dump. If a secondary has no dump, its migrations are marked as pending again and run.
+  - `migrate:fresh` empties the secondary connections as well.
+  - ClickHouse connections that no migration or dump refers to are never touched.
+
+### Changed
+
+- **Behavior change:** if MySQL or PostgreSQL holds the `migrations` table, `migrate:fresh` now also empties the ClickHouse databases your migrations write to, along with any ClickHouse database that has a dump in `database/schema`. Before, it left them untouched. Migrations written with `CREATE TABLE IF NOT EXISTS` therefore kept their ClickHouse data across `migrate:fresh`; that data is now dropped. The command keeps its production confirmation.
+
+### Fixed
+
+- `DB::connection('<name>')->table(...)` on a ClickHouse connection other than `clickhouse` ran its queries against the `clickhouse` connection. Models with a non-default `$connection` logged their queries there as well. Because of this, `migrate --database=<name>` read and wrote the wrong `migrations` table. Query builders are now bound to the connection that created them.
+
 ## [2.0.0] - 2026-10-08
 
 ### Changed

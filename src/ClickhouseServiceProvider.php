@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace PhpClickHouseLaravel;
 
 use Illuminate\Contracts\Container\BindingResolutionException;
+use Illuminate\Database\Console\Migrations\FreshCommand;
+use Illuminate\Database\Events\SchemaDumped;
+use Illuminate\Database\Events\SchemaLoaded;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -46,6 +49,12 @@ class ClickhouseServiceProvider extends ServiceProvider
                 array_merge($connectionDefaults, $existing)
             );
         }
+
+        // migrate:fresh must also empty the secondary ClickHouse connections.
+        $this->app->extend(
+            FreshCommand::class,
+            fn (FreshCommand $command, $app) => new Console\FreshCommand($app['migrator'])
+        );
     }
 
     /**
@@ -68,6 +77,15 @@ class ClickhouseServiceProvider extends ServiceProvider
         });
 
         BaseModel::setEventDispatcher($this->app['events']);
+
+        $this->app['events']->listen(
+            SchemaDumped::class,
+            fn (SchemaDumped $event) => $this->app->make(SecondaryConnections::class)->dump($event)
+        );
+        $this->app['events']->listen(
+            SchemaLoaded::class,
+            fn (SchemaLoaded $event) => $this->app->make(SecondaryConnections::class)->load($event)
+        );
 
         $this->app->terminating(static function () {
             BaseModel::flushAllBuffers(silent: true);

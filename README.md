@@ -676,30 +676,52 @@ migrations have run yet, it loads the dump first. After that, it runs only the
 migrations created after the dump. On a `cluster` connection, the statements
 are sent to every node, the same way migrations are.
 
-Keep in mind:
+`--prune` is Laravel's own behavior. It deletes the whole `database/migrations`
+directory, including migrations for your other connections.
 
-- `--prune` is Laravel's own behavior. It deletes the whole
-  `database/migrations` directory, including migrations for your other
-  connections.
-- `migrate` only loads the dump for the connection that holds the
-  `migrations` table. If your default connection is MySQL or PostgreSQL, run
-  `schema:dump` for both connections. Then load the ClickHouse dump yourself
-  after the main schema loads. The ClickHouse database must be empty at that
-  point:
+#### Which connection holds the `migrations` table
 
-  ```php
-  use Illuminate\Database\Events\SchemaLoaded;
-  use Illuminate\Support\Facades\DB;
-  use Illuminate\Support\Facades\Event;
+Laravel's `migrate`, `migrate:fresh` and `schema:dump` act on one connection:
+the default one, or the one you pass with `--database`. That connection also
+holds the `migrations` table. In this section it is called the *primary*
+connection. The package also works when ClickHouse is not the primary.
 
-  Event::listen(function (SchemaLoaded $event) {
-      $path = database_path('schema/clickhouse-schema.sql');
+**ClickHouse is the primary connection.** For example, `DB_CONNECTION=clickhouse`,
+or `--database=analytics` for a ClickHouse connection with another name. All
+commands work directly:
 
-      if ($event->connection->getName() !== 'clickhouse' && is_file($path)) {
-          DB::connection('clickhouse')->getSchemaState()->load($path);
-      }
-  });
-  ```
+```sh
+php artisan migrate --database=analytics
+php artisan schema:dump --database=analytics --prune
+php artisan migrate:fresh --database=analytics
+```
+
+If your ClickHouse connection has a name other than `clickhouse`, set it on the
+migrations: `protected $connection = 'analytics';`.
+
+**ClickHouse is a secondary connection.** For example, MySQL is the default
+connection and some migrations write to ClickHouse. A ClickHouse connection
+counts as secondary when one of these is true:
+
+- a migration in `database/migrations`, or in a path registered with
+  `loadMigrationsFrom()`, sets `$connection` to it;
+- `database/schema` has a dump for it.
+
+Secondary connections follow the primary one:
+
+| Command | What happens to secondary ClickHouse connections |
+| --- | --- |
+| `php artisan schema:dump [--prune]` | Each one is dumped to `database/schema/<connection>-schema.sql`, next to the primary dump. |
+| `php artisan migrate` (primary dump gets loaded) | An empty one is loaded from its dump. If it has no dump, its migrations are run again. A connection that still holds tables is left as it is. |
+| `php artisan migrate:fresh` | Each one is emptied too. It is then rebuilt from its dump if the primary dump gets loaded, otherwise by running the migrations again. |
+
+ClickHouse connections that no migration or dump refers to are never emptied
+or loaded.
+
+`migrate:fresh` and `db:wipe` drop every table, materialized view, view and
+dictionary in the ClickHouse database, in an order ClickHouse accepts, on every
+node. Views are dropped even without `--drop-views`: the dump and the
+migrations recreate them, and that would fail while they still exist.
 
 ## Contributing
 

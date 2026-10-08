@@ -377,7 +377,7 @@ class BaseModel
 
     protected function newQuery(): Builder
     {
-        return new Builder($this->getThisClient());
+        return new Builder($this->getThisClient(), $this->connection);
     }
 
     /**
