@@ -38,6 +38,8 @@ More: https://github.com/smi2/phpClickHouse#features
 
 ## Installation
 
+Upgrading from 1.x? See [UPGRADE.md](UPGRADE.md).
+
 **1.** Install via composer:
 
 ```sh

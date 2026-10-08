@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade note
 
+- See [UPGRADE.md](UPGRADE.md) for the full guide.
 - Replace `Tinderbox\ClickhouseBuilder\` with `PhpClickHouseLaravel\ClickhouseBuilder\` in your `use` statements, for example `Query\Expression`, `Query\Enums\Operator` and `Query\TwoElementsLogicExpression`.
 - If you called the global `raw()`, import it with `use function PhpClickHouseLaravel\ClickhouseBuilder\raw;`, or use `new RawColumn(...)` or `new Expression(...)` instead.
 - If your app requires `oralunal/clickhouse-builder` directly, remove it. The bundled copy replaces it.
