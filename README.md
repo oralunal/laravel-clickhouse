@@ -15,6 +15,7 @@ Laravel adapter for PHP ClickHouse tooling:
 
 - Eloquent-flavored `BaseModel` (`create`, `save`, `insertBulk`, `insertAssoc`, `where`, pagination)
 - `PhpClickHouseLaravel\Migration` base class for ClickHouse DDL migrations (single-node and cluster)
+- `php artisan schema:dump [--prune]` support for squashing migrations into a schema file
 - Query builder integration with `settings()`, `chunk()`, and ClickHouse-specific grammar
 - Column casts (currently `boolean`) applied on insert
 - Model events: `creating`, `created`, `saved`
@@ -643,6 +644,59 @@ $row->resolveConnection()->getCluster()->slideNode();
 echo $row->getThisClient()->getConnectHost();
 // will print 'clickhouse02'
 ```
+
+### Squashing migrations with `schema:dump`
+
+Laravel's built-in `schema:dump` command works on ClickHouse connections.
+You don't need a separate command or the `clickhouse-client` binary:
+
+```sh
+php artisan schema:dump --database=clickhouse
+
+# Dump the schema and delete all existing migration files
+php artisan schema:dump --database=clickhouse --prune
+```
+
+This writes `database/schema/clickhouse-schema.sql`. The file has one
+`CREATE` statement for each table, dictionary, view and materialized view in
+the connection's database, ordered so that each object comes after the ones it
+reads from. If the `migrations` table is on this connection, its rows are
+appended at the end; pass `--without-migration-data` to leave them out.
+References written as `<database>.<table>` lose the database prefix when they
+point at the connection's own database, so you can load the file into a
+database with a different name. Engine arguments that name the database as a
+separate string, such as `Buffer('analytics', 'events', ...)`, are left as they
+are.
+
+When `php artisan migrate` runs against a ClickHouse database where no
+migrations have run yet, it loads the dump first. After that, it runs only the
+migrations created after the dump. On a `cluster` connection, the statements
+are sent to every node, the same way migrations are.
+
+Keep in mind:
+
+- `--prune` is Laravel's own behavior. It deletes the whole
+  `database/migrations` directory, including migrations for your other
+  connections.
+- `migrate` only loads the dump for the connection that holds the
+  `migrations` table. If your default connection is MySQL or PostgreSQL, run
+  `schema:dump` for both connections. Then load the ClickHouse dump yourself
+  after the main schema loads. The ClickHouse database must be empty at that
+  point:
+
+  ```php
+  use Illuminate\Database\Events\SchemaLoaded;
+  use Illuminate\Support\Facades\DB;
+  use Illuminate\Support\Facades\Event;
+
+  Event::listen(function (SchemaLoaded $event) {
+      $path = database_path('schema/clickhouse-schema.sql');
+
+      if ($event->connection->getName() !== 'clickhouse' && is_file($path)) {
+          DB::connection('clickhouse')->getSchemaState()->load($path);
+      }
+  });
+  ```
 
 ## Contributing
 

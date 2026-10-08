@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `php artisan schema:dump` now works on ClickHouse connections, including `--prune`, `--path` and `--without-migration-data`. Previously it failed with a `BadMethodCallException` because the connection had no schema state. The dump uses HTTP only, so no `clickhouse-client` binary is needed. It lists tables, dictionaries, views and materialized views in dependency order and appends the rows of the migrations table. References written as `<database>.<table>` lose the database prefix when they point at the connection's own database, so you can load the file into a database with a different name.
+- `php artisan migrate` loads `database/schema/<connection>-schema.sql` into a ClickHouse database where no migrations have run yet, then runs only the newer migrations. On a `cluster` connection, the statements go to every node, the same way `Migration::write()` does. `Connection::getSchemaState()` exposes the same loader for apps where ClickHouse is not the default connection.
+
+### Fixed
+
+- `Schema::drop()` and `Schema::dropIfExists()` on a ClickHouse connection used to do nothing, without any error, because the schema grammar could not compile them. They now run `DROP TABLE` and `DROP TABLE IF EXISTS`. A migration whose `down()` relied on these calls now really drops the table.
+
 ## [1.4.0] - 2026-08-20
 
 ### Fixed

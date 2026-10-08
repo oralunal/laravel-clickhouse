@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use Illuminate\Database\Connection;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Fluent;
 use PhpClickHouseLaravel\SchemaGrammar;
 use PHPUnit\Framework\TestCase;
@@ -22,6 +23,17 @@ class SchemaGrammarTest extends TestCase
             "select * from system.tables where database = 'mydb' and name = 'users'",
             $result
         );
+    }
+
+    public function test_compile_drop_and_drop_if_exists(): void
+    {
+        $connection = $this->createMock(Connection::class);
+        $grammar = new SchemaGrammar($connection);
+        $connection->method('getSchemaGrammar')->willReturn($grammar);
+        $blueprint = new Blueprint($connection, 'migrations');
+
+        $this->assertSame('DROP TABLE "migrations"', $grammar->compileDrop($blueprint, new Fluent()));
+        $this->assertSame('DROP TABLE IF EXISTS "migrations"', $grammar->compileDropIfExists($blueprint, new Fluent()));
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('typeMappings')]

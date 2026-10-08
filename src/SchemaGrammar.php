@@ -49,6 +49,30 @@ class SchemaGrammar extends Grammar
     }
 
     /**
+     * Compile a drop table command.
+     *
+     * @param Blueprint $blueprint
+     * @param Fluent $command
+     * @return string
+     */
+    public function compileDrop(Blueprint $blueprint, Fluent $command): string
+    {
+        return 'DROP TABLE ' . $this->wrapTable($blueprint);
+    }
+
+    /**
+     * Compile a drop table (if exists) command.
+     *
+     * @param Blueprint $blueprint
+     * @param Fluent $command
+     * @return string
+     */
+    public function compileDropIfExists(Blueprint $blueprint, Fluent $command): string
+    {
+        return 'DROP TABLE IF EXISTS ' . $this->wrapTable($blueprint);
+    }
+
+    /**
      * Compile the blueprint's column definitions.
      *
      * @param Blueprint $blueprint
