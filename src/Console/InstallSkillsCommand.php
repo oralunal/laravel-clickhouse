@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel\Console;
+namespace Oralunal\LaravelClickHouse\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;

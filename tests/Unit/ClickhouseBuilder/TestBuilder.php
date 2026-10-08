@@ -2,8 +2,8 @@
 
 namespace Tests\Unit\ClickhouseBuilder;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\BaseBuilder;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Grammar;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Grammar;
 
 /**
  * Minimal concrete builder that compiles SQL without a ClickHouse client.

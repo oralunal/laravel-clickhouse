@@ -4,7 +4,7 @@ namespace Tests;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use PHPUnit\Framework\TestCase as PHPUnitTestCase;
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 
 class EventsTestModel extends BaseModel
 {

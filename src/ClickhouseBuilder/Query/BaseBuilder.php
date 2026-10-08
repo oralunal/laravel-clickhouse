@@ -1,15 +1,15 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
 use Closure;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Format;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\JoinStrict;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\JoinType;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Operator;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\OrderDirection;
-use function PhpClickHouseLaravel\ClickhouseBuilder\raw;
-use function PhpClickHouseLaravel\ClickhouseBuilder\tp;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinStrict;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinType;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\OrderDirection;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\tp;
 
 abstract class BaseBuilder
 {

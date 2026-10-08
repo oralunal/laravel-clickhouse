@@ -3,8 +3,8 @@
 namespace Tests;
 
 use Illuminate\Support\Facades\DB;
-use PhpClickHouseLaravel\BaseModel;
-use PhpClickHouseLaravel\ClickhouseServiceProvider;
+use Oralunal\LaravelClickHouse\BaseModel;
+use Oralunal\LaravelClickHouse\ClickhouseServiceProvider;
 
 class CastFirstColumn extends BaseModel
 {

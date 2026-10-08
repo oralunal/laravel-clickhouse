@@ -2,19 +2,19 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
 use ClickHouseDB\Client;
 use ClickHouseDB\Statement;
 use Exception;
 use Illuminate\Database\Eloquent\Concerns\HasAttributes;
-use PhpClickHouseLaravel\Concerns\HasBufferedInserts;
-use PhpClickHouseLaravel\Concerns\HasEvents;
+use Oralunal\LaravelClickHouse\Concerns\HasBufferedInserts;
+use Oralunal\LaravelClickHouse\Concerns\HasEvents;
 use Illuminate\Database\Eloquent\Concerns\HidesAttributes;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Operator;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\TwoElementsLogicExpression;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\TwoElementsLogicExpression;
 
 class BaseModel
 {

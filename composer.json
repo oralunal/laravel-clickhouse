@@ -26,8 +26,8 @@
         "smi2/phpclickhouse": "^1.26",
         "laravel/framework": "^13"
     },
-    "replace": {
-        "oralunal/phpclickhouse-laravel": "self.version"
+    "conflict": {
+        "oralunal/phpclickhouse-laravel": "*"
     },
     "require-dev": {
         "orchestra/testbench": "^11.0",
@@ -36,7 +36,7 @@
     },
     "autoload": {
         "psr-4": {
-            "PhpClickHouseLaravel\\": "src/"
+            "Oralunal\\LaravelClickHouse\\": "src/"
         },
         "files": [
             "src/ClickhouseBuilder/functions.php"
@@ -53,7 +53,7 @@
     "extra": {
         "laravel": {
             "providers": [
-                "PhpClickHouseLaravel\\ClickhouseServiceProvider"
+                "Oralunal\\LaravelClickHouse\\ClickhouseServiceProvider"
             ]
         }
     },

@@ -2,9 +2,9 @@
 
 namespace Tests\Unit\ClickhouseSchemaBuilder;
 
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Engine;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Expression;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Engine;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Expression;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree;
 use PHPUnit\Framework\TestCase;
 
 class MergeTreeTest extends TestCase

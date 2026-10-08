@@ -1,6 +1,6 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Exceptions;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions;
 
 class Exception extends \Exception
 {

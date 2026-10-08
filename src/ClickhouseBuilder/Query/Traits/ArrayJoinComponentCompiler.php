@@ -1,9 +1,9 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\ArrayJoinClause;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\BaseBuilder as Builder;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\ArrayJoinClause;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder as Builder;
 
 trait ArrayJoinComponentCompiler
 {

@@ -1,9 +1,9 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Column;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Expression;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Column;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
 
 trait ColumnCompiler
 {

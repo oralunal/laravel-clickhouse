@@ -1,8 +1,8 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
-use function PhpClickHouseLaravel\ClickhouseBuilder\tp;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\tp;
 
 class From
 {

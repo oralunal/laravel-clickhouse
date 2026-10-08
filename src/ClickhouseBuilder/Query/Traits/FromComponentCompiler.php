@@ -1,10 +1,10 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Exceptions\GrammarException;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\BaseBuilder;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\From;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\GrammarException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\From;
 
 trait FromComponentCompiler
 {

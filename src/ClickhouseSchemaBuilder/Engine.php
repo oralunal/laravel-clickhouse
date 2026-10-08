@@ -1,8 +1,8 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseSchemaBuilder;
+namespace Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder;
 
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Exceptions\IncompleteClickHouseDDLException;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Exceptions\IncompleteClickHouseDDLException;
 
 class Engine implements Element
 {

@@ -2,7 +2,7 @@
 
 namespace Tests\Models;
 
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 
 /**
  * Points at a table that does not exist so insert calls fail at the HTTP

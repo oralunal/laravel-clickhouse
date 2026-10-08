@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel\Testing;
+namespace Oralunal\LaravelClickHouse\Testing;
 
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
@@ -10,7 +10,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\ParallelTesting;
-use PhpClickHouseLaravel\SecondaryConnections;
+use Oralunal\LaravelClickHouse\SecondaryConnections;
 
 /**
  * Gives each parallel test process its own database on the secondary ClickHouse

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Expression;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
 
 class RawColumn extends Expression
 {

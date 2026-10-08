@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use ClickHouseDB\Client;
-use PhpClickHouseLaravel\Builder;
+use Oralunal\LaravelClickHouse\Builder;
 use PHPUnit\Framework\TestCase;
 
 class BuilderSqlTest extends TestCase

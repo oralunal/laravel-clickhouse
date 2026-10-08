@@ -1,6 +1,6 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseSchemaBuilder\Exceptions;
+namespace Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Exceptions;
 
 class IncompleteClickHouseDDLException extends ClickHouseDDLException
 {

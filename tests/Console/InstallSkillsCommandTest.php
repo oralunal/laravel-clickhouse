@@ -4,8 +4,8 @@ namespace Tests\Console;
 
 use Illuminate\Filesystem\Filesystem;
 use Orchestra\Testbench\TestCase;
-use PhpClickHouseLaravel\ClickhouseServiceProvider;
-use PhpClickHouseLaravel\Console\InstallSkillsCommand;
+use Oralunal\LaravelClickHouse\ClickhouseServiceProvider;
+use Oralunal\LaravelClickHouse\Console\InstallSkillsCommand;
 
 class InstallSkillsCommandTest extends TestCase
 {

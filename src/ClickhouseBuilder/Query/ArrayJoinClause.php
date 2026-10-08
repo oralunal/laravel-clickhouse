@@ -1,8 +1,8 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\JoinType;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinType;
 
 class ArrayJoinClause
 {

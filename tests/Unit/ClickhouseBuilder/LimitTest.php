@@ -3,7 +3,7 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Limit;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Limit;
 
 class LimitTest extends TestCase
 {

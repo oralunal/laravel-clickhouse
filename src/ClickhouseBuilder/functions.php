@@ -1,8 +1,8 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Expression;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
 
 /**
  * Call the given Closure with the given value then return the value.

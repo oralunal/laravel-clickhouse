@@ -3,12 +3,12 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Column;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Operator;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\From;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\JoinClause;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\TwoElementsLogicExpression;
-use function PhpClickHouseLaravel\ClickhouseBuilder\raw;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Column;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\From;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\TwoElementsLogicExpression;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
 
 class BuilderTest extends TestCase
 {

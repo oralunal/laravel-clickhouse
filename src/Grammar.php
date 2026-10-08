@@ -1,9 +1,9 @@
 <?php
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
 
-class Grammar extends \PhpClickHouseLaravel\ClickhouseBuilder\Query\Grammar
+class Grammar extends \Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Grammar
 {
     public function __construct()
     {

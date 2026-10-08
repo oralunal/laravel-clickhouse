@@ -6,7 +6,7 @@ namespace Tests\Unit;
 
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Expression;
-use PhpClickHouseLaravel\QueryGrammar;
+use Oralunal\LaravelClickHouse\QueryGrammar;
 use PHPUnit\Framework\TestCase;
 
 class QueryGrammarTest extends TestCase

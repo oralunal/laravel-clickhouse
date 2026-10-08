@@ -1,6 +1,6 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
 /**
  * Object for element identity which should be escaped.

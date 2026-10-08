@@ -4,7 +4,7 @@ The problem is described here: https://github.com/glushkovds/phpclickhouse-larav
 
 For `DB::table('my-table')` the default builder used to be
 `\Illuminate\Database\Query\Builder` instead of this library's
-`\PhpClickHouseLaravel\Builder`, which broke parameter numbering for
+`\Oralunal\LaravelClickHouse\Builder`, which broke parameter numbering for
 `whereIn` / `whereBetween`.
 
 ### Status
@@ -51,7 +51,7 @@ $rows = DB::table('my-table')
 ### Why not use `\Illuminate\Database\Query\Builder`
 
 This library uses its own bundled builder,
-`PhpClickHouseLaravel\ClickhouseBuilder` (originally
+`Oralunal\LaravelClickHouse\ClickhouseBuilder` (originally
 `the-tinderbox/ClickhouseBuilder`, via the `glushkovds` and `oralunal`
 forks). It has ClickHouse-specific methods that the standard builder
 cannot represent, and vice versa.

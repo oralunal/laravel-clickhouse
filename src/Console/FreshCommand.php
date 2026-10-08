@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel\Console;
+namespace Oralunal\LaravelClickHouse\Console;
 
 use Illuminate\Database\Console\Migrations\FreshCommand as BaseFreshCommand;
-use PhpClickHouseLaravel\SecondaryConnections;
+use Oralunal\LaravelClickHouse\SecondaryConnections;
 
 /**
  * `migrate:fresh` that also empties the secondary ClickHouse connections.

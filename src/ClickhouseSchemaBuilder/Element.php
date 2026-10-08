@@ -1,6 +1,6 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseSchemaBuilder;
+namespace Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder;
 
 interface Element
 {

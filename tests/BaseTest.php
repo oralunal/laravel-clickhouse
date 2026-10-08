@@ -6,7 +6,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
-use PhpClickHouseLaravel\Builder;
+use Oralunal\LaravelClickHouse\Builder;
 use Tests\Models\Example;
 
 class BaseTest extends TestCase

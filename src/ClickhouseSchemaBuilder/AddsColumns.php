@@ -1,8 +1,8 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseSchemaBuilder;
+namespace Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder;
 
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Exceptions\InvalidClickHouseDDLException;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Exceptions\InvalidClickHouseDDLException;
 
 trait AddsColumns
 {

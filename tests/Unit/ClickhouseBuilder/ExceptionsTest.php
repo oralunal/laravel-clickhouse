@@ -3,10 +3,10 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
-use PhpClickHouseLaravel\ClickhouseBuilder\Exceptions\BuilderException;
-use PhpClickHouseLaravel\ClickhouseBuilder\Exceptions\GrammarException;
-use PhpClickHouseLaravel\ClickhouseBuilder\Exceptions\NotSupportedException;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\JoinClause;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\BuilderException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\GrammarException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\NotSupportedException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause;
 
 class ExceptionsTest extends TestCase
 {

@@ -6,7 +6,7 @@
 
 namespace Tests\Unit\Enum;
 
-use PhpClickHouseLaravel\Enum\Enum;
+use Oralunal\LaravelClickHouse\Enum\Enum;
 
 /**
  * Class EnumFixture

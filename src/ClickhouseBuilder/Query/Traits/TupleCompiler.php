@@ -1,8 +1,8 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Tuple;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Tuple;
 
 trait TupleCompiler
 {
