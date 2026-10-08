@@ -1,27 +1,105 @@
 # Upgrade Guide
 
-## Switching from `oralunal/phpclickhouse-laravel` 2.0.x
+## Upgrading from 2.x to 3.0
 
-From 2.0.3 on, the package is published as `oralunal/laravel-clickhouse`.
-`oralunal/phpclickhouse-laravel` is abandoned and gets no new releases. The
-namespaces, configuration and behavior are the same, so only the package name
-in `composer.json` changes:
+PHP (`^8.5`) and Laravel (`^13`) requirements are unchanged. Still on 1.x?
+Follow [Upgrading from 1.x to 2.0](#upgrading-from-1x-to-20) first, then come
+back here.
+
+3.0 renames the package and its namespace:
+
+| | 2.x | 3.0 |
+| --- | --- | --- |
+| Composer package | `oralunal/phpclickhouse-laravel` | `oralunal/laravel-clickhouse` |
+| Namespace | `PhpClickHouseLaravel\` | `Oralunal\LaravelClickHouse\` |
+
+Nothing else changes. Class names below the namespace, the folder layout,
+configuration, the generated SQL and the behavior are the same as in 2.0.2, for
+example `PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree` becomes
+`Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree`. 2.0.2 is
+the last release of `oralunal/phpclickhouse-laravel`, and the package is
+abandoned. 3.0 conflicts with it, so Composer never installs both.
+
+### Let your coding agent do it
+
+1. Switch the package and install the skills:
+
+   ```sh
+   composer remove oralunal/phpclickhouse-laravel --no-update
+   composer require oralunal/laravel-clickhouse:^3.0 --with-all-dependencies
+   php artisan clickhouse:install-skills
+   ```
+
+2. In your agent, run:
+
+   ```text
+   /lc-upgrade-2x-to-3x
+   ```
+
+   If your agent does not offer skills as slash commands, ask it to
+   "upgrade phpclickhouse-laravel to laravel-clickhouse 3.x".
+
+The agent renames the namespace everywhere, refreshes Laravel's caches, checks
+the result, and reports how the test suite compares with the run before the
+upgrade. `clickhouse:install-skills` finds your agents from their project
+files (`.claude/`, `.cursor/`, `AGENTS.md`, …); pass `--agent=claude_code` and
+so on to choose them yourself.
+
+If `php artisan` fails after step 1 with a class-not-found error for a
+`PhpClickHouseLaravel\…` class, your app uses the 2.x namespace while it boots.
+Copy the skill by hand instead of running `clickhouse:install-skills`, for
+example:
 
 ```sh
-composer remove oralunal/phpclickhouse-laravel --no-update
-composer require oralunal/laravel-clickhouse:^2.0.3
+mkdir -p .claude/skills
+cp -r vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-2x-to-3x .claude/skills/
 ```
 
-The new package replaces the old name, so Composer never installs both.
+### Or upgrade by hand
+
+1. Switch the package:
+
+   ```sh
+   composer remove oralunal/phpclickhouse-laravel --no-update
+   composer require oralunal/laravel-clickhouse:^3.0 --with-all-dependencies
+   ```
+
+   The `artisan` scripts that Composer runs may fail with a class-not-found
+   error until step 2 is done.
+
+2. Rename the namespace in your code, migrations, config and tests. This keeps
+   the escaping of strings such as `'PhpClickHouseLaravel\\BaseModel'`:
+
+   ```sh
+   grep -rlI 'PhpClickHouseLaravel' . \
+       --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=storage \
+       --exclude-dir=.git --exclude-dir=cache --exclude=composer.lock \
+     | xargs perl -pi -e 's/PhpClickHouseLaravel(\\+)/Oralunal$1LaravelClickHouse$1/g'
+   ```
+
+   Then search for `PhpClickHouseLaravel` again and check what is left, such
+   as mentions in comments.
+
+3. Run `php artisan package:discover` and `php artisan optimize:clear`. If they
+   fail with `Class "PhpClickHouseLaravel\ClickhouseServiceProvider" not found`,
+   delete `bootstrap/cache/packages.php` and `bootstrap/cache/services.php` and
+   run `php artisan package:discover` again.
+
+4. Values serialized with the 2.x class names cannot be unserialized by 3.0:
+   cache entries, queued jobs and sessions that hold objects of the package's
+   classes, such as `RawColumn` or the builder enums. If your app stores such
+   values, let the queues drain before you deploy and clear the cache
+   afterwards.
 
 ## Upgrading from 1.x to 2.0
 
+These steps take you to `oralunal/phpclickhouse-laravel` 2.0.2. Continue with
+[Upgrading from 2.x to 3.0](#upgrading-from-2x-to-30) afterwards.
+
 PHP (`^8.5`) and Laravel (`^13`) requirements are unchanged.
 
-Upgrade to **2.0.3 or later**. From 2.0.3 on, the package is published as
-`oralunal/laravel-clickhouse` instead of `oralunal/phpclickhouse-laravel`; the
-namespaces did not change. 2.0.0 was tagged before the schema builder and the
-enum base class were bundled. In 2.0.1, parallel test processes drop each
+Upgrade to **2.0.2 or later**. 2.0.0 was tagged before the schema builder and
+the enum base class were bundled. In 2.0.1, parallel test processes drop each
 other's ClickHouse tables (see
 [step 7](#7-migratefresh-also-empties-secondary-clickhouse-connections)).
 
@@ -36,9 +114,7 @@ They generate the same SQL as before, but their classes are in this package's
 namespaces now. Apart from Laravel, the only remaining dependency is
 `smi2/phpclickhouse`.
 
-**Do you need to change anything?** Every app changes the package name in
-`composer.json` ([step 1](#1-update-the-dependency)). Code only changes in these
-cases:
+**Do you need to change anything?** Only in these cases:
 
 - Your code or migrations mention `Tinderbox\ClickhouseBuilder`,
   `PhpClickHouseSchemaBuilder` or `MyCLabs\Enum`.
@@ -48,7 +124,7 @@ cases:
   table (see [step 7](#7-migratefresh-also-empties-secondary-clickhouse-connections)).
 
 Apps that only use `BaseModel`, `Migration::write()`, `RawColumn` and
-`DB::connection('clickhouse')` keep working without code changes.
+`DB::connection('clickhouse')` keep working without changes.
 
 ### Let your coding agent do it
 
@@ -57,11 +133,10 @@ the result. It works with Claude Code, Cursor, GitHub Copilot, Codex, Junie,
 OpenCode, Amp, Gemini/Antigravity, Kiro, Pi, Zed, Grok Build, Factory Droid and
 other agents that read `AGENTS.md`. Nothing else needs to be installed.
 
-1. Switch to the new package name and update:
+1. Update the package:
 
    ```sh
-   composer remove oralunal/phpclickhouse-laravel --no-update
-   composer require oralunal/laravel-clickhouse:^2.0.3 --with-all-dependencies
+   composer require oralunal/phpclickhouse-laravel:^2.0.2 --with-all-dependencies
    ```
 
 2. Install the skill:
@@ -84,8 +159,8 @@ other agents that read `AGENTS.md`. Nothing else needs to be installed.
    ```
 
    If your agent does not offer skills as slash commands, ask it to
-   "upgrade phpclickhouse-laravel to laravel-clickhouse 2.x". The skill is
-   picked up from its description.
+   "upgrade phpclickhouse-laravel to 2.x". The skill is picked up from its
+   description.
 
 The agent then follows every step below. It stops to ask you before changing
 code whose meaning it cannot decide alone, such as uses of the removed
@@ -100,7 +175,7 @@ example:
 
 ```sh
 mkdir -p .claude/skills
-cp -r vendor/oralunal/laravel-clickhouse/resources/skills/plc-upgrade-1x-to-2x .claude/skills/
+cp -r vendor/oralunal/phpclickhouse-laravel/resources/skills/plc-upgrade-1x-to-2x .claude/skills/
 ```
 
 ### Or upgrade by hand
@@ -114,11 +189,8 @@ grep -rnE 'Tinderbox\\ClickhouseBuilder|PhpClickHouseSchemaBuilder|MyCLabs\\Enum
 
 ### 1. Update the dependency
 
-The package is now called `oralunal/laravel-clickhouse`:
-
 ```sh
-composer remove oralunal/phpclickhouse-laravel --no-update
-composer require oralunal/laravel-clickhouse:^2.0.3 --with-all-dependencies
+composer require oralunal/phpclickhouse-laravel:^2.0.2
 ```
 
 If your `composer.json` lists `oralunal/clickhouse-builder` or

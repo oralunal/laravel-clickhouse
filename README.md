@@ -13,9 +13,9 @@ this package's namespace; see [Credits](#credits).
 ## Features
 
 - Eloquent-flavored `BaseModel` (`create`, `save`, `insertBulk`, `insertAssoc`, `where`, pagination)
-- `PhpClickHouseLaravel\Migration` base class for ClickHouse DDL migrations (single-node and cluster)
+- `Oralunal\LaravelClickHouse\Migration` base class for ClickHouse DDL migrations (single-node and cluster)
 - `php artisan schema:dump [--prune]` support for squashing migrations into a schema file
-- `php artisan clickhouse:install-skills` installs coding-agent skills, such as `/plc-upgrade-1x-to-2x` for the 1.x → 2.x upgrade
+- `php artisan clickhouse:install-skills` installs coding-agent skills: `/lc-upgrade-2x-to-3x` for the 2.x → 3.x upgrade and `/plc-upgrade-1x-to-2x` for 1.x → 2.x
 - Query builder integration with `settings()`, `chunk()`, and ClickHouse-specific grammar
 - Column casts (currently `boolean`) applied on insert
 - Model events: `creating`, `created`, `saved`
@@ -37,7 +37,18 @@ More: https://github.com/smi2/phpClickHouse#features
 
 ## Installation
 
-Upgrading from 1.x? Run `php artisan clickhouse:install-skills`, then `/plc-upgrade-1x-to-2x` in your coding agent. To upgrade by hand, see [UPGRADE.md](UPGRADE.md).
+Upgrading from 2.x? Until 2.0.2 the package was published as
+`oralunal/phpclickhouse-laravel`, with the `PhpClickHouseLaravel` namespace.
+Switch the package and install the coding-agent skills:
+
+```sh
+composer remove oralunal/phpclickhouse-laravel --no-update
+composer require oralunal/laravel-clickhouse:^3.0 --with-all-dependencies
+php artisan clickhouse:install-skills
+```
+
+Then run `/lc-upgrade-2x-to-3x` in your coding agent. On 1.x, run
+`/plc-upgrade-1x-to-2x` before it. To upgrade by hand, see [UPGRADE.md](UPGRADE.md).
 
 **1.** Install via composer:
 
@@ -45,19 +56,9 @@ Upgrading from 1.x? Run `php artisan clickhouse:install-skills`, then `/plc-upgr
 composer require oralunal/laravel-clickhouse
 ```
 
-Until 2.0.2 the package was published as `oralunal/phpclickhouse-laravel`. To
-switch an existing app to the new name, run:
-
-```sh
-composer remove oralunal/phpclickhouse-laravel --no-update
-composer require oralunal/laravel-clickhouse:^2.0.3
-```
-
-The namespaces are the same (`PhpClickHouseLaravel\...`), so your code needs no changes.
-
 The service provider is registered automatically via Laravel package
 auto-discovery. If you have auto-discovery disabled, add
-`PhpClickHouseLaravel\ClickhouseServiceProvider::class` to
+`Oralunal\LaravelClickHouse\ClickhouseServiceProvider::class` to
 `bootstrap/providers.php` (Laravel 11+) or `config/app.php` (Laravel 10 and below).
 
 **2.** Configure the connection.
@@ -130,7 +131,7 @@ More about `$db`: https://github.com/smi2/phpClickHouse/blob/master/README.md
 
 namespace App\Models\Clickhouse;
 
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 
 class MyTable extends BaseModel
 {
@@ -144,7 +145,7 @@ class MyTable extends BaseModel
 ```php
 <?php
 
-class CreateMyTable extends \PhpClickHouseLaravel\Migration
+class CreateMyTable extends \Oralunal\LaravelClickHouse\Migration
 {
     public function up()
     {
@@ -172,10 +173,10 @@ Or use the Schema Builder:
 ```php
 <?php
 
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Expression;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Expression;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree;
 
-class CreateMyTable extends \PhpClickHouseLaravel\Migration
+class CreateMyTable extends \Oralunal\LaravelClickHouse\Migration
 {
     public function up()
     {
@@ -201,7 +202,7 @@ For another engine of the MergeTree family, such as `ReplacingMergeTree`,
 pass its name and parameters to `engine()`:
 
 ```php
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Engine;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Engine;
 
 static::createMergeTree('my_table', fn(MergeTree $table) => $table
     ->columns([
@@ -268,7 +269,7 @@ Casts apply to `insertAssoc()` / `buffer()` by column name, and to
 ```php
 namespace App\Models\Clickhouse;
 
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 
 class MyTable extends BaseModel
 {
@@ -336,7 +337,7 @@ See https://clickhouse.tech/docs/en/engines/table-engines/special/buffer/
 
 namespace App\Models\Clickhouse;
 
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 
 class MyTable extends BaseModel
 {
@@ -354,7 +355,7 @@ If you also want to read from the buffer table, set its name as `$table`:
 
 namespace App\Models\Clickhouse;
 
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 
 class MyTable extends BaseModel
 {
@@ -451,7 +452,7 @@ Using the buffer engine with OPTIMIZE / ALTER TABLE DELETE:
 
 namespace App\Models\Clickhouse;
 
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 
 class MyTable extends BaseModel
 {
@@ -537,7 +538,7 @@ the same shape to `config/database.php` works too, and overrides both.
 
 namespace App\Models\Clickhouse;
 
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 
 class MyTable2 extends BaseModel
 {
@@ -552,7 +553,7 @@ class MyTable2 extends BaseModel
 ```php
 <?php
 
-return new class extends \PhpClickHouseLaravel\Migration
+return new class extends \Oralunal\LaravelClickHouse\Migration
 {
     protected $connection = 'clickhouse2';
 
@@ -643,7 +644,7 @@ Migration:
 ```php
 <?php
 
-return new class extends \PhpClickHouseLaravel\Migration
+return new class extends \Oralunal\LaravelClickHouse\Migration
 {
     public function up()
     {
@@ -777,9 +778,9 @@ directory keeps the original license next to the code.
 
 | Bundled as | Origin | License |
 | --- | --- | --- |
-| `PhpClickHouseLaravel\ClickhouseBuilder` (`src/ClickhouseBuilder`) | [the-tinderbox/ClickhouseBuilder](https://github.com/the-tinderbox/ClickhouseBuilder), via the [glushkovds](https://github.com/glushkovds/ClickhouseBuilder) and [oralunal](https://github.com/oralunal/ClickhouseBuilder) forks (v1.0.0) | `src/ClickhouseBuilder/LICENSE` |
-| `PhpClickHouseLaravel\ClickhouseSchemaBuilder` (`src/ClickhouseSchemaBuilder`) | [glushkovds/php-clickhouse-schema-builder](https://github.com/glushkovds/php-clickhouse-schema-builder) v1.1.1 by Denis Glushkov | `src/ClickhouseSchemaBuilder/LICENSE` |
-| `PhpClickHouseLaravel\Enum\Enum` (`src/Enum`) | [myclabs/php-enum](https://github.com/myclabs/php-enum) 1.8.5 by My C-Labs | `src/Enum/LICENSE` |
+| `Oralunal\LaravelClickHouse\ClickhouseBuilder` (`src/ClickhouseBuilder`) | [the-tinderbox/ClickhouseBuilder](https://github.com/the-tinderbox/ClickhouseBuilder), via the [glushkovds](https://github.com/glushkovds/ClickhouseBuilder) and [oralunal](https://github.com/oralunal/ClickhouseBuilder) forks (v1.0.0) | `src/ClickhouseBuilder/LICENSE` |
+| `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder` (`src/ClickhouseSchemaBuilder`) | [glushkovds/php-clickhouse-schema-builder](https://github.com/glushkovds/php-clickhouse-schema-builder) v1.1.1 by Denis Glushkov | `src/ClickhouseSchemaBuilder/LICENSE` |
+| `Oralunal\LaravelClickHouse\Enum\Enum` (`src/Enum`) | [myclabs/php-enum](https://github.com/myclabs/php-enum) 1.8.5 by My C-Labs | `src/Enum/LICENSE` |
 
 The package itself is a fork of
 [glushkovds/phpclickhouse-laravel](https://github.com/glushkovds/phpclickhouse-laravel).

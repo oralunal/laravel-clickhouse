@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+3.0 renames the package and its namespace. Nothing else changes for your code. The quickest way to upgrade is `/lc-upgrade-2x-to-3x`; see [UPGRADE.md](UPGRADE.md).
+
 ### Changed
 
-- The package is now published as `oralunal/laravel-clickhouse`, and the GitHub repository is `oralunal/laravel-clickhouse`. `oralunal/phpclickhouse-laravel` is abandoned and gets no new releases; its existing releases stay installable. To switch, run `composer remove oralunal/phpclickhouse-laravel --no-update` and then `composer require oralunal/laravel-clickhouse`. Namespaces, configuration and behavior are unchanged, so no code changes are needed. The new package replaces the old name, so Composer never installs both.
+- **Breaking:** The package is now published as `oralunal/laravel-clickhouse`, and the GitHub repository is `oralunal/laravel-clickhouse`. 2.0.2 is the last release of `oralunal/phpclickhouse-laravel`; that package is abandoned and its existing releases stay installable. `oralunal/laravel-clickhouse` conflicts with it, so Composer never installs both.
+- **Breaking:** The namespace moves from `PhpClickHouseLaravel\` to `Oralunal\LaravelClickHouse\`, including the bundled `ClickhouseBuilder`, `ClickhouseSchemaBuilder` and `Enum` and the `raw()`, `tp()` and `array_flatten()` helpers. Class names below the namespace, configuration, the generated SQL and the behavior are unchanged. Values serialized with the 2.x class names, such as cached or queued `RawColumn` objects, cannot be unserialized by 3.0.
+
+### Added
+
+- The `lc-upgrade-2x-to-3x` coding-agent skill, installed by `php artisan clickhouse:install-skills`. Running `/lc-upgrade-2x-to-3x` makes the agent switch the package, rename the namespace across the application, refresh Laravel's caches and verify the result. `/plc-upgrade-1x-to-2x` stays for 1.x applications and now points to it as the next step.
 
 ### Fixed
 
