@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The package is now published as `oralunal/laravel-clickhouse`, and the GitHub repository is `oralunal/laravel-clickhouse`. `oralunal/phpclickhouse-laravel` is abandoned and gets no new releases; its existing releases stay installable. To switch, run `composer remove oralunal/phpclickhouse-laravel --no-update` and then `composer require oralunal/laravel-clickhouse`. Namespaces, configuration and behavior are unchanged, so no code changes are needed. The new package replaces the old name, so Composer never installs both.
+
 ### Fixed
 
 - On a `cluster` connection, `Migration::createMergeTree()` created a table that was not replicated when the callback set the engine by name, for example `->engine(Engine::REPLACING_MERGE_TREE, 'version')`. The table became `ReplacingMergeTree` instead of `ReplicatedReplacingMergeTree`, so its rows were not replicated between the nodes. Setting the engine by name now keeps the replication. An `Engine` instance passed to `engine()` is still used as given. Existing tables are not changed, but wherever the migration runs again (a fresh install, CI, `migrate:fresh`) it now creates the replicated table.
@@ -159,13 +163,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Forked from [glushkovds/phpclickhouse-laravel](https://github.com/glushkovds/phpclickhouse-laravel) at 2.5.2.
 - Minimum PHP 8.5, Laravel 13+ only.
 
-[Unreleased]: https://github.com/oralunal/phpclickhouse-laravel/compare/v2.0.2...HEAD
-[2.0.2]: https://github.com/oralunal/phpclickhouse-laravel/compare/v2.0.1...v2.0.2
-[2.0.1]: https://github.com/oralunal/phpclickhouse-laravel/compare/v2.0.0...v2.0.1
-[2.0.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.5.0...v2.0.0
-[1.5.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.4.0...v1.5.0
-[1.4.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/oralunal/phpclickhouse-laravel/releases/tag/v1.0.0
+[Unreleased]: https://github.com/oralunal/laravel-clickhouse/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/oralunal/laravel-clickhouse/compare/v2.0.1...v2.0.2
+[2.0.1]: https://github.com/oralunal/laravel-clickhouse/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.5.0...v2.0.0
+[1.5.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/oralunal/laravel-clickhouse/releases/tag/v1.0.0

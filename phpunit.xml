@@ -7,7 +7,7 @@
          failOnRisky="true"
          failOnWarning="true">
     <testsuites>
-        <testsuite name="phpClickHouse-laravel test suite">
+        <testsuite name="laravel-clickhouse test suite">
             <directory>tests</directory>
             <exclude>tests/Models</exclude>
             <exclude>tests/migrations</exclude>

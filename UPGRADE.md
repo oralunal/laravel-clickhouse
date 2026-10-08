@@ -1,11 +1,27 @@
 # Upgrade Guide
 
+## Switching from `oralunal/phpclickhouse-laravel` 2.0.x
+
+From 2.0.3 on, the package is published as `oralunal/laravel-clickhouse`.
+`oralunal/phpclickhouse-laravel` is abandoned and gets no new releases. The
+namespaces, configuration and behavior are the same, so only the package name
+in `composer.json` changes:
+
+```sh
+composer remove oralunal/phpclickhouse-laravel --no-update
+composer require oralunal/laravel-clickhouse:^2.0.3
+```
+
+The new package replaces the old name, so Composer never installs both.
+
 ## Upgrading from 1.x to 2.0
 
 PHP (`^8.5`) and Laravel (`^13`) requirements are unchanged.
 
-Upgrade to **2.0.2 or later**. 2.0.0 was tagged before the schema builder and
-the enum base class were bundled. In 2.0.1, parallel test processes drop each
+Upgrade to **2.0.3 or later**. From 2.0.3 on, the package is published as
+`oralunal/laravel-clickhouse` instead of `oralunal/phpclickhouse-laravel`; the
+namespaces did not change. 2.0.0 was tagged before the schema builder and the
+enum base class were bundled. In 2.0.1, parallel test processes drop each
 other's ClickHouse tables (see
 [step 7](#7-migratefresh-also-empties-secondary-clickhouse-connections)).
 
@@ -20,7 +36,9 @@ They generate the same SQL as before, but their classes are in this package's
 namespaces now. Apart from Laravel, the only remaining dependency is
 `smi2/phpclickhouse`.
 
-**Do you need to change anything?** Only in these cases:
+**Do you need to change anything?** Every app changes the package name in
+`composer.json` ([step 1](#1-update-the-dependency)). Code only changes in these
+cases:
 
 - Your code or migrations mention `Tinderbox\ClickhouseBuilder`,
   `PhpClickHouseSchemaBuilder` or `MyCLabs\Enum`.
@@ -30,7 +48,7 @@ namespaces now. Apart from Laravel, the only remaining dependency is
   table (see [step 7](#7-migratefresh-also-empties-secondary-clickhouse-connections)).
 
 Apps that only use `BaseModel`, `Migration::write()`, `RawColumn` and
-`DB::connection('clickhouse')` keep working without changes.
+`DB::connection('clickhouse')` keep working without code changes.
 
 ### Let your coding agent do it
 
@@ -39,10 +57,11 @@ the result. It works with Claude Code, Cursor, GitHub Copilot, Codex, Junie,
 OpenCode, Amp, Gemini/Antigravity, Kiro, Pi, Zed, Grok Build, Factory Droid and
 other agents that read `AGENTS.md`. Nothing else needs to be installed.
 
-1. Update the package:
+1. Switch to the new package name and update:
 
    ```sh
-   composer require oralunal/phpclickhouse-laravel:^2.0.2 --with-all-dependencies
+   composer remove oralunal/phpclickhouse-laravel --no-update
+   composer require oralunal/laravel-clickhouse:^2.0.3 --with-all-dependencies
    ```
 
 2. Install the skill:
@@ -65,8 +84,8 @@ other agents that read `AGENTS.md`. Nothing else needs to be installed.
    ```
 
    If your agent does not offer skills as slash commands, ask it to
-   "upgrade phpclickhouse-laravel to 2.x". The skill is picked up from its
-   description.
+   "upgrade phpclickhouse-laravel to laravel-clickhouse 2.x". The skill is
+   picked up from its description.
 
 The agent then follows every step below. It stops to ask you before changing
 code whose meaning it cannot decide alone, such as uses of the removed
@@ -81,7 +100,7 @@ example:
 
 ```sh
 mkdir -p .claude/skills
-cp -r vendor/oralunal/phpclickhouse-laravel/resources/skills/plc-upgrade-1x-to-2x .claude/skills/
+cp -r vendor/oralunal/laravel-clickhouse/resources/skills/plc-upgrade-1x-to-2x .claude/skills/
 ```
 
 ### Or upgrade by hand
@@ -95,8 +114,11 @@ grep -rnE 'Tinderbox\\ClickhouseBuilder|PhpClickHouseSchemaBuilder|MyCLabs\\Enum
 
 ### 1. Update the dependency
 
+The package is now called `oralunal/laravel-clickhouse`:
+
 ```sh
-composer require oralunal/phpclickhouse-laravel:^2.0.2
+composer remove oralunal/phpclickhouse-laravel --no-update
+composer require oralunal/laravel-clickhouse:^2.0.3 --with-all-dependencies
 ```
 
 If your `composer.json` lists `oralunal/clickhouse-builder` or

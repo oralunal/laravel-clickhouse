@@ -1,12 +1,12 @@
 {
-    "name": "oralunal/phpclickhouse-laravel",
+    "name": "oralunal/laravel-clickhouse",
     "description": "Adapter of the most popular library https://github.com/smi2/phpClickHouse to Laravel",
     "keywords": [
         "php",
         "laravel",
         "clickhouse"
     ],
-    "homepage": "https://github.com/oralunal/phpclickhouse-laravel",
+    "homepage": "https://github.com/oralunal/laravel-clickhouse",
     "type": "library",
     "license": "MIT",
     "authors": [
@@ -25,6 +25,9 @@
         "php": "^8.5",
         "smi2/phpclickhouse": "^1.26",
         "laravel/framework": "^13"
+    },
+    "replace": {
+        "oralunal/phpclickhouse-laravel": "self.version"
     },
     "require-dev": {
         "orchestra/testbench": "^11.0",

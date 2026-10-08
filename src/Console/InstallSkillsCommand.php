@@ -54,7 +54,7 @@ class InstallSkillsCommand extends Command
     /**
      * @var string
      */
-    protected $description = 'Install the phpclickhouse-laravel AI agent skills, such as /plc-upgrade-1x-to-2x';
+    protected $description = 'Install the laravel-clickhouse AI agent skills, such as /plc-upgrade-1x-to-2x';
 
     public function __construct(
         protected Filesystem $files,

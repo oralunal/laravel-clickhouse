@@ -1,8 +1,8 @@
-![Tests](https://github.com/oralunal/phpclickhouse-laravel/actions/workflows/tests.yml/badge.svg)
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/oralunal/phpclickhouse-laravel.svg?style=flat-square)](https://packagist.org/packages/oralunal/phpclickhouse-laravel)
-[![Total Downloads](https://img.shields.io/packagist/dt/oralunal/phpclickhouse-laravel.svg?style=flat-square)](https://packagist.org/packages/oralunal/phpclickhouse-laravel)
+![Tests](https://github.com/oralunal/laravel-clickhouse/actions/workflows/tests.yml/badge.svg)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/oralunal/laravel-clickhouse.svg?style=flat-square)](https://packagist.org/packages/oralunal/laravel-clickhouse)
+[![Total Downloads](https://img.shields.io/packagist/dt/oralunal/laravel-clickhouse.svg?style=flat-square)](https://packagist.org/packages/oralunal/laravel-clickhouse)
 
-# phpClickHouse-laravel
+# laravel-clickhouse
 
 Laravel adapter for ClickHouse, built on
 [smi2/phpClickHouse](https://github.com/smi2/phpClickHouse) for HTTP transport
@@ -42,8 +42,18 @@ Upgrading from 1.x? Run `php artisan clickhouse:install-skills`, then `/plc-upgr
 **1.** Install via composer:
 
 ```sh
-composer require oralunal/phpclickhouse-laravel
+composer require oralunal/laravel-clickhouse
 ```
+
+Until 2.0.2 the package was published as `oralunal/phpclickhouse-laravel`. To
+switch an existing app to the new name, run:
+
+```sh
+composer remove oralunal/phpclickhouse-laravel --no-update
+composer require oralunal/laravel-clickhouse:^2.0.3
+```
+
+The namespaces are the same (`PhpClickHouseLaravel\...`), so your code needs no changes.
 
 The service provider is registered automatically via Laravel package
 auto-discovery. If you have auto-discovery disabled, add
