@@ -96,7 +96,19 @@ abstract class TestCase extends OrchestraTestCase
         ]);
 
         $app->afterResolving('migrator', function ($migrator) {
-            $migrator->path(__DIR__ . '/migrations');
+            foreach ($this->migratorPaths() as $path) {
+                $migrator->path($path);
+            }
         });
+    }
+
+    /**
+     * Migration paths registered on the migrator, as a package would with loadMigrationsFrom().
+     *
+     * @return string[]
+     */
+    protected function migratorPaths(): array
+    {
+        return [__DIR__ . '/migrations'];
     }
 }

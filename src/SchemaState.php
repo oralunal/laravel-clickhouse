@@ -200,6 +200,6 @@ class SchemaState extends BaseSchemaState
      */
     protected function quoteIdentifier(string $identifier): string
     {
-        return '`' . str_replace(['\\', '`'], ['\\\\', '\\`'], $identifier) . '`';
+        return SchemaGrammar::quoteIdentifier($identifier);
     }
 }

@@ -31,9 +31,16 @@ class Builder extends BaseBuilder
      */
     protected $connection = Connection::DEFAULT_NAME;
 
-    public function __construct(?Client $client = null)
+    /**
+     * @param Client|null $client Client to run queries with; defaults to the connection's active node.
+     * @param string|null $connection Connection name used for the client and query logging.
+     */
+    public function __construct(?Client $client = null, ?string $connection = null)
     {
         $this->grammar = new Grammar();
+        if ($connection !== null) {
+            $this->connection = $connection;
+        }
         $this->client = $client ?? $this->getThisClient();
     }
 
@@ -158,7 +165,7 @@ class Builder extends BaseBuilder
 
     public function newQuery(): self
     {
-        return new static($this->client);
+        return new static($this->client, $this->connection);
     }
 
     public function count(): int

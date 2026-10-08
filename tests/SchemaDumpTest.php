@@ -26,6 +26,8 @@ class SchemaDumpTest extends TestCase
 
         $this->workDir = sys_get_temp_dir() . '/phpch-schema-' . bin2hex(random_bytes(4));
         (new Filesystem())->ensureDirectoryExists($this->workDir . '/empty');
+        // Dumps of secondary connections are written under database_path().
+        $this->app->useDatabasePath($this->workDir . '/database');
 
         $this->defaultConnection = $this->app['config']->get('database.connections.clickhouse');
         foreach ([self::SOURCE, self::TARGET] as $database) {
@@ -63,6 +65,11 @@ class SchemaDumpTest extends TestCase
         (new Filesystem())->deleteDirectory($this->workDir);
 
         parent::tearDown();
+    }
+
+    protected function migratorPaths(): array
+    {
+        return [];
     }
 
     public function testDumpWritesPortableDdlInDependencyOrderWithMigrationData(): void
@@ -112,7 +119,6 @@ class SchemaDumpTest extends TestCase
 
     public function testPruneDeletesMigrationsDirectory(): void
     {
-        $this->app->useDatabasePath($this->workDir . '/database');
         (new Filesystem())->ensureDirectoryExists($this->workDir . '/database/migrations');
         touch($this->workDir . '/database/migrations/2024_01_01_000000_create_events_table.php');
 
@@ -161,6 +167,7 @@ class SchemaDumpTest extends TestCase
         Artisan::call('schema:dump', ['--database' => self::SOURCE, '--path' => $path]);
 
         $this->app['config']->set('database.connections.clickhouse-cluster.database', self::TARGET);
+        DB::purge('clickhouse-cluster');
         DB::connection('clickhouse-cluster')->getSchemaState()->load($path);
 
         foreach (self::NODES as $node) {

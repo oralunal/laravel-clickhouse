@@ -11,6 +11,17 @@ use Illuminate\Support\Fluent;
 class SchemaGrammar extends Grammar
 {
     /**
+     * Wrap a ClickHouse identifier (database, table or column name) in backticks.
+     *
+     * @param string $identifier
+     * @return string
+     */
+    public static function quoteIdentifier(string $identifier): string
+    {
+        return '`' . str_replace(['\\', '`'], ['\\\\', '\\`'], $identifier) . '`';
+    }
+
+    /**
      * Compile the query to determine if the given table exists.
      *
      * @param string|null $schema
