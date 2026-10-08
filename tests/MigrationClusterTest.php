@@ -4,6 +4,7 @@ namespace Tests;
 
 use ClickHouseDB\Statement;
 use Illuminate\Support\Facades\DB;
+use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Engine;
 use PhpClickHouseLaravel\Migration;
 use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree;
 
@@ -26,24 +27,56 @@ class MigrationClusterTest extends TestCase
      */
     public function testCreateMergeTreeOnClusterCreatesReplicatedTableOnAllNodes(): void
     {
+        $this->assertCreatedOnAllNodes('ReplicatedMergeTree', fn (MergeTree $table) => $table
+            ->ifNotExists()
+            ->columns([
+                $table->int64('f_int'),
+                $table->string('f_string'),
+            ])
+            ->orderBy('f_int'));
+    }
+
+    /**
+     * Setting the engine type in the callback must not drop the replication
+     * that createMergeTree() set up for the cluster.
+     */
+    public function testCreateMergeTreeOnClusterKeepsTheEngineTypeReplicated(): void
+    {
+        $this->assertCreatedOnAllNodes('ReplicatedReplacingMergeTree', fn (MergeTree $table) => $table
+            ->ifNotExists()
+            ->columns([
+                $table->int64('f_int'),
+                $table->uInt64('f_version'),
+            ])
+            ->orderBy('f_int')
+            ->engine(Engine::REPLACING_MERGE_TREE, 'f_version'));
+    }
+
+    /**
+     * Run createMergeTree() on the cluster connection and assert the table has
+     * the given engine on every node.
+     *
+     * @param string $engine
+     * @param callable(MergeTree): MergeTree $define
+     * @return void
+     */
+    private function assertCreatedOnAllNodes(string $engine, callable $define): void
+    {
         $migration = new class extends Migration {
             protected $connection = 'clickhouse-cluster';
 
             /** Unique per run so stale ZooKeeper replica metadata can never collide. */
             public string $table;
 
+            /** @var callable(MergeTree): MergeTree */
+            public $define;
+
             /** @var string[] DDL captured from createMergeTree via the write() override. */
             public static array $writtenSql = [];
 
             public function up(): void
             {
-                static::createMergeTree($this->table, fn (MergeTree $table) => $table
-                    ->ifNotExists()
-                    ->columns([
-                        $table->int64('f_int'),
-                        $table->string('f_string'),
-                    ])
-                    ->orderBy('f_int'));
+                static::createMergeTree($this->table, $this->define);
             }
 
             public function down(): void
@@ -58,6 +91,7 @@ class MigrationClusterTest extends TestCase
             }
         };
         $migration->table = 'examples6_' . bin2hex(random_bytes(4));
+        $migration->define = $define;
 
         try {
             $migration::$writtenSql = [];
@@ -69,16 +103,16 @@ class MigrationClusterTest extends TestCase
             ));
             $this->assertCount(1, $createSql);
             $this->assertStringContainsString("ON CLUSTER 'company_cluster'", $createSql[0]);
-            $this->assertStringContainsString('ReplicatedMergeTree', $createSql[0]);
+            $this->assertStringContainsString("ENGINE = {$engine}(", $createSql[0]);
 
             $engineSql = "SELECT engine FROM system.tables WHERE database = 'default' AND name = '{$migration->table}'";
             foreach (['clickhouse', 'clickhouse2'] as $connectionName) {
                 $rows = DB::connection($connectionName)->getClient()->select($engineSql)->rows();
                 $this->assertNotEmpty($rows, "{$migration->table} is missing on node '$connectionName'");
-                $this->assertStringStartsWith(
-                    'Replicated',
+                $this->assertSame(
+                    $engine,
                     $rows[0]['engine'],
-                    "{$migration->table} on node '$connectionName' is not replicated"
+                    "{$migration->table} on node '$connectionName' has the wrong engine"
                 );
             }
         } finally {

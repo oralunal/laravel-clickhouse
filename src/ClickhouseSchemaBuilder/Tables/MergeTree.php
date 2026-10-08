@@ -100,13 +100,21 @@ class MergeTree implements Element
     }
 
     /**
-     * @param Engine|string $engine Engine::REPLICATED_MERGE_TREE for example
+     * Set the table engine.
+     *
+     * A string only changes the engine type, so the current engine's replication
+     * settings are kept. On a cluster connection, where createMergeTree() makes
+     * the engine replicated, `->engine(Engine::REPLACING_MERGE_TREE, 'ver')` thus
+     * gives a ReplicatedReplacingMergeTree. An Engine instance is used as given.
+     *
+     * @param Engine|string $engine Engine::REPLACING_MERGE_TREE for example
+     * @param mixed ...$params Engine parameters, such as the version column
      * @return $this
      */
     public function engine(Engine|string $engine, ...$params): static
     {
         if (is_string($engine)) {
-            $engine = new Engine($engine);
+            $engine = (clone $this->engine)->setType($engine);
         }
         $this->engine = $engine
             ->params(...$params)
