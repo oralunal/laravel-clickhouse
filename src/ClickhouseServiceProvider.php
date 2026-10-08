@@ -68,6 +68,10 @@ class ClickhouseServiceProvider extends ServiceProvider
                 : base_path('config/clickhouse.php'),
         ], 'clickhouse-config');
 
+        if ($this->app->runningInConsole()) {
+            $this->commands([Console\InstallSkillsCommand::class]);
+        }
+
         $db = $this->app->make('db');
 
         $db->extend('clickhouse', function ($config, $name) {

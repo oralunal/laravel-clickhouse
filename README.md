@@ -15,6 +15,7 @@ this package's namespace; see [Credits](#credits).
 - Eloquent-flavored `BaseModel` (`create`, `save`, `insertBulk`, `insertAssoc`, `where`, pagination)
 - `PhpClickHouseLaravel\Migration` base class for ClickHouse DDL migrations (single-node and cluster)
 - `php artisan schema:dump [--prune]` support for squashing migrations into a schema file
+- `php artisan clickhouse:install-skills` installs coding-agent skills, such as `/plc-upgrade-1x-to-2x` for the 1.x → 2.x upgrade
 - Query builder integration with `settings()`, `chunk()`, and ClickHouse-specific grammar
 - Column casts (currently `boolean`) applied on insert
 - Model events: `creating`, `created`, `saved`
@@ -36,7 +37,7 @@ More: https://github.com/smi2/phpClickHouse#features
 
 ## Installation
 
-Upgrading from 1.x? See [UPGRADE.md](UPGRADE.md).
+Upgrading from 1.x? Run `php artisan clickhouse:install-skills`, then `/plc-upgrade-1x-to-2x` in your coding agent. To upgrade by hand, see [UPGRADE.md](UPGRADE.md).
 
 **1.** Install via composer:
 
