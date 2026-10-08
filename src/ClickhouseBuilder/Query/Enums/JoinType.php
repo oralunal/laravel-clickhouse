@@ -1,8 +1,8 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums;
 
-use PhpClickHouseLaravel\Enum\Enum;
+use Oralunal\LaravelClickHouse\Enum\Enum;
 
 /**
  * Join types.

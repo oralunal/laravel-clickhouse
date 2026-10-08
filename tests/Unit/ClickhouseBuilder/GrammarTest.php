@@ -3,17 +3,17 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
-use PhpClickHouseLaravel\ClickhouseBuilder\Exceptions\GrammarException;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Column;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Format;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Operator;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Expression;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\From;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Grammar;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Identifier;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\JoinClause;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Tuple;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\TwoElementsLogicExpression;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\GrammarException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Column;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\From;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Grammar;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Identifier;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Tuple;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\TwoElementsLogicExpression;
 
 class GrammarTest extends TestCase
 {

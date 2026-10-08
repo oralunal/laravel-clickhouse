@@ -1,9 +1,9 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\BaseBuilder as Builder;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Limit;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder as Builder;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Limit;
 
 trait LimitComponentCompiler
 {

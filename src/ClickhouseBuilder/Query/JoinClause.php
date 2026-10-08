@@ -1,13 +1,13 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
 use Closure;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\JoinStrict;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\JoinType;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Operator;
-use function PhpClickHouseLaravel\ClickhouseBuilder\array_flatten;
-use function PhpClickHouseLaravel\ClickhouseBuilder\tp;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinStrict;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinType;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\array_flatten;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\tp;
 
 class JoinClause
 {

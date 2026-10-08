@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel\Concerns;
+namespace Oralunal\LaravelClickHouse\Concerns;
 
 use ClickHouseDB\Statement;
 use Throwable;

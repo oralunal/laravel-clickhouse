@@ -3,7 +3,7 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Tuple;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Tuple;
 
 class TupleTest extends TestCase
 {

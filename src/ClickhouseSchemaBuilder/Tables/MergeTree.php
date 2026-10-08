@@ -1,14 +1,14 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables;
+namespace Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables;
 
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\AddsColumns;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Column;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Element;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Engine;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Exceptions\IncompleteClickHouseDDLException;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Syntax;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\TTL;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\AddsColumns;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Column;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Element;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Engine;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Exceptions\IncompleteClickHouseDDLException;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Syntax;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\TTL;
 
 class MergeTree implements Element
 {

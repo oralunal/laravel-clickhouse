@@ -3,12 +3,12 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\JoinStrict;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\JoinType;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Operator;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Identifier;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\JoinClause;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\TwoElementsLogicExpression;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinStrict;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinType;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Identifier;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\TwoElementsLogicExpression;
 
 class JoinClauseTest extends TestCase
 {

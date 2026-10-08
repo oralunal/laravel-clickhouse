@@ -3,7 +3,7 @@
 namespace Tests;
 
 use Illuminate\Support\Facades\DB;
-use PhpClickHouseLaravel\RawColumn;
+use Oralunal\LaravelClickHouse\RawColumn;
 use Tests\Models\Example;
 
 class UpdateTest extends TestCase

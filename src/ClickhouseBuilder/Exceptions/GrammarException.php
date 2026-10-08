@@ -1,8 +1,8 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Exceptions;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\JoinClause;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause;
 
 class GrammarException extends Exception
 {

@@ -3,7 +3,7 @@
 namespace Tests;
 
 use Illuminate\Support\Facades\DB;
-use PhpClickHouseLaravel\Builder;
+use Oralunal\LaravelClickHouse\Builder;
 use Tests\Models\Example;
 
 class BindingsTest extends TestCase

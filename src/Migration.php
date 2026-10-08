@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
 use ClickHouseDB\Statement;
 use ClickHouseDB\Transport\CurlerRequest;
 use Illuminate\Database\Migrations\Migration as BaseMigration;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree;
 use Symfony\Component\Console\Output\ConsoleOutput;
 
 class Migration extends BaseMigration

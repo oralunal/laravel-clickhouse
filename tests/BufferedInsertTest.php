@@ -3,7 +3,7 @@
 namespace Tests;
 
 use ClickHouseDB\Statement;
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 use Throwable;
 use Tests\Models\Example;
 use Tests\Models\Example3;

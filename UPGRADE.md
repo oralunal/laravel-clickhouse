@@ -1,6 +1,100 @@
 # Upgrade Guide
 
+## Upgrading from 2.x to 3.0
+
+PHP (`^8.5`) and Laravel (`^13`) requirements are unchanged. Still on 1.x?
+Follow [Upgrading from 1.x to 2.0](#upgrading-from-1x-to-20) first, then come
+back here.
+
+3.0 renames the package and its namespace:
+
+| | 2.x | 3.0 |
+| --- | --- | --- |
+| Composer package | `oralunal/phpclickhouse-laravel` | `oralunal/laravel-clickhouse` |
+| Namespace | `PhpClickHouseLaravel\` | `Oralunal\LaravelClickHouse\` |
+
+Nothing else changes. Class names below the namespace, the folder layout,
+configuration, the generated SQL and the behavior are the same as in 2.0.2, for
+example `PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree` becomes
+`Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree`. 2.0.2 is
+the last release of `oralunal/phpclickhouse-laravel`, and the package is
+abandoned. 3.0 conflicts with it, so Composer never installs both.
+
+### Let your coding agent do it
+
+1. Switch the package and install the skills:
+
+   ```sh
+   composer remove oralunal/phpclickhouse-laravel --no-update
+   composer require oralunal/laravel-clickhouse:^3.0 --with-all-dependencies
+   php artisan clickhouse:install-skills
+   ```
+
+2. In your agent, run:
+
+   ```text
+   /lc-upgrade-2x-to-3x
+   ```
+
+   If your agent does not offer skills as slash commands, ask it to
+   "upgrade phpclickhouse-laravel to laravel-clickhouse 3.x".
+
+The agent renames the namespace everywhere, refreshes Laravel's caches, checks
+the result, and reports how the test suite compares with the run before the
+upgrade. `clickhouse:install-skills` finds your agents from their project
+files (`.claude/`, `.cursor/`, `AGENTS.md`, …); pass `--agent=claude_code` and
+so on to choose them yourself.
+
+If `php artisan` fails after step 1 with a class-not-found error for a
+`PhpClickHouseLaravel\…` class, your app uses the 2.x namespace while it boots.
+Copy the skill by hand instead of running `clickhouse:install-skills`, for
+example:
+
+```sh
+mkdir -p .claude/skills
+cp -r vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-2x-to-3x .claude/skills/
+```
+
+### Or upgrade by hand
+
+1. Switch the package:
+
+   ```sh
+   composer remove oralunal/phpclickhouse-laravel --no-update
+   composer require oralunal/laravel-clickhouse:^3.0 --with-all-dependencies
+   ```
+
+   The `artisan` scripts that Composer runs may fail with a class-not-found
+   error until step 2 is done.
+
+2. Rename the namespace in your code, migrations, config and tests. This keeps
+   the escaping of strings such as `'PhpClickHouseLaravel\\BaseModel'`:
+
+   ```sh
+   grep -rlI 'PhpClickHouseLaravel' . \
+       --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=storage \
+       --exclude-dir=.git --exclude-dir=cache --exclude=composer.lock \
+     | xargs perl -pi -e 's/PhpClickHouseLaravel(\\+)/Oralunal$1LaravelClickHouse$1/g'
+   ```
+
+   Then search for `PhpClickHouseLaravel` again and check what is left, such
+   as mentions in comments.
+
+3. Run `php artisan package:discover` and `php artisan optimize:clear`. If they
+   fail with `Class "PhpClickHouseLaravel\ClickhouseServiceProvider" not found`,
+   delete `bootstrap/cache/packages.php` and `bootstrap/cache/services.php` and
+   run `php artisan package:discover` again.
+
+4. Values serialized with the 2.x class names cannot be unserialized by 3.0:
+   cache entries, queued jobs and sessions that hold objects of the package's
+   classes, such as `RawColumn` or the builder enums. If your app stores such
+   values, let the queues drain before you deploy and clear the cache
+   afterwards.
+
 ## Upgrading from 1.x to 2.0
+
+These steps take you to `oralunal/phpclickhouse-laravel` 2.0.2. Continue with
+[Upgrading from 2.x to 3.0](#upgrading-from-2x-to-30) afterwards.
 
 PHP (`^8.5`) and Laravel (`^13`) requirements are unchanged.
 

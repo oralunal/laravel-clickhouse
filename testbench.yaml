@@ -1,7 +1,7 @@
 laravel: '@testbench'
 
 providers:
-  - PhpClickHouseLaravel\ClickhouseServiceProvider
+  - Oralunal\LaravelClickHouse\ClickhouseServiceProvider
   - Workbench\App\Providers\WorkbenchServiceProvider
 
 env:

@@ -1,9 +1,9 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Operator;
-use function PhpClickHouseLaravel\ClickhouseBuilder\tp;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\tp;
 
 class TwoElementsLogicExpression
 {

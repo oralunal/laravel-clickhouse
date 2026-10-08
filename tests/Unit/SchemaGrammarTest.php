@@ -7,7 +7,7 @@ namespace Tests\Unit;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Fluent;
-use PhpClickHouseLaravel\SchemaGrammar;
+use Oralunal\LaravelClickHouse\SchemaGrammar;
 use PHPUnit\Framework\TestCase;
 
 class SchemaGrammarTest extends TestCase

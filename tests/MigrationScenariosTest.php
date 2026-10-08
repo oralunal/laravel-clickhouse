@@ -81,7 +81,7 @@ class MigrationScenariosTest extends TestCase
         $events = <<<'PHP'
             <?php
 
-            return new class extends \PhpClickHouseLaravel\Migration {
+            return new class extends \Oralunal\LaravelClickHouse\Migration {
                 protected $connection = 'phpch_scenario';
 
                 public function up(): void

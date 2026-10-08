@@ -1,25 +1,25 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Exceptions\GrammarException;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Enums\Format;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\ArrayJoinComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\ColumnsComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\FormatComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\FromComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\GroupsComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\HavingsComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\JoinComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\LimitByComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\LimitComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\OrdersComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\PreWheresComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\SampleComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\TupleCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\TwoElementsLogicExpressionsCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\UnionsComponentCompiler;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits\WheresComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\GrammarException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\ArrayJoinComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\ColumnsComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\FormatComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\FromComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\GroupsComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\HavingsComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\JoinComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\LimitByComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\LimitComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\OrdersComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\PreWheresComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\SampleComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\TupleCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\TwoElementsLogicExpressionsCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\UnionsComponentCompiler;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits\WheresComponentCompiler;
 
 class Grammar
 {

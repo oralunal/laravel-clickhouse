@@ -2,15 +2,15 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
 use ClickHouseDB\Client;
 use ClickHouseDB\Statement;
 use Closure;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
-use PhpClickHouseLaravel\Exceptions\QueryException;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\BaseBuilder;
+use Oralunal\LaravelClickHouse\Exceptions\QueryException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder;
 
 class Builder extends BaseBuilder
 {

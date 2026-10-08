@@ -1,10 +1,10 @@
 <?php
 
-namespace PhpClickHouseLaravel\ClickhouseBuilder\Query\Traits;
+namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits;
 
-use PhpClickHouseLaravel\ClickhouseBuilder\Exceptions\GrammarException;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\BaseBuilder as Builder;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\JoinClause;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\GrammarException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder as Builder;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause;
 
 trait JoinComponentCompiler
 {

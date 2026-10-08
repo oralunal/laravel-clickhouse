@@ -1,12 +1,12 @@
 {
-    "name": "oralunal/phpclickhouse-laravel",
+    "name": "oralunal/laravel-clickhouse",
     "description": "Adapter of the most popular library https://github.com/smi2/phpClickHouse to Laravel",
     "keywords": [
         "php",
         "laravel",
         "clickhouse"
     ],
-    "homepage": "https://github.com/oralunal/phpclickhouse-laravel",
+    "homepage": "https://github.com/oralunal/laravel-clickhouse",
     "type": "library",
     "license": "MIT",
     "authors": [
@@ -26,6 +26,9 @@
         "smi2/phpclickhouse": "^1.26",
         "laravel/framework": "^13"
     },
+    "conflict": {
+        "oralunal/phpclickhouse-laravel": "*"
+    },
     "require-dev": {
         "orchestra/testbench": "^11.0",
         "phpunit/phpunit": "^11.0",
@@ -33,7 +36,7 @@
     },
     "autoload": {
         "psr-4": {
-            "PhpClickHouseLaravel\\": "src/"
+            "Oralunal\\LaravelClickHouse\\": "src/"
         },
         "files": [
             "src/ClickhouseBuilder/functions.php"
@@ -50,7 +53,7 @@
     "extra": {
         "laravel": {
             "providers": [
-                "PhpClickHouseLaravel\\ClickhouseServiceProvider"
+                "Oralunal\\LaravelClickHouse\\ClickhouseServiceProvider"
             ]
         }
     },

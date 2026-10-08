@@ -4,12 +4,12 @@ namespace Tests\Console;
 
 use Illuminate\Filesystem\Filesystem;
 use Orchestra\Testbench\TestCase;
-use PhpClickHouseLaravel\ClickhouseServiceProvider;
-use PhpClickHouseLaravel\Console\InstallSkillsCommand;
+use Oralunal\LaravelClickHouse\ClickhouseServiceProvider;
+use Oralunal\LaravelClickHouse\Console\InstallSkillsCommand;
 
 class InstallSkillsCommandTest extends TestCase
 {
-    private const SKILL = 'plc-upgrade-1x-to-2x';
+    private const SKILLS = ['lc-upgrade-2x-to-3x', 'plc-upgrade-1x-to-2x'];
 
     private string $project;
 
@@ -43,9 +43,11 @@ class InstallSkillsCommandTest extends TestCase
         $this->files->ensureDirectoryExists($this->project . '/.cursor');
 
         $this->artisan('clickhouse:install-skills')
-            ->expectsOutputToContain('.claude/skills/' . self::SKILL)
-            ->expectsOutputToContain('.cursor/skills/' . self::SKILL)
-            ->expectsOutputToContain('/plc-upgrade-1x-to-2x')
+            ->expectsOutputToContain('.claude/skills/lc-upgrade-2x-to-3x')
+            ->expectsOutputToContain('.claude/skills/plc-upgrade-1x-to-2x')
+            ->expectsOutputToContain('.cursor/skills/lc-upgrade-2x-to-3x')
+            ->expectsOutputToContain('.cursor/skills/plc-upgrade-1x-to-2x')
+            ->expectsOutputToContain('/lc-upgrade-2x-to-3x to upgrade from 2.x to 3.x')
             ->assertSuccessful();
 
         $this->assertInstalled('.claude/skills');
@@ -65,7 +67,7 @@ class InstallSkillsCommandTest extends TestCase
 
     public function testReinstallReplacesTheSkillDirectory(): void
     {
-        $stale = $this->project . '/.claude/skills/' . self::SKILL . '/stale.md';
+        $stale = $this->project . '/.claude/skills/lc-upgrade-2x-to-3x/stale.md';
         $this->files->ensureDirectoryExists(dirname($stale));
         $this->files->put($stale, 'old');
 
@@ -122,9 +124,11 @@ class InstallSkillsCommandTest extends TestCase
 
     private function assertInstalled(string $directory): void
     {
-        $this->assertFileEquals(
-            dirname(__DIR__, 2) . '/resources/skills/' . self::SKILL . '/SKILL.md',
-            $this->project . "/{$directory}/" . self::SKILL . '/SKILL.md'
-        );
+        foreach (self::SKILLS as $skill) {
+            $this->assertFileEquals(
+                dirname(__DIR__, 2) . "/resources/skills/{$skill}/SKILL.md",
+                $this->project . "/{$directory}/{$skill}/SKILL.md"
+            );
+        }
     }
 }

@@ -3,7 +3,7 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Identifier;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Identifier;
 
 class IdentifierTest extends TestCase
 {

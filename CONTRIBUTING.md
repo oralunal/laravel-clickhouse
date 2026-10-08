@@ -75,7 +75,7 @@ The `[Unreleased]` section accumulates between releases.
 ### What belongs in it
 
 The filter is: **does this change anything for someone who runs
-`composer require oralunal/phpclickhouse-laravel`?**
+`composer require oralunal/laravel-clickhouse`?**
 
 Include:
 

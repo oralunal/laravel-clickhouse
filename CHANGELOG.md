@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+3.0 renames the package and its namespace. Nothing else changes for your code. The quickest way to upgrade is `/lc-upgrade-2x-to-3x`; see [UPGRADE.md](UPGRADE.md).
+
+### Changed
+
+- **Breaking:** The package is now published as `oralunal/laravel-clickhouse`, and the GitHub repository is `oralunal/laravel-clickhouse`. 2.0.2 is the last release of `oralunal/phpclickhouse-laravel`; that package is abandoned and its existing releases stay installable. `oralunal/laravel-clickhouse` conflicts with it, so Composer never installs both.
+- **Breaking:** The namespace moves from `PhpClickHouseLaravel\` to `Oralunal\LaravelClickHouse\`, including the bundled `ClickhouseBuilder`, `ClickhouseSchemaBuilder` and `Enum` and the `raw()`, `tp()` and `array_flatten()` helpers. Class names below the namespace, configuration, the generated SQL and the behavior are unchanged. Values serialized with the 2.x class names, such as cached or queued `RawColumn` objects, cannot be unserialized by 3.0.
+
+### Added
+
+- The `lc-upgrade-2x-to-3x` coding-agent skill, installed by `php artisan clickhouse:install-skills`. Running `/lc-upgrade-2x-to-3x` makes the agent switch the package, rename the namespace across the application, refresh Laravel's caches and verify the result. `/plc-upgrade-1x-to-2x` stays for 1.x applications and now points to it as the next step.
+
 ### Fixed
 
 - On a `cluster` connection, `Migration::createMergeTree()` created a table that was not replicated when the callback set the engine by name, for example `->engine(Engine::REPLACING_MERGE_TREE, 'version')`. The table became `ReplacingMergeTree` instead of `ReplicatedReplacingMergeTree`, so its rows were not replicated between the nodes. Setting the engine by name now keeps the replication. An `Engine` instance passed to `engine()` is still used as given. Existing tables are not changed, but wherever the migration runs again (a fresh install, CI, `migrate:fresh`) it now creates the replicated table.
@@ -159,13 +170,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Forked from [glushkovds/phpclickhouse-laravel](https://github.com/glushkovds/phpclickhouse-laravel) at 2.5.2.
 - Minimum PHP 8.5, Laravel 13+ only.
 
-[Unreleased]: https://github.com/oralunal/phpclickhouse-laravel/compare/v2.0.2...HEAD
-[2.0.2]: https://github.com/oralunal/phpclickhouse-laravel/compare/v2.0.1...v2.0.2
-[2.0.1]: https://github.com/oralunal/phpclickhouse-laravel/compare/v2.0.0...v2.0.1
-[2.0.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.5.0...v2.0.0
-[1.5.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.4.0...v1.5.0
-[1.4.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/oralunal/phpclickhouse-laravel/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/oralunal/phpclickhouse-laravel/releases/tag/v1.0.0
+[Unreleased]: https://github.com/oralunal/laravel-clickhouse/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/oralunal/laravel-clickhouse/compare/v2.0.1...v2.0.2
+[2.0.1]: https://github.com/oralunal/laravel-clickhouse/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.5.0...v2.0.0
+[1.5.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/oralunal/laravel-clickhouse/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/oralunal/laravel-clickhouse/releases/tag/v1.0.0

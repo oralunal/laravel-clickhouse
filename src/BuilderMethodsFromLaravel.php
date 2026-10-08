@@ -1,9 +1,9 @@
 <?php
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
 use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Expression;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
 
 trait BuilderMethodsFromLaravel
 {

@@ -1,9 +1,9 @@
 <?php
 
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Expression;
-use PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Expression;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree;
 
-return new class extends \PhpClickHouseLaravel\Migration {
+return new class extends \Oralunal\LaravelClickHouse\Migration {
     /**
      * Run the migrations.
      *

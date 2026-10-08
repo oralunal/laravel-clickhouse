@@ -3,10 +3,10 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Expression;
-use function PhpClickHouseLaravel\ClickhouseBuilder\tp;
-use function PhpClickHouseLaravel\ClickhouseBuilder\array_flatten;
-use function PhpClickHouseLaravel\ClickhouseBuilder\raw;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\tp;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\array_flatten;
+use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
 
 class FunctionsTest extends TestCase
 {

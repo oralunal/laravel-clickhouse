@@ -2,7 +2,7 @@
 
 namespace Tests\Models;
 
-use PhpClickHouseLaravel\BaseModel;
+use Oralunal\LaravelClickHouse\BaseModel;
 
 /**
  * @property string $f_string

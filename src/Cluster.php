@@ -1,6 +1,6 @@
 <?php
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
 use ClickHouseDB\Client;
 use ClickHouseDB\Exception\TransportException;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
 use ClickHouseDB\Exception\DatabaseException;
 use Illuminate\Database\QueryException;

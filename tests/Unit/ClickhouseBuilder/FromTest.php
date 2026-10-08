@@ -3,8 +3,8 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\Expression;
-use PhpClickHouseLaravel\ClickhouseBuilder\Query\From;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\From;
 
 class FromTest extends TestCase
 {

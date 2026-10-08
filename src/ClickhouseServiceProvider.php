@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
 use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Database\Console\Migrations\FreshCommand;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace PhpClickHouseLaravel;
+namespace Oralunal\LaravelClickHouse;
 
 use Illuminate\Database\Connection as BaseConnection;
 use Illuminate\Database\Schema\SchemaState as BaseSchemaState;

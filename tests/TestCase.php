@@ -4,7 +4,7 @@ namespace Tests;
 
 use Illuminate\Support\Facades\Artisan;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
-use PhpClickHouseLaravel\ClickhouseServiceProvider;
+use Oralunal\LaravelClickHouse\ClickhouseServiceProvider;
 
 abstract class TestCase extends OrchestraTestCase
 {

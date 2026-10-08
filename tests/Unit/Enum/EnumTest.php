@@ -321,9 +321,9 @@ class EnumTest extends \PHPUnit\Framework\TestCase
     {
         // split string for Pretty CI: "Line exceeds 120 characters"
         $bin = '4f3a32373a2254657374735c556e69745c456e756d5c456e756d46697874757265'.
-            '223a323a7b733a383a22002a0076616c7565223b733a333a22666f6f223b733a33'.
-            '353a2200506870436c69636b486f7573654c61726176656c5c456e756d5c456e75'.
-            '6d006b6579223b733a333a22464f4f223b7d';
+            '223a323a7b733a383a22002a0076616c7565223b733a333a22666f6f223b733a34'.
+            '313a22004f72616c756e616c5c4c61726176656c436c69636b486f7573655c456e'.
+            '756d5c456e756d006b6579223b733a333a22464f4f223b7d';
 
         $this->assertEquals($bin, bin2hex(serialize(EnumFixture::FOO())));
     }
@@ -346,9 +346,9 @@ class EnumTest extends \PHPUnit\Framework\TestCase
     {
         // split string for Pretty CI: "Line exceeds 120 characters"
         $bin = '4f3a32373a2254657374735c556e69745c456e756d5c456e756d46697874757265'.
-            '223a323a7b733a383a22002a0076616c7565223b733a333a22666f6f223b733a33'.
-            '353a2200506870436c69636b486f7573654c61726176656c5c456e756d5c456e75'.
-            '6d006b6579223b733a333a22464f4f223b7d';
+            '223a323a7b733a383a22002a0076616c7565223b733a333a22666f6f223b733a34'.
+            '313a22004f72616c756e616c5c4c61726176656c436c69636b486f7573655c456e'.
+            '756d5c456e756d006b6579223b733a333a22464f4f223b7d';
 
         /* @var $value EnumFixture */
         $value = unserialize(pack('H*', $bin));
