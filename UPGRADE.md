@@ -4,6 +4,9 @@
 
 PHP (`^8.5`) and Laravel (`^13`) requirements are unchanged.
 
+Upgrade to **2.0.1 or later**. 2.0.0 was tagged before the schema builder and
+the enum base class were bundled.
+
 2.0 bundles the libraries this package used to pull in:
 
 - the query builder (`oralunal/clickhouse-builder`);
@@ -37,7 +40,7 @@ other agents that read `AGENTS.md`. Nothing else needs to be installed.
 1. Update the package:
 
    ```sh
-   composer require oralunal/phpclickhouse-laravel:^2.0 --with-all-dependencies
+   composer require oralunal/phpclickhouse-laravel:^2.0.1 --with-all-dependencies
    ```
 
 2. Install the skill:
@@ -91,7 +94,7 @@ grep -rnE 'Tinderbox\\ClickhouseBuilder|PhpClickHouseSchemaBuilder|MyCLabs\\Enum
 ### 1. Update the dependency
 
 ```sh
-composer require oralunal/phpclickhouse-laravel:^2.0
+composer require oralunal/phpclickhouse-laravel:^2.0.1
 ```
 
 If your `composer.json` lists `oralunal/clickhouse-builder` or

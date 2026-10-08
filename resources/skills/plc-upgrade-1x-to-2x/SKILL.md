@@ -38,7 +38,9 @@ is unclear.
 ## Step 1: Assess
 
 1. Read `composer.json` and run `composer show oralunal/phpclickhouse-laravel`
-   to see the required and installed versions.
+   to see the required and installed versions. The target is 2.0.1 or later.
+   2.0.0 lacks the bundled schema builder, so treat an installed 2.0.0 like
+   1.x and do every step.
 2. Check `git status`. If the tree has uncommitted changes that are not yours,
    tell the user and suggest committing them or working on a new branch before
    you continue.
@@ -76,7 +78,7 @@ is unclear.
 1. Set the constraint and update:
 
    ```bash
-   composer require oralunal/phpclickhouse-laravel:^2.0 --with-all-dependencies
+   composer require oralunal/phpclickhouse-laravel:^2.0.1 --with-all-dependencies
    ```
 
 2. Remove these packages if `composer.json` requires them directly. The bundled
