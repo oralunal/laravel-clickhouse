@@ -73,6 +73,13 @@ npm run build   # Build to docs/.vitepress/dist
 
 Write the documentation in [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/): short sentences, active voice, one instruction in each sentence.
 
+### Versions
+
+The root of `docs/` has the documentation of the latest version. `docs/3.x`, `docs/2.x` and `docs/1.x` have the earlier versions. Each version is a locale of VitePress in `docs/.vitepress/config.mts`, with its own menu, sidebar and search index.
+
+- Change the pages of an earlier version only to correct them.
+- Before the next major release, copy the pages of the latest version to a directory such as `docs/4.x`. Add the version to `VERSIONS` in `config.mts`. Then change the root pages for the new version.
+
 ### Public API
 
 `tests/Unit/Documentation/DocumentationTest.php` makes sure that the documentation covers the public API:
