@@ -65,4 +65,27 @@ class TwoElementsLogicExpressionTest extends TestCase
         $this->assertEquals('=', $expression->getOperator());
         $this->assertEquals(Operator::OR, $expression->getConcatenationOperator());
     }
+
+    public function testOperatorsAreReadInAnyLetterCase()
+    {
+        $expression = (new TwoElementsLogicExpression($this->getBuilder()))
+            ->operator('like')
+            ->concatOperator('or');
+
+        $this->assertSame(Operator::LIKE, $expression->getOperator()->getValue());
+        $this->assertSame(Operator::OR, $expression->getConcatenationOperator()->getValue());
+
+        $this->assertSame(Operator::NOT_ILIKE, $expression->operator('Not ILike')->getOperator()->getValue());
+        $this->assertSame(Operator::AND, $expression->concatOperator('And')->getConcatenationOperator()->getValue());
+        $this->assertSame(Operator::LAMBDA, $expression->operator('->')->getOperator()->getValue());
+        $this->assertSame(Operator::EQUALS, $expression->operator('=')->getOperator()->getValue());
+    }
+
+    public function testAnUnknownOperatorIsNamedAsItWasGiven()
+    {
+        $this->expectException(\UnexpectedValueException::class);
+        $this->expectExceptionMessage("Value 'xor' is not part of the enum");
+
+        (new TwoElementsLogicExpression($this->getBuilder()))->concatOperator('xor');
+    }
 }

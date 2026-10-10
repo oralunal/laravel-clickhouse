@@ -20,6 +20,14 @@ class Engine implements Element
     ) {
     }
 
+    /**
+     * Compile the engine. A replicated engine gets the ZooKeeper path
+     * '/clickhouse/tables/<database>.<table>' and the replica name as its
+     * first two parameters, written as escaped string literals. The engine
+     * parameters, such as a version column, are written as given.
+     *
+     * @return string
+     */
     public function compile(): string
     {
         $this->validate();
@@ -28,8 +36,8 @@ class Engine implements Element
         }
         $params = array_merge(
             [
-                "'/clickhouse/tables/$this->dbName.$this->tableName'",
-                "'$this->replicaName'",
+                Syntax::quoteString("/clickhouse/tables/$this->dbName.$this->tableName"),
+                Syntax::quoteString($this->replicaName),
             ],
             $this->params,
         );

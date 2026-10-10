@@ -3,6 +3,7 @@
 namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums;
 
 use Oralunal\LaravelClickHouse\Enum\Enum;
+use UnexpectedValueException;
 
 /**
  * Formats.
@@ -14,6 +15,7 @@ final class Format extends Enum
     public const CSV_WITH_NAMES = 'CSVWithNames';
     public const JSON = 'JSON';
     public const JSON_COMPACT = 'JSONCompact';
+    public const JSON_COMPACT_EACH_ROW = 'JSONCompactEachRow';
     public const JSON_EACH_ROW = 'JSONEachRow';
     public const NATIVE = 'Native';
     public const NULL = 'Null';
@@ -34,4 +36,25 @@ final class Format extends Enum
     public const VERTICAL = 'Vertical';
     public const XML = 'XML';
     public const TSV = 'TSV';
+
+    /**
+     * Get the format with this name in any letter case, as ClickHouse matches format names:
+     * Format::named('jsoneachrow') returns the JSONEachRow format, whose value is the canonical name.
+     *
+     * @param string $name
+     *
+     * @throws UnexpectedValueException When the enum has no format of that name
+     *
+     * @return self
+     */
+    public static function named(string $name): self
+    {
+        foreach (static::toArray() as $value) {
+            if (strcasecmp($value, $name) === 0) {
+                return new self($value);
+            }
+        }
+
+        throw new UnexpectedValueException("Value '{$name}' is not part of the enum ".static::class);
+    }
 }

@@ -18,12 +18,15 @@ final class Operator extends Enum
     public const LIKE = 'LIKE';
     public const ILIKE = 'ILIKE';
     public const NOT_LIKE = 'NOT LIKE';
+    public const NOT_ILIKE = 'NOT ILIKE';
     public const BETWEEN = 'BETWEEN';
     public const NOT_BETWEEN = 'NOT BETWEEN';
     public const IN = 'IN';
     public const NOT_IN = 'NOT IN';
     public const GLOBAL_IN = 'GLOBAL IN';
     public const GLOBAL_NOT_IN = 'GLOBAL NOT IN';
+    public const IS_NULL = 'IS NULL';
+    public const IS_NOT_NULL = 'IS NOT NULL';
     public const AND = 'AND';
     public const OR = 'OR';
     public const CONCAT = '||';

@@ -23,6 +23,7 @@ class MigrationScenariosTest extends TestCase
 
     private const USERS_MIGRATION = '2024_01_01_000000_create_users_table';
     private const EVENTS_MIGRATION = '2024_01_02_000000_create_events_table';
+    private const SESSIONS_MIGRATION = '2024_01_03_000000_create_sessions_table';
 
     private string $workDir;
 
@@ -224,6 +225,54 @@ class MigrationScenariosTest extends TestCase
         $this->assertSame(['events', 'migrations'], $this->analyticsTables());
         $this->assertSame(0, $this->eventCount());
         $this->assertSame([self::EVENTS_MIGRATION], $this->clickhouseMigrations(self::ANALYTICS));
+    }
+
+    /**
+     * Laravel's migration repository on a ClickHouse connection runs through the package Builder: the ran migrations
+     * with pluck(), the next batch with max(), the batch of each migration with pluck() by key, and the records with
+     * insert().
+     */
+    public function testPrimaryUnderOtherNameRecordsEachBatchAndShowsTheStatus(): void
+    {
+        $arguments = [
+            '--database' => self::ANALYTICS,
+            '--path' => $this->workDir . '/clickhouse-only',
+            '--realpath' => true,
+        ];
+        $this->artisan('migrate', $arguments)->assertSuccessful();
+
+        $this->files->put($this->workDir . '/clickhouse-only/' . self::SESSIONS_MIGRATION . '.php', <<<'PHP'
+            <?php
+
+            return new class extends \Oralunal\LaravelClickHouse\Migration {
+                protected $connection = 'phpch_scenario';
+
+                public function up(): void
+                {
+                    static::write('CREATE TABLE sessions (id UInt64) ENGINE = MergeTree ORDER BY id');
+                }
+
+                public function down(): void
+                {
+                    static::write('DROP TABLE IF EXISTS sessions');
+                }
+            };
+            PHP);
+        $this->artisan('migrate', $arguments)->assertSuccessful();
+
+        $this->assertSame(
+            [[self::EVENTS_MIGRATION, 1], [self::SESSIONS_MIGRATION, 2]],
+            array_map(
+                fn (array $row): array => [$row['migration'], (int) $row['batch']],
+                $this->clickhouse(self::ANALYTICS)->select('SELECT migration, batch FROM migrations ORDER BY migration')->rows()
+            )
+        );
+        $this->artisan('migrate:status', $arguments)
+            ->expectsOutputToContain('[1] Ran')
+            ->expectsOutputToContain('[2] Ran')
+            ->assertSuccessful();
+        $this->artisan('migrate', $arguments)->expectsOutputToContain('Nothing to migrate')->assertSuccessful();
+        $this->assertSame(['events', 'migrations', 'sessions'], $this->analyticsTables());
     }
 
     public function testWipeDropsObjectsThatDependOnEachOther(): void
