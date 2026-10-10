@@ -105,6 +105,7 @@ class LaravelCompatibilityTest extends TestCase
             'whereBetween with a keyed list' => [fn (Builder $q) => $q->whereBetween('id', ['from' => 1, 'to' => 2]), [1, 2]],
             'whereBetween with three values' => [fn (Builder $q) => $q->whereBetween('id', [2, 3, 1]), [2, 3]],
             'whereBetweenColumns with a keyed list' => [fn (Builder $q) => $q->whereBetweenColumns('a', ['min' => 'a', 'max' => 'b']), [1, 2]],
+            'whereNotBetweenColumns' => [fn (Builder $q) => $q->whereNotBetweenColumns('a', ['a', 'b']), [3]],
             'whereColumn' => [fn (Builder $q) => $q->whereColumn('a', 'b'), [2]],
             'whereColumn with an operator' => [fn (Builder $q) => $q->whereColumn('a', '<', 'b'), [1]],
             'whereColumn with qualified names' => [fn (Builder $q) => $q->whereColumn('lc_events.a', '>', 'lc_events.b'), [3]],

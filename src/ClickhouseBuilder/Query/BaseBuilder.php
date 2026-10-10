@@ -3068,6 +3068,37 @@ abstract class BaseBuilder
     }
 
     /**
+     * Add where statement with NOT BETWEEN simulation, but with column names as value.
+     *
+     * The list is read as whereBetweenColumns() reads it.
+     *
+     * @param        $column
+     * @param array  $values
+     * @param string $boolean
+     *
+     * @throws InvalidArgumentException when the list has fewer than two values
+     *
+     * @return static
+     */
+    public function whereNotBetweenColumns($column, array $values, $boolean = Operator::AND)
+    {
+        return $this->whereBetweenColumns($column, $values, $boolean, true);
+    }
+
+    /**
+     * Add where statement with NOT BETWEEN simulation, but with column names as value and OR operator.
+     *
+     * @param       $column
+     * @param array $values
+     *
+     * @return static
+     */
+    public function orWhereNotBetweenColumns($column, array $values)
+    {
+        return $this->whereNotBetweenColumns($column, $values, Operator::OR);
+    }
+
+    /**
      * Add where statement with BETWEEN simulation and OR operator.
      *
      * @param       $column
@@ -3915,6 +3946,37 @@ abstract class BaseBuilder
     public function orHavingBetweenColumns($column, array $values)
     {
         return $this->havingBetweenColumns($column, $values, Operator::OR);
+    }
+
+    /**
+     * Add having statement with NOT BETWEEN simulation, but with column names as value.
+     *
+     * The list is read as havingBetweenColumns() reads it.
+     *
+     * @param        $column
+     * @param array  $values
+     * @param string $boolean
+     *
+     * @throws InvalidArgumentException when the list has fewer than two values
+     *
+     * @return static
+     */
+    public function havingNotBetweenColumns($column, array $values, $boolean = Operator::AND)
+    {
+        return $this->havingBetweenColumns($column, $values, $boolean, true);
+    }
+
+    /**
+     * Add having statement with NOT BETWEEN simulation, but with column names as value and OR operator.
+     *
+     * @param       $column
+     * @param array $values
+     *
+     * @return static
+     */
+    public function orHavingNotBetweenColumns($column, array $values)
+    {
+        return $this->havingNotBetweenColumns($column, $values, Operator::OR);
     }
 
     /**

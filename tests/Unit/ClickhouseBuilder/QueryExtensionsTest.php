@@ -2060,6 +2060,8 @@ class QueryExtensionsTest extends TestCase
             'orWhereNotBetween' => [fn (TestBuilder $q, array $v) => $where($q)->orWhereNotBetween('a', $v), 'WHERE `id` = 1 OR NOT ( `a` BETWEEN %s AND %s )', false],
             'whereBetweenColumns' => [fn (TestBuilder $q, array $v) => $q->whereBetweenColumns('a', $v), 'WHERE `a` BETWEEN %s AND %s', true],
             'orWhereBetweenColumns' => [fn (TestBuilder $q, array $v) => $where($q)->orWhereBetweenColumns('a', $v), 'WHERE `id` = 1 OR `a` BETWEEN %s AND %s', true],
+            'whereNotBetweenColumns' => [fn (TestBuilder $q, array $v) => $q->whereNotBetweenColumns('a', $v), 'WHERE NOT ( `a` BETWEEN %s AND %s )', true],
+            'orWhereNotBetweenColumns' => [fn (TestBuilder $q, array $v) => $where($q)->orWhereNotBetweenColumns('a', $v), 'WHERE `id` = 1 OR NOT ( `a` BETWEEN %s AND %s )', true],
             'preWhereBetween' => [fn (TestBuilder $q, array $v) => $q->preWhereBetween('a', $v), 'PREWHERE `a` BETWEEN %s AND %s', false],
             'orPreWhereBetween' => [fn (TestBuilder $q, array $v) => $preWhere($q)->orPreWhereBetween('a', $v), 'PREWHERE `id` = 1 OR `a` BETWEEN %s AND %s', false],
             'preWhereNotBetween' => [fn (TestBuilder $q, array $v) => $q->preWhereNotBetween('a', $v), 'PREWHERE NOT ( `a` BETWEEN %s AND %s )', false],
@@ -2074,6 +2076,8 @@ class QueryExtensionsTest extends TestCase
             'orHavingNotBetween' => [fn (TestBuilder $q, array $v) => $having($q)->orHavingNotBetween('a', $v), 'GROUP BY `a` HAVING `id` = 1 OR NOT ( `a` BETWEEN %s AND %s )', false],
             'havingBetweenColumns' => [fn (TestBuilder $q, array $v) => $q->groupBy('a')->havingBetweenColumns('a', $v), 'GROUP BY `a` HAVING `a` BETWEEN %s AND %s', true],
             'orHavingBetweenColumns' => [fn (TestBuilder $q, array $v) => $having($q)->orHavingBetweenColumns('a', $v), 'GROUP BY `a` HAVING `id` = 1 OR `a` BETWEEN %s AND %s', true],
+            'havingNotBetweenColumns' => [fn (TestBuilder $q, array $v) => $q->groupBy('a')->havingNotBetweenColumns('a', $v), 'GROUP BY `a` HAVING NOT ( `a` BETWEEN %s AND %s )', true],
+            'orHavingNotBetweenColumns' => [fn (TestBuilder $q, array $v) => $having($q)->orHavingNotBetweenColumns('a', $v), 'GROUP BY `a` HAVING `id` = 1 OR NOT ( `a` BETWEEN %s AND %s )', true],
         ];
     }
 
