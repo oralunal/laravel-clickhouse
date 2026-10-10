@@ -64,13 +64,15 @@ abstract class TestCase extends OrchestraTestCase
             'retries'  => 0,
         ]);
 
-        $config->set('database.connections.clickhouse-cluster', [
+        // Without the test cluster's config (CLICKHOUSE_CLUSTER_AVAILABLE off, as in CI's service containers) the
+        // servers define no company_cluster, so the connection leaves cluster_name out and writes to each node,
+        // as 3.0.0 did: an ON CLUSTER statement, such as the DROPs of migrate:fresh, would fail there.
+        $config->set('database.connections.clickhouse-cluster', array_merge([
             'driver'  => 'clickhouse',
             'cluster' => [
                 ['host' => env('CLICKHOUSE_HOST', '127.0.0.1'),  'port' => env('CLICKHOUSE_PORT', '18123')],
                 ['host' => env('CLICKHOUSE2_HOST', '127.0.0.1'), 'port' => env('CLICKHOUSE2_PORT', '18124')],
             ],
-            'cluster_name'   => 'company_cluster',
             'database'       => 'default',
             'username'       => 'default',
             'password'       => '',
@@ -78,7 +80,7 @@ abstract class TestCase extends OrchestraTestCase
             'timeout_query'  => 10,
             'https'          => false,
             'retries'        => 0,
-        ]);
+        ], env('CLICKHOUSE_CLUSTER_AVAILABLE') ? ['cluster_name' => 'company_cluster'] : []));
 
         $config->set('database.connections.problem-clickhouse-cluster', [
             'driver'  => 'clickhouse',

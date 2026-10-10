@@ -5,14 +5,33 @@ namespace Tests;
 use ClickHouseDB\Client;
 use ClickHouseDB\Exception\QueryException as ClientQueryException;
 use ClickHouseDB\Statement;
+use Closure;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use Oralunal\LaravelClickHouse\BaseModel;
 use Oralunal\LaravelClickHouse\Builder;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
 use Oralunal\LaravelClickHouse\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Models\Example;
 use Tests\Models\ExampleJson;
+
+/**
+ * A model of the examples table that chooses its connection at runtime, as a multi-tenant app may do, by overriding
+ * resolveConnection(). The connection that its $connection names stays the default one.
+ */
+class PretendTenantExample extends BaseModel
+{
+    public const CONNECTION = 'clickhouse-pretend-tenant';
+
+    protected $table = 'examples';
+
+    public function resolveConnection(): Connection
+    {
+        return DB::connection(self::CONNECTION);
+    }
+}
 
 /**
  * The writes of the models and of the package builder while the connection pretends (DB::pretend(), migrate
@@ -35,6 +54,7 @@ class PretendPackageWritesTest extends TestCase
     {
         Example::clearBuffer();
         ExampleJson::clearBuffer();
+        PretendTenantExample::clearBuffer();
 
         parent::tearDown();
     }
@@ -160,24 +180,133 @@ class PretendPackageWritesTest extends TestCase
     }
 
     /**
-     * Rows buffered before pretend() and flushed inside it are logged and not sent, and the buffer is emptied.
+     * Rows buffered before pretend() and flushed inside it, by flushBuffer() or flushAllBuffers(), are logged and not
+     * sent, and stay buffered: the first flush after pretend() ends sends them, once. Pretending loses no rows.
      */
-    public function testAFlushWhilePretendingEmptiesTheBufferWithoutSending(): void
+    public function testAFlushWhilePretendingKeepsTheRowsBufferedBeforeIt(): void
     {
         Example::buffer(['f_int' => 2, 'f_string' => 'before']);
+        ExampleJson::buffer(['id' => 3, 'f_flag' => true]);
 
-        $log = DB::connection('clickhouse')->pretend(fn () => Example::flushBuffer());
+        $log = DB::connection('clickhouse')->pretend(function (): void {
+            Example::flushBuffer();
+            BaseModel::flushAllBuffers();
+        });
+
+        $this->assertSame(
+            [
+                "INSERT INTO `examples` (`f_int`,`f_string`)  VALUES  (2,'before')",
+                "INSERT INTO `examples` (`f_int`,`f_string`)  VALUES  (2,'before')",
+                'INSERT INTO `json_examples` (`id`, `f_flag`) FORMAT JSONEachRow',
+            ],
+            array_column($log, 'query')
+        );
+        $this->assertSame(1, Example::bufferCount());
+        $this->assertSame(1, ExampleJson::bufferCount());
+        $this->assertSame([[1, 'kept']], $this->examples());
+        $this->assertSame(0, $this->jsonExampleCount());
+
+        BaseModel::flushAllBuffers();
         BaseModel::flushAllBuffers();
 
-        $this->assertSame(["INSERT INTO `examples` (`f_int`,`f_string`)  VALUES  (2,'before')"], array_column($log, 'query'));
         $this->assertSame(0, Example::bufferCount());
+        $this->assertSame(0, ExampleJson::bufferCount());
+        $this->assertSame([[1, 'kept'], [2, 'before']], $this->examples());
+        $this->assertSame(1, $this->jsonExampleCount());
+    }
+
+    /**
+     * A model that overrides resolveConnection() buffers and flushes by the connection that it returns, which its
+     * inserts go through, and not by the connection that its $connection names. While the returned connection
+     * pretends, rows buffered before are kept, and sent once afterwards, and rows buffered inside are logged and never
+     * sent; the first used to be dropped, and the second sent by the next flush. While only the named connection
+     * pretends, a flush sends the rows once; it used to keep them after sending them, so the next flush sent them
+     * again.
+     */
+    public function testAModelThatResolvesItsConnectionPretendsWithThatConnection(): void
+    {
+        config(['database.connections.' . PretendTenantExample::CONNECTION => config('database.connections.clickhouse')]);
+        DB::purge(PretendTenantExample::CONNECTION);
+
+        PretendTenantExample::buffer(['f_int' => 2, 'f_string' => 'before']);
+        $log = DB::connection(PretendTenantExample::CONNECTION)->pretend(function (): void {
+            PretendTenantExample::flushBuffer();
+            PretendTenantExample::buffer(['f_int' => 3, 'f_string' => 'inside']);
+        });
+
+        $this->assertSame(
+            [
+                "INSERT INTO `examples` (`f_int`,`f_string`)  VALUES  (2,'before')",
+                "INSERT INTO `examples` (`f_int`,`f_string`)  VALUES  (3,'inside')",
+            ],
+            array_column($log, 'query')
+        );
+        $this->assertSame([['f_int' => 2, 'f_string' => 'before']], PretendTenantExample::getBufferedRows());
         $this->assertSame([[1, 'kept']], $this->examples());
+
+        PretendTenantExample::flushBuffer();
+        BaseModel::flushAllBuffers();
+
+        $this->assertSame([[1, 'kept'], [2, 'before']], $this->examples());
+
+        PretendTenantExample::buffer(['f_int' => 4, 'f_string' => 'named']);
+        $log = DB::connection('clickhouse')->pretend(fn () => PretendTenantExample::flushBuffer());
+        BaseModel::flushAllBuffers();
+
+        $this->assertSame([], $log);
+        $this->assertSame(0, PretendTenantExample::bufferCount());
+        $this->assertSame([[1, 'kept'], [2, 'before'], [4, 'named']], $this->examples());
+    }
+
+    /**
+     * An insert that a check refuses before anything is sent, on each path, with the exception and the start of its
+     * message: rows whose keys differ in Values, and in JSONEachRow and JSONCompactEachRow a value that JSON cannot
+     * hold, raw SQL or a string that is not valid UTF-8, since the rows are encoded while pretending too.
+     *
+     * @return array<string, array{Closure(): mixed, class-string, string}>
+     */
+    public static function insertThatWouldFailProvider(): array
+    {
+        $utf8 = 'Cannot insert the value of column [f_string] in the row at index 0 as JSON: Malformed UTF-8 characters';
+
+        return [
+            'insertAssoc(), keys that differ, as Values' => [
+                fn () => Example::insertAssoc([['f_int' => 2, 'f_string' => 'a'], ['f_int' => 3]]),
+                ClientQueryException::class,
+                'Fields not match: f_int and f_int,f_string on element 1',
+            ],
+            "the builder's insert(), raw SQL, as JSONEachRow" => [
+                fn () => DB::connection('clickhouse')->table('json_examples')
+                    ->insert([['id' => 2, 'f_string' => DB::raw("'x'")]], Format::JSON_EACH_ROW),
+                InvalidArgumentException::class,
+                'Cannot insert the value of column [f_string] in the row at index 0 as JSON: raw SQL',
+            ],
+            'insertAssoc(), invalid UTF-8, as JSONEachRow' => [
+                fn () => ExampleJson::insertAssoc([['id' => 2, 'f_string' => "\xff"]]),
+                InvalidArgumentException::class,
+                $utf8,
+            ],
+            'insertBulk(), invalid UTF-8, as JSONCompactEachRow' => [
+                fn () => ExampleJson::insertBulk([[2, "\xff"]], ['id', 'f_string']),
+                InvalidArgumentException::class,
+                'Cannot insert the value of column [1] in the row at index 0 as JSON: Malformed UTF-8 characters',
+            ],
+            'buffer(), invalid UTF-8, as JSONEachRow' => [
+                fn () => ExampleJson::buffer(['id' => 2, 'f_string' => "\xff"]),
+                InvalidArgumentException::class,
+                $utf8,
+            ],
+        ];
     }
 
     /**
      * A check that fails before anything is sent still throws while pretending, and logs nothing.
+     *
+     * @param Closure(): mixed $insert
+     * @param class-string $exception
      */
-    public function testAnInsertThatWouldFailStillThrowsWhilePretending(): void
+    #[DataProvider('insertThatWouldFailProvider')]
+    public function testAnInsertThatWouldFailStillThrowsWhilePretending(Closure $insert, string $exception, string $message): void
     {
         $logged = [];
         DB::listen(function (QueryExecuted $query) use (&$logged): void {
@@ -185,16 +314,17 @@ class PretendPackageWritesTest extends TestCase
         });
 
         try {
-            DB::connection('clickhouse')->pretend(function (): void {
-                Example::insertAssoc([['f_int' => 2, 'f_string' => 'a'], ['f_int' => 3]]);
-            });
+            DB::connection('clickhouse')->pretend($insert);
             $this->fail('The insert did not throw.');
-        } catch (ClientQueryException $exception) {
-            $this->assertSame('Fields not match: f_int and f_int,f_string on element 1', $exception->getMessage());
+        } catch (ClientQueryException|InvalidArgumentException $thrown) {
+            $this->assertInstanceOf($exception, $thrown);
+            $this->assertStringStartsWith($message, $thrown->getMessage());
         }
 
         $this->assertSame([], $logged);
         $this->assertSame([[1, 'kept']], $this->examples());
+        $this->assertSame(0, $this->jsonExampleCount());
+        $this->assertSame(0, ExampleJson::bufferCount());
     }
 
     /**
@@ -223,6 +353,11 @@ class PretendPackageWritesTest extends TestCase
             fn (array $row): array => [(int) $row['f_int'], $row['f_string']],
             $this->client()->select('SELECT f_int, f_string FROM examples ORDER BY f_int')->rows()
         );
+    }
+
+    private function jsonExampleCount(): int
+    {
+        return (int) $this->client()->select('SELECT count() AS c FROM json_examples')->fetchOne('c');
     }
 
     private function client(): Client

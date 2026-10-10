@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oralunal\LaravelClickHouse;
 
 use ClickHouseDB\Client;
+use ClickHouseDB\Exception\DatabaseException;
 use ClickHouseDB\Exception\QueryException as ClientQueryException;
 use ClickHouseDB\Query\Degeneration\Bindings;
 use ClickHouseDB\Query\Expression\Expression as ClientExpression;
@@ -34,6 +35,8 @@ use Stringable;
  * - select() reads a SELECT in the format that ClickHouse sends it in. smi2's Client::select() searches the whole
  *   SQL, string literals, comments and names included, for FORMAT followed by a format name that it knows, so
  *   a value such as 'export as format csv' made it read a JSON result as CSV.
+ * - selectIntoStream() writes the result of a SELECT into a stream and throws the error that ClickHouse wrote into
+ *   it, which smi2's Client::streamRead() reports without its message.
  * - write() logs a write and leaves it out while the connection pretends.
  * - compileValuesInsert() writes the INSERT ... VALUES of the package's Values inserts, with every digit of a
  *   float, NaN and INF, and dates at the connection's datetime_precision.
@@ -61,6 +64,17 @@ final class ClientRequests
      * The response header in which ClickHouse names the format of the result.
      */
     private const FORMAT_HEADER = 'X-ClickHouse-Format';
+
+    /**
+     * How many bytes at the end of a streamed result selectIntoStream() searches for an error that ClickHouse wrote
+     * after the rows (see findExceptionAtTheEnd()). A ClickHouse error message is far shorter.
+     */
+    private const STREAM_TAIL_BYTES = 65536;
+
+    /**
+     * The start of a ClickHouse error message, as smi2's Statement::error() reads it.
+     */
+    private const EXCEPTION_MESSAGE_PATTERN = '/^Code:\s*\d+\.\s*DB::Exception/';
 
     /**
      * Run a SELECT and return its statement, read in the format that the SQL names, or JSON when it names none.
@@ -301,6 +315,194 @@ final class ClientRequests
                 throw new ClientQueryException('Can`t find meta');
             }
         };
+    }
+
+    /**
+     * Run a SELECT with its result in JSONEachRow, one JSON object per line, written into a stream as it arrives,
+     * and return its statement. The rows are in the stream, which is left at its end; the statement's response has
+     * the response headers and no body.
+     *
+     * FORMAT JSONEachRow is appended to the SQL on a line of its own, after a semicolon at its end is removed, so
+     * that a line comment at the end of the SQL stays a comment; the SQL must not name a format itself. The request
+     * is built as select() builds a rerouted query, with readonly=2 and smi2's Bindings degeneration only, and runs
+     * on the client's curler, so the connection's retries apply. The stream is emptied each time a response
+     * starts, so that a request that is sent again leaves no rows of an earlier attempt in it. A curler that keeps
+     * the body in the response instead of handing it to the request's write function, such as a test double, has
+     * its body written into the stream, so that its rows are not lost.
+     *
+     * The request also sends output_format_json_validate_utf8=1, so that ClickHouse replaces the bytes of a string
+     * that are not valid UTF-8, such as those of a binary MD5 hash, with U+FFFD, as it always does in FORMAT JSON,
+     * which select() reads: the rows are then the rows of select(). Without it, JSONEachRow writes such bytes as they
+     * are, and the line is not JSON that PHP can decode (24.8, 26.3 and 26.8 checked). A read-only user, the readonly
+     * option of the connection, cannot change a setting, so the setting is not sent for such a user.
+     *
+     * smi2's Client::streamRead() reports a failed query as 'HttpCode:500 ; ;', since ClickHouse writes the error
+     * into the stream and not into the response body. Here the error is read from the end of the stream (see
+     * findExceptionAtTheEnd()) and thrown as smi2 throws the error of a select: a DatabaseException with the
+     * ClickHouse code, name and version. That includes an error after the first rows of a large result, which
+     * ClickHouse (24.8 checked) sends with HTTP 200, as the last line of the result: such a result throws instead of
+     * ending in a row that holds the error. ClickHouse 25 and later (26.3 and 26.8 checked) send such an error in an
+     * exception frame and then end the response without finishing its chunked body, so curl reports 'transfer
+     * closed with outstanding read data remaining' (CURLE_PARTIAL_FILE). An error found at the end of the stream
+     * replaces the curl error, since smi2 throws a curl error instead of the error in the body.
+     *
+     * @param Client $client
+     * @param string $sql A query without a FORMAT clause
+     * @param array<int|string, mixed> $bindings Bindings for smi2's Bindings degeneration (':name' and '{name}')
+     * @param resource $stream A stream that can be written, read and truncated, such as php://temp
+     * @return Statement
+     * @throws DatabaseException When ClickHouse reports an error, before or after the rows that it sent
+     * @throws ClientQueryException When the request fails without a ClickHouse error, such as a timeout
+     */
+    public static function selectIntoStream(Client $client, string $sql, array $bindings, mixed $stream): Statement
+    {
+        $sql = rtrim($sql);
+        if (str_ends_with($sql, ';')) {
+            $sql = rtrim(substr($sql, 0, -1));
+        }
+
+        $request = $client->transport()->getRequestRead(
+            new Query($sql . "\nFORMAT " . self::JSON_EACH_ROW, [self::bindings($bindings)]),
+            null,
+            null,
+            $client->settings()->isReadOnlyUser() ? [] : ['output_format_json_validate_utf8' => 1]
+        );
+        $request->setRequestExtendedInfo(
+            array_merge($request->getRequestExtendedInfo(), ['format' => self::JSON_EACH_ROW])
+        );
+
+        $headers = [];
+        $request->setHeaderFunction(function (mixed $handle, string $line) use ($stream, &$headers): int {
+            if (str_starts_with($line, 'HTTP/')) {
+                ftruncate($stream, 0);
+                rewind($stream);
+                $headers = [];
+            } elseif (str_contains($line, ':')) {
+                [$name, $value] = explode(':', $line, 2);
+                $headers[trim($name)] = trim($value);
+            }
+
+            return strlen($line);
+        });
+        $request->setWriteFunction(fn (mixed $handle, string $data): int => (int) fwrite($stream, $data));
+
+        $client->transport()->getCurler()->execOne($request, true);
+
+        $response = $request->response();
+        $response->_headers = array_merge($response->_headers, $headers);
+        if (ftell($stream) === 0 && $response->body() !== '') {
+            fwrite($stream, $response->body());
+        }
+        $statement = new Statement($request);
+
+        $httpFailed = $response->http_code() !== 200;
+        [$tail, $wholeStream] = self::readTailOfStream($stream);
+        $exception = self::findExceptionAtTheEnd($tail, $wholeStream, $httpFailed);
+        if (!$httpFailed && $response->error_no() === 0 && $exception === null) {
+            return $statement;
+        }
+
+        $response->_body = $exception ?? ($wholeStream ? $tail : '');
+        if ($exception !== null) {
+            $response->_errorNo = 0;
+            $response->_error = '';
+        }
+        $statement->error();
+
+        throw new ClientQueryException(
+            'ClickHouse reported an error after the rows of the result: ' . $response->_body
+        );
+    }
+
+    /**
+     * Read the end of a stream, at most STREAM_TAIL_BYTES bytes, and leave the stream at its end.
+     *
+     * @param resource $stream
+     * @return array{0: string, 1: bool} The end of the stream, and whether it is the whole stream
+     */
+    private static function readTailOfStream(mixed $stream): array
+    {
+        fseek($stream, 0, SEEK_END);
+        $offset = max(0, (int) ftell($stream) - self::STREAM_TAIL_BYTES);
+        fseek($stream, $offset);
+        $tail = (string) stream_get_contents($stream);
+
+        return [$tail, $offset === 0];
+    }
+
+    /**
+     * Find the error that ClickHouse wrote at the end of a result in JSONEachRow, and return its message, such as
+     * "Code: 395. DB::Exception: ...", or null when the result ends with a row.
+     *
+     * ClickHouse writes an error after the rows, or as the whole body of a query that failed before its first
+     * row, in one of these ways, depending on its version and settings:
+     * - as the last line, a JSON object with the one key exception, {"exception": "Code: ..."}, with a space after
+     *   the colon (24.8 checked, with http_write_exception_in_output_format on, its default). ClickHouse writes a
+     *   row without that space, so a row of a column named exception that holds such a message, as a select from
+     *   system.query_log returns it, {"exception":"Code: ..."}, stays a row: it is the error only when the
+     *   response has an HTTP code other than 200, or when the row before it has other keys. A curl error alone,
+     *   such as a timeout, does not make it the error: the stream then ends where the client stopped reading;
+     * - as text on lines of its own, starting with "Code: ", after the last row (24.8 checked, with
+     *   http_write_exception_in_output_format off), or as the whole body. No row starts with a letter: each one is
+     *   a JSON object;
+     * - framed by lines of __exception__ and a random tag, as ClickHouse 25 and later write an error after the HTTP
+     *   headers have been sent: __exception__, the tag, the message, the length of the message and the tag, and
+     *   __exception__ (26.3 checked: "\r\n__exception__\r\n<tag>\r\n<message>\n<length> <tag>\r\n__exception__\r\n"
+     *   after the last row, with the tag also in the X-ClickHouse-Exception-Tag header).
+     *
+     * @param string $tail The end of the stream (see readTailOfStream())
+     * @param bool $wholeStream Whether $tail is the whole stream, so that its first line is a whole line
+     * @param bool $failed Whether the response has an HTTP code other than 200, so that a last line
+     *                     {"exception":"Code: ..."} is the error
+     * @return string|null
+     */
+    private static function findExceptionAtTheEnd(string $tail, bool $wholeStream, bool $failed): ?string
+    {
+        $text = rtrim($tail);
+        if (str_ends_with($text, '__exception__')) {
+            $frame = '/(?:\A|\n)__exception__\r?\n([^\r\n]+)\r?\n(.*)\r?\n\d+ \1\r?\n__exception__\z/s';
+            if (preg_match($frame, $text, $match) === 1) {
+                return trim($match[2]);
+            }
+        }
+
+        $lines = preg_split('/\r?\n/', $text) ?: [];
+        $last = (string) array_pop($lines);
+        if ($lines === [] && !$wholeStream) {
+            return null;
+        }
+
+        if (str_starts_with($last, '{')) {
+            $row = json_decode($last, true);
+            if (!is_array($row) || array_keys($row) !== ['exception'] || !is_string($row['exception'])
+                || preg_match(self::EXCEPTION_MESSAGE_PATTERN, $row['exception']) !== 1) {
+                return null;
+            }
+
+            if ($failed || str_starts_with($last, '{"exception": "')) {
+                return $row['exception'];
+            }
+
+            $previousIsWhole = count($lines) > 1 || ($lines !== [] && $wholeStream);
+            $previous = $previousIsWhole ? json_decode((string) end($lines), true) : null;
+
+            return is_array($previous) && array_keys($previous) !== ['exception'] ? $row['exception'] : null;
+        }
+
+        $lines[] = $last;
+        for ($index = count($lines) - 1; $index >= 0; $index--) {
+            if (str_starts_with($lines[$index], '{')) {
+                return null;
+            }
+
+            if (preg_match(self::EXCEPTION_MESSAGE_PATTERN, $lines[$index]) === 1 && ($index > 0 || $wholeStream)) {
+                $message = implode("\n", array_slice($lines, $index));
+
+                return trim((string) preg_replace('/\n\d+ \S+\n__exception__\z/', '', $message));
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -553,7 +755,8 @@ final class ClientRequests
      * the URL and the rows in the request body, so smi2 never substitutes bindings in the data, a retry sends
      * the whole body again, and an error message names the head instead of carrying the data: ClickHouse (24.8
      * checked) quotes at most about 160 bytes around a value that it cannot parse. While the connection
-     * pretends, the head is logged and nothing is sent.
+     * pretends, the rows are checked and encoded as for a real insert, so that a row the real insert refuses is
+     * refused as well, then the head is logged and nothing is sent.
      *
      * @param Client $client
      * @param Connection $connection The connection whose pretend mode decides
@@ -572,14 +775,37 @@ final class ClientRequests
         array $rows,
         JsonEachRowEncoder $encoder
     ): Statement {
-        $head = self::compileInsertWithFormat($table, self::verifyKeys($rows), self::JSON_EACH_ROW);
+        [$columns, $body] = self::encodeJsonEachRow($rows, $encoder);
+        $head = self::compileInsertWithFormat($table, $columns, self::JSON_EACH_ROW);
         if ($connection->pretending()) {
             $connection->logQuery($head, [], 0.0);
 
             return self::pretendedStatement($head);
         }
 
-        return self::sendInsert($client, $head, $encoder->encodeRows($rows), self::JSON_EACH_ROW);
+        return self::sendInsert($client, $head, $body, self::JSON_EACH_ROW);
+    }
+
+    /**
+     * Check keyed rows as insertJsonEachRow() checks them, and encode them as JSONEachRow, one JSON object per line,
+     * without sending anything: every row must be an array with the first row's keys, in any order, and every value
+     * must be one that JSON can hold (see JsonEachRowEncoder).
+     *
+     * Laravel's query builder inserts with it (see QueryBuilder::insert()), with an INSERT head that its own grammar
+     * writes.
+     *
+     * @param array<int|string, array<int|string, mixed>> $rows
+     * @param JsonEachRowEncoder $encoder
+     * @return array{0: array<int, int|string>, 1: string} The keys of the first row, and the encoded rows
+     * @throws QueryException When a row's keys differ from the first row's
+     * @throws InvalidArgumentException When a row is not an array, or a value cannot be sent as JSON
+     * @throws ClientQueryException When there are no rows
+     */
+    public static function encodeJsonEachRow(array $rows, JsonEachRowEncoder $encoder): array
+    {
+        $columns = self::verifyKeys($rows);
+
+        return [$columns, $encoder->encodeRows($rows)];
     }
 
     /**
@@ -589,7 +815,8 @@ final class ClientRequests
      * Without columns, the values of a row go to the table's columns in their order, as in a Values insert.
      * Every row must have as many values as the first row, and as the columns when they are given; otherwise
      * nothing is sent. The head and the rows are sent as insertJsonEachRow() sends them, and while the
-     * connection pretends, the head is logged and nothing is sent.
+     * connection pretends, the rows are checked and encoded as for a real insert, then the head is logged and
+     * nothing is sent.
      *
      * @param Client $client
      * @param Connection $connection The connection whose pretend mode decides
@@ -612,13 +839,14 @@ final class ClientRequests
     ): Statement {
         self::verifyValueCounts($rows, $columns);
         $head = self::compileInsertWithFormat($table, $columns, self::JSON_COMPACT_EACH_ROW);
+        $body = $encoder->encodeCompactRows($rows);
         if ($connection->pretending()) {
             $connection->logQuery($head, [], 0.0);
 
             return self::pretendedStatement($head);
         }
 
-        return self::sendInsert($client, $head, $encoder->encodeCompactRows($rows), self::JSON_COMPACT_EACH_ROW);
+        return self::sendInsert($client, $head, $body, self::JSON_COMPACT_EACH_ROW);
     }
 
     /**
@@ -979,20 +1207,22 @@ final class ClientRequests
     }
 
     /**
-     * Send an insert with its head in the URL and its rows in the body, and throw when it fails.
+     * Send an insert with its head in the URL and its rows in the body, and throw when it fails. Nothing is logged,
+     * and the connection's pretend mode is not checked: the caller does both.
      *
      * When smi2 attaches the request to an exception, the rows are left out of it. The $body is marked
      * #[\SensitiveParameter] so that it does not appear in a stack trace either (the string form of any exception
      * thrown below this frame, which Laravel's log writes, would otherwise show the first bytes of the rows).
      *
      * @param Client $client
-     * @param string $head
-     * @param string $body
-     * @param string $format
+     * @param string $head The INSERT, which names the input format of the body, such as INSERT INTO t (a) FORMAT
+     *                     JSONEachRow
+     * @param string $body The rows in that format
+     * @param string $format The name of the format, for the message that replaces the rows in an exception
      * @return Statement
      * @throws ClientQueryException When the insert fails
      */
-    private static function sendInsert(
+    public static function sendInsert(
         Client $client,
         string $head,
         #[\SensitiveParameter] string $body,

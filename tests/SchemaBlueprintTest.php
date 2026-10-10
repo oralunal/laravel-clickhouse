@@ -18,6 +18,14 @@ use Oralunal\LaravelClickHouse\SchemaBlueprint;
  * statements that Schema::create() sends, and the ALTER, RENAME and DROP
  * statements of Schema::table(), rename() and drop(), checked in
  * system.tables, system.columns and system.data_skipping_indices.
+ *
+ * The checks hold on ClickHouse 24.8, 26.3 and 26.8: 64-bit integers are
+ * read with toString(), since 25.8 and later no longer quote them in JSON;
+ * a key of one column is read without the parentheses that 26.8 keeps (see
+ * table()); the command of a mutation is read without the parentheses that
+ * 25.8 and later add; and a change() that drops nullable() also gives a
+ * default(), which 26.3 and 26.8 require when a MODIFY COLUMN turns a
+ * Nullable type into one without NULL (BAD_ARGUMENTS).
  */
 class SchemaBlueprintTest extends TestCase
 {
@@ -611,7 +619,7 @@ class SchemaBlueprintTest extends TestCase
         );
         $this->assertSame(
             [['source' => 'web', 'id' => '1', 'step' => 0]],
-            $this->client()->select('SELECT source, id, step FROM ' . self::ALTERED)->rows()
+            $this->client()->select('SELECT source, toString(id) AS id, step FROM ' . self::ALTERED)->rows()
         );
     }
 
@@ -631,7 +639,7 @@ class SchemaBlueprintTest extends TestCase
 
         Schema::rename(DB::connection('clickhouse')->getDatabaseName() . '.' . self::ALTERED_RENAMED, self::ALTERED);
         $this->assertTrue(Schema::hasTable(self::ALTERED));
-        $this->assertSame([['id' => '1', 'body' => 'p']], $this->client()->select('SELECT id, body FROM ' . self::ALTERED)->rows());
+        $this->assertSame([['id' => '1', 'body' => 'p']], $this->client()->select('SELECT toString(id) AS id, body FROM ' . self::ALTERED)->rows());
     }
 
     /**
@@ -781,12 +789,12 @@ class SchemaBlueprintTest extends TestCase
         $this->assertSame([['id', 'UInt64'], ['note', 'Nullable(String)']], $this->columns(self::CHANGED, ['name', 'type']));
         $this->assertSame(
             [['id' => '1', 'note' => 'a'], ['id' => '2', 'note' => null]],
-            $this->client()->select('SELECT id, note FROM ' . self::CHANGED . ' ORDER BY id')->rows()
+            $this->client()->select('SELECT toString(id) AS id, note FROM ' . self::CHANGED . ' ORDER BY id')->rows()
         );
         $this->assertSame(0, $this->mutationCount(self::CHANGED));
 
         $this->client()->write('ALTER TABLE ' . self::CHANGED . " UPDATE note = '' WHERE note IS NULL SETTINGS mutations_sync = 2");
-        Schema::table(self::CHANGED, fn (SchemaBlueprint $table) => $table->string('note')->change());
+        Schema::table(self::CHANGED, fn (SchemaBlueprint $table) => $table->string('note')->default('')->change());
         $this->assertSame([['id', 'UInt64'], ['note', 'String']], $this->columns(self::CHANGED, ['name', 'type']));
     }
 
@@ -817,7 +825,7 @@ class SchemaBlueprintTest extends TestCase
         $this->assertSame([['id', 'UInt64'], ['tags', 'Array(String)']], $this->columns(self::CHANGED, ['name', 'type']));
         $this->assertSame(
             [['id' => '1', 'tags' => ['a']], ['id' => '2', 'tags' => ['b']]],
-            $this->client()->select('SELECT id, tags FROM ' . self::CHANGED . ' ORDER BY id')->rows()
+            $this->client()->select('SELECT toString(id) AS id, tags FROM ' . self::CHANGED . ' ORDER BY id')->rows()
         );
     }
 
@@ -834,7 +842,7 @@ class SchemaBlueprintTest extends TestCase
         $this->client()->write('DELETE FROM ' . self::CHANGED . ' WHERE note IS NULL');
         $this->assertSame(
             [['id' => '1', 'note' => 'a'], ['id' => '3', 'note' => 'c']],
-            $this->client()->select('SELECT id, note FROM ' . self::CHANGED . ' ORDER BY id')->rows()
+            $this->client()->select('SELECT toString(id) AS id, note FROM ' . self::CHANGED . ' ORDER BY id')->rows()
         );
 
         try {
@@ -853,11 +861,11 @@ class SchemaBlueprintTest extends TestCase
         )->rows());
 
         $this->client()->write('ALTER TABLE ' . self::CHANGED . ' APPLY DELETED MASK SETTINGS mutations_sync = 2');
-        Schema::table(self::CHANGED, fn (SchemaBlueprint $table) => $table->string('note')->change());
+        Schema::table(self::CHANGED, fn (SchemaBlueprint $table) => $table->string('note')->default('')->change());
         $this->assertSame([['id', 'UInt64'], ['note', 'String']], $this->columns(self::CHANGED, ['name', 'type']));
         $this->assertSame(
             [['id' => '1', 'note' => 'a'], ['id' => '3', 'note' => 'c']],
-            $this->client()->select('SELECT id, note FROM ' . self::CHANGED . ' ORDER BY id')->rows()
+            $this->client()->select('SELECT toString(id) AS id, note FROM ' . self::CHANGED . ' ORDER BY id')->rows()
         );
     }
 
@@ -893,9 +901,12 @@ class SchemaBlueprintTest extends TestCase
         );
         $this->assertSame(
             ['MATERIALIZE INDEX schema_blueprint_altered_payload_index'],
-            array_column($this->client()->select(
-                "SELECT command FROM system.mutations WHERE database = currentDatabase() AND table = '" . self::ALTERED . "'"
-            )->rows(), 'command')
+            array_map(
+                fn (string $command): string => preg_replace('/\A\((.*)\)\z/s', '$1', $command),
+                array_column($this->client()->select(
+                    "SELECT command FROM system.mutations WHERE database = currentDatabase() AND table = '" . self::ALTERED . "'"
+                )->rows(), 'command')
+            )
         );
 
         Schema::table(self::ALTERED, function (SchemaBlueprint $table) {
@@ -1190,7 +1201,7 @@ class SchemaBlueprintTest extends TestCase
             $table->string('packed')->change();
             $table->string('eph')->change();
             $table->string('kind')->storedAs("concat('k', toString(id))")->change();
-            $table->string('nullable_clean')->comment('no NULL left')->change();
+            $table->string('nullable_clean')->default('')->comment('no NULL left')->change();
         });
     }
 
@@ -1207,7 +1218,7 @@ class SchemaBlueprintTest extends TestCase
             ['upper_source', 'String', '', '', '', ''],
             ['packed', 'String', '', '', '', 'CODEC(ZSTD(3))'],
             ['eph', 'String', 'EPHEMERAL', "'e'", '', ''],
-            ['nullable_clean', 'String', '', '', 'no NULL left', ''],
+            ['nullable_clean', 'String', 'DEFAULT', "''", 'no NULL left', ''],
             ['kind', 'String', 'MATERIALIZED', "concat('k', toString(id))", '', ''],
         ], $this->columns($table, ['name', 'type', 'default_kind', 'default_expression', 'comment', 'compression_codec']));
         $this->assertStringContainsString(
@@ -1219,7 +1230,9 @@ class SchemaBlueprintTest extends TestCase
                 ['id' => '1', 'traffic_source' => 'x', 'doubled' => '2', 'packed' => 'pp', 'nullable_clean' => 'c'],
                 ['id' => '2', 'traffic_source' => 'y', 'doubled' => '4', 'packed' => 'qq', 'nullable_clean' => 'd'],
             ],
-            $this->client()->select("SELECT id, traffic_source, doubled, packed, nullable_clean FROM {$table} ORDER BY id")->rows()
+            $this->client()->select(
+                "SELECT toString(id) AS id, traffic_source, toString(doubled) AS doubled, packed, nullable_clean FROM {$table} ORDER BY id"
+            )->rows()
         );
         $this->assertSame(
             0,
@@ -1308,7 +1321,9 @@ class SchemaBlueprintTest extends TestCase
 
     /**
      * Insert a row into TYPES through a model's insertAssoc() and read it back.
-     * The values fit both integer mappings.
+     * The values fit both integer mappings. The UInt64 column c_ubig is
+     * compared as a string, which ClickHouse 24.8 returns and 25.8 and later
+     * do not.
      */
     private function insertAndReadBackTypes(): void
     {
@@ -1346,6 +1361,7 @@ class SchemaBlueprintTest extends TestCase
         $read = $this->client()->select(
             'SELECT ' . implode(', ', array_keys($row)) . ', deleted_at FROM ' . self::TYPES
         )->rows()[0];
+        $read['c_ubig'] = (string) $read['c_ubig'];
         $this->assertSame([
             'c_char' => 'ab',
             'c_string' => "it's",
@@ -1377,15 +1393,24 @@ class SchemaBlueprintTest extends TestCase
     /**
      * Get the given system.tables fields of a table in the connection's database.
      *
+     * A sorting_key or primary_key of one column in parentheses, such as (id), is read without them: ClickHouse 26.8
+     * keeps the parentheses of ORDER BY (id), which the schema builder writes, where 24.8 and 26.3 print id.
+     *
      * @param list<string> $fields
      * @return array<string, mixed>
      */
     private function table(string $table, array $fields): array
     {
-        return $this->client()->select(
+        $row = $this->client()->select(
             'SELECT ' . implode(', ', $fields) . ' FROM system.tables WHERE database = currentDatabase() AND name = :table',
             ['table' => $table]
         )->rows()[0];
+
+        foreach (array_intersect(['sorting_key', 'primary_key'], array_keys($row)) as $key) {
+            $row[$key] = preg_replace('/\A\(([^(),]+)\)\z/', '$1', $row[$key]);
+        }
+
+        return $row;
     }
 
     /**

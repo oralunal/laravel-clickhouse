@@ -106,7 +106,7 @@ class QueryProcessor extends Processor
 
             return [
                 'name' => strtolower($result->name),
-                'columns' => static::splitExpressionList($result->expression),
+                'columns' => static::splitExpressionList(static::withoutEnclosingParentheses($result->expression)),
                 'type' => $isPrimary ? null : strtolower($result->type),
                 'unique' => false,
                 'primary' => $isPrimary,
@@ -141,6 +141,51 @@ class QueryProcessor extends Processor
             || str_starts_with($type, 'Variant(')
             || $type === 'Dynamic'
             || str_starts_with($type, 'Dynamic(');
+    }
+
+    /**
+     * Remove one pair of parentheses that encloses a whole expression.
+     *
+     * ClickHouse 26.8 keeps the parentheses of a key of one column that the
+     * CREATE wrote in parentheses, such as ORDER BY (id), which the schema
+     * builder writes: system.tables prints its primary key as (id), where
+     * 24.8 and 26.3 print id. A list of more columns is printed without them
+     * on each version: id, intHash32(id). An expression whose first
+     * parenthesis closes before its end, such as (a) + (b), is returned
+     * unchanged.
+     *
+     * @param string $expression For example: (id)
+     * @return string For example: id
+     */
+    protected static function withoutEnclosingParentheses(string $expression): string
+    {
+        $expression = trim($expression);
+        $length = strlen($expression);
+        if ($length < 2 || $expression[0] !== '(' || $expression[$length - 1] !== ')') {
+            return $expression;
+        }
+
+        $depth = 0;
+        $quote = null;
+        for ($position = 0; $position < $length; $position++) {
+            $character = $expression[$position];
+
+            if ($quote !== null) {
+                if ($character === '\\') {
+                    $position++;
+                } elseif ($character === $quote) {
+                    $quote = null;
+                }
+            } elseif ($character === "'" || $character === '"' || $character === '`') {
+                $quote = $character;
+            } elseif ($character === '(') {
+                $depth++;
+            } elseif ($character === ')' && --$depth === 0 && $position < $length - 1) {
+                return $expression;
+            }
+        }
+
+        return substr($expression, 1, -1);
     }
 
     /**

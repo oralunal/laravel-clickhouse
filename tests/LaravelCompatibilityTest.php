@@ -305,11 +305,12 @@ class LaravelCompatibilityTest extends TestCase
 
     /**
      * The builder writes a Laravel database expression, such as DB::raw(), as it writes raw(), with the query grammar
-     * of the connection it follows.
+     * of the connection it follows. The count is selected as a string, since ClickHouse 24.8 quotes a UInt64 in JSON
+     * and 25.8 and later do not.
      */
     public function test_a_laravel_expression_is_written_as_raw_sql(): void
     {
-        $this->assertSame([['c' => '3']], $this->events()->select(DB::raw('count() AS c'))->getRows());
+        $this->assertSame([['c' => '3']], $this->events()->select(DB::raw('toString(count()) AS c'))->getRows());
         $this->assertSame([1], $this->ids($this->events()->where(DB::raw('a + 1'), 2)));
         $this->assertSame([2], $this->ids($this->events()->where('a', DB::raw('b'))));
         $this->assertSame([1, 3], $this->ids($this->events()->where(DB::raw('nd'), null)));

@@ -54,7 +54,9 @@ class LaravelQueryBuilderTest extends TestCase
 
     private const NAMES = 'lqb_names';
 
-    private const TABLES = [self::ROWS, self::DATES, self::FLOATS, self::NAMES];
+    private const JSON = 'lqb_json';
+
+    private const TABLES = [self::ROWS, self::DATES, self::FLOATS, self::NAMES, self::JSON];
 
     /**
      * Create ROWS: id 1 to 4 with mixed-case names, flags 1, 256, 257 and 2, a Nullable note that is NULL for 1 and 3,
@@ -280,6 +282,138 @@ class LaravelQueryBuilderTest extends TestCase
 
         $this->assertSame(1 / 3, $query()->where('id', 2)->value('f'));
         $this->assertSame([2], $this->ids($query()->where('f', 1 / 3)));
+    }
+
+    // Inserts as JSONEachRow
+
+    /**
+     * Dates at each datetime_precision: at 'second' a fraction is cut off for both columns, at 'microsecond' it is
+     * kept for the DateTime64(6) column, and the DateTime column, which refuses a fraction in both formats, gets a
+     * whole second.
+     *
+     * @return array<string, array{string, Carbon, Carbon, string}>
+     */
+    public static function insertPrecisionProvider(): array
+    {
+        return [
+            'second' => [
+                'second',
+                Carbon::parse('2024-01-02 03:04:05.123456', 'UTC'),
+                Carbon::parse('2024-01-02 03:04:05.123456', 'UTC'),
+                '2024-01-02 03:04:05.000000',
+            ],
+            'microsecond' => [
+                'microsecond',
+                Carbon::parse('2024-01-02 03:04:05', 'UTC'),
+                Carbon::parse('2024-01-02 03:04:05.123456', 'UTC'),
+                '2024-01-02 03:04:05.123456',
+            ],
+        ];
+    }
+
+    /**
+     * insert($rows, 'JSONEachRow') stores what Laravel's Values insert stores for the same row: floats with every
+     * digit, -INF, dates at the connection's datetime_precision, NULL, arrays, nested arrays and collections, a bool,
+     * a UInt64 and a Decimal given as strings, and an enum.
+     */
+    #[DataProvider('insertPrecisionProvider')]
+    public function testAJsonEachRowInsertStoresWhatAValuesInsertStores(string $precision, Carbon $dateTime, Carbon $dateTime64, string $storedDateTime64): void
+    {
+        $this->client()->write(
+            'CREATE TABLE ' . self::JSON . ' (id UInt32, f Float64, f_inf Float64, f32 Float32, d DateTime,'
+            . ' d6 DateTime64(6), day Date, n Nullable(String), ni Nullable(Int32), a Array(Int32), s Array(String),'
+            . ' nested Array(Array(Float64)), b Bool, u UInt64, dec Decimal(10, 2), e String)'
+            . ' ENGINE = MergeTree ORDER BY id'
+        );
+        $row = fn (int $id): array => [
+            'id' => $id,
+            'f' => 0.1 + 0.2,
+            'f_inf' => -INF,
+            'f32' => 1 / 3,
+            'd' => $dateTime,
+            'd6' => $dateTime64,
+            'day' => '2024-01-02',
+            'n' => null,
+            'ni' => 5,
+            'a' => [1, 2, 3],
+            's' => collect(['x', "it's", 'back\\slash', '']),
+            'nested' => [[1.5, 1 / 3], []],
+            'b' => true,
+            'u' => '18446744073709551615',
+            'dec' => '19.99',
+            'e' => StringBackedEnumFixture::Active,
+        ];
+        $query = fn (): QueryBuilder => $this->connection(['datetime_precision' => $precision])->table(self::JSON);
+
+        $this->assertTrue($query()->insert($row(1)));
+        $this->assertTrue($query()->insert($row(2), 'JSONEachRow'));
+
+        $stored = $this->client()->select(
+            'SELECT * EXCEPT (id), toString(f) AS f_text, toString(d6) AS d6_text FROM ' . self::JSON . ' ORDER BY id'
+        )->rows();
+        $this->assertCount(2, $stored);
+        $this->assertSame($stored[0], $stored[1], 'both formats store the same values');
+        $this->assertSame('0.30000000000000004', $stored[0]['f_text']);
+        $this->assertSame($storedDateTime64, $stored[0]['d6_text']);
+        $this->assertSame('2024-01-02 03:04:05', $stored[0]['d']);
+        $this->assertNull($stored[0]['n']);
+        $this->assertSame(5, $stored[0]['ni']);
+        $this->assertSame(['x', "it's", 'back\\slash', ''], $stored[0]['s']);
+        $this->assertSame([[1.5, 1 / 3], []], $stored[0]['nested']);
+        $this->assertTrue($stored[0]['b']);
+        $this->assertSame('active', $stored[0]['e']);
+    }
+
+    /**
+     * Without a format, insert() follows the connection's insert_format, Eloquent's create() included. The insert is
+     * logged once by its head, without bindings; while the connection pretends, it is logged and not sent.
+     */
+    public function testInsertFollowsTheInsertFormatOfTheConnection(): void
+    {
+        $connection = $this->connection(['insert_format' => 'JSONEachRow']);
+        $connection->enableQueryLog();
+
+        $this->assertTrue($connection->table(self::ROWS)->insert([
+            ['id' => 10, 'name' => 'j', 'flag' => 1, 'note' => null, 'tags' => ['t']],
+            ['tags' => [], 'note' => 'n', 'flag' => 2, 'name' => 'k', 'id' => 11],
+        ]));
+        $created = LaravelQueryBuilderRow::create(['id' => 12, 'name' => 'm', 'flag' => 3, 'tags' => collect(['u'])]);
+        $queryLog = $connection->getQueryLog();
+        $log = $connection->pretend(fn (Connection $connection) => $connection->table(self::ROWS)->insert(['id' => 13, 'name' => 'p', 'flag' => 0, 'tags' => []]));
+
+        $this->assertTrue($created->exists);
+        $this->assertSame(
+            [
+                ['insert into "lqb_rows" ("id", "name", "flag", "note", "tags") format JSONEachRow', []],
+                ['insert into "lqb_rows" ("id", "name", "flag", "tags") format JSONEachRow', []],
+            ],
+            array_map(fn (array $entry): array => [$entry['query'], $entry['bindings']], $queryLog)
+        );
+        $this->assertSame(['insert into "lqb_rows" ("id", "name", "flag", "tags") format JSONEachRow'], array_column($log, 'query'));
+        $this->assertSame(
+            [
+                ['id' => 10, 'name' => 'j', 'flag' => 1, 'note' => null, 'tags' => ['t']],
+                ['id' => 11, 'name' => 'k', 'flag' => 2, 'note' => 'n', 'tags' => []],
+                ['id' => 12, 'name' => 'm', 'flag' => 3, 'note' => null, 'tags' => ['u']],
+            ],
+            $connection->table(self::ROWS)->where('id', '>=', 10)->orderBy('id')->get(['id', 'name', 'flag', 'note', 'tags'])
+                ->map(fn ($row): array => (array) $row)->all()
+        );
+    }
+
+    /**
+     * A row that the JSONEachRow insert refuses, here one whose keys differ from the first row's, stores nothing.
+     */
+    public function testARefusedJsonEachRowInsertStoresNothing(): void
+    {
+        try {
+            $this->connection()->table(self::ROWS)->insert([['id' => 10, 'name' => 'a', 'flag' => 0], ['id' => 11, 'name' => 'b']], 'JSONEachRow');
+            $this->fail('The insert should throw');
+        } catch (QueryException $exception) {
+            $this->assertStringStartsWith('Cannot insert the rows as JSONEachRow: the row at index 1 lacks the keys [flag].', $exception->getMessage());
+        }
+
+        $this->assertSame([1, 2, 3, 4], $this->ids($this->connection()->table(self::ROWS)));
     }
 
     // count() and paginate()

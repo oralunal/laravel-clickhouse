@@ -18,7 +18,8 @@ use RuntimeException;
  * withoutOnCluster() keeps a blueprint on the active node, dropAllTables() reaches every host, pretend() sends nothing,
  * and inside a session an ON CLUSTER statement on the name of a temporary table of the session is refused.
  *
- * Each test uses table names with a suffix of its own, and drops its tables with SYNC on both nodes.
+ * Each test uses table names with a suffix of its own, and drops its tables with SYNC on both nodes. Counts are
+ * selected as strings, since ClickHouse 24.8 quotes a UInt64 in JSON and 25.8 and later do not.
  */
 class SchemaBlueprintClusterTest extends TestCase
 {
@@ -72,7 +73,7 @@ class SchemaBlueprintClusterTest extends TestCase
             $table->string('name');
         });
 
-        foreach ($this->onEveryNode("SELECT engine_full FROM system.tables WHERE database = currentDatabase() AND name = '{$events}'") as $rows) {
+        foreach ($this->engineFullOnEveryNode($events) as $rows) {
             $this->assertSame(
                 [[
                     'engine_full' => "ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') ORDER BY id"
@@ -84,7 +85,7 @@ class SchemaBlueprintClusterTest extends TestCase
 
         DB::connection(self::CLUSTER)->statement("INSERT INTO `{$events}` VALUES (1, 'a'), (2, 'b')");
         DB::connection('clickhouse2')->statement("SYSTEM SYNC REPLICA `{$events}`");
-        $this->assertSame([['c' => '2']], DB::connection('clickhouse2')->select("SELECT count() AS c FROM `{$events}`"));
+        $this->assertSame([['c' => '2']], DB::connection('clickhouse2')->select("SELECT toString(count()) AS c FROM `{$events}`"));
 
         $schema->table($events, function (SchemaBlueprint $table) {
             $table->integer('extra')->default(7);
@@ -117,7 +118,7 @@ class SchemaBlueprintClusterTest extends TestCase
         }
         $this->assertSame(
             [['c' => '0']],
-            DB::connection('clickhouse')->select("SELECT count() AS c FROM system.zookeeper WHERE path = '/clickhouse/tables/{$uuid}'"),
+            DB::connection('clickhouse')->select("SELECT toString(count()) AS c FROM system.zookeeper WHERE path = '/clickhouse/tables/{$uuid}'"),
             'drop()->sync() leaves no replica of the table in ZooKeeper.'
         );
     }
@@ -132,7 +133,7 @@ class SchemaBlueprintClusterTest extends TestCase
             $table->unsignedBigInteger('version');
         });
 
-        foreach ($this->onEveryNode("SELECT engine_full FROM system.tables WHERE database = currentDatabase() AND name = '{$versions}'") as $rows) {
+        foreach ($this->engineFullOnEveryNode($versions) as $rows) {
             $this->assertSame(
                 [[
                     'engine_full' => "ReplicatedReplacingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}', version)"
@@ -147,37 +148,38 @@ class SchemaBlueprintClusterTest extends TestCase
      * A replicated table drops an insert identical to a recent one as a duplicate, while the MergeTree table of 3.0.0
      * kept it. The schema builder's replicated tables keep it: Laravel's migrator logs the same row in its migrations
      * table again after a rollback, which a deduplicating table would silently drop.
+     *
+     * The inserts are synchronous (async_insert = 0), which replicated_deduplication_window governs on every version.
+     * ClickHouse 26.3, whose inserts are asynchronous by default, checks an asynchronous insert against
+     * replicated_deduplication_window_for_async_inserts instead, which the schema builder leaves at the server's
+     * default, and drops an identical one, also 5 seconds later (26.3.46 checked; see
+     * SchemaGrammar::getReplicatedTableSettings()).
      */
     public function testAReplicatedTableKeepsAnInsertIdenticalToAnEarlierOne(): void
     {
         $logged = $this->table('logged');
         $cluster = DB::connection(self::CLUSTER);
 
-        if (str_starts_with($cluster->getServerVersion(), '26.3.')) {
-            $this->markTestSkipped(
-                'ClickHouse 26.3 (26.3.46 checked) deduplicates inserts into a replicated table even with'
-                . ' replicated_deduplication_window = 0; 24.8 and 26.8 keep them.'
-            );
-        }
-
         Schema::connection(self::CLUSTER)->create($logged, function (SchemaBlueprint $table) {
             $table->integer('id');
             $table->string('migration');
         });
 
-        $cluster->statement("INSERT INTO `{$logged}` VALUES (0, 'create_things')");
-        $cluster->statement("INSERT INTO `{$logged}` VALUES (0, 'create_things')");
+        $insert = "INSERT INTO `{$logged}` SETTINGS async_insert = 0 VALUES (0, 'create_things')";
+
+        $cluster->statement($insert);
+        $cluster->statement($insert);
         DB::connection('clickhouse2')->statement("SYSTEM SYNC REPLICA `{$logged}`");
 
-        foreach ($this->onEveryNode("SELECT count() AS c FROM `{$logged}`") as $rows) {
+        foreach ($this->onEveryNode("SELECT toString(count()) AS c FROM `{$logged}`") as $rows) {
             $this->assertSame([['c' => '2']], $rows);
         }
 
         $cluster->statement("ALTER TABLE `{$logged}` DELETE WHERE 1 SETTINGS mutations_sync = 2");
-        $cluster->statement("INSERT INTO `{$logged}` VALUES (0, 'create_things')");
+        $cluster->statement($insert);
         DB::connection('clickhouse2')->statement("SYSTEM SYNC REPLICA `{$logged}`");
 
-        foreach ($this->onEveryNode("SELECT count() AS c FROM `{$logged}`") as $rows) {
+        foreach ($this->onEveryNode("SELECT toString(count()) AS c FROM `{$logged}`") as $rows) {
             $this->assertSame([['c' => '1']], $rows, 'The row logged again after the delete is kept.');
         }
     }
@@ -330,7 +332,8 @@ class SchemaBlueprintClusterTest extends TestCase
 
     /**
      * A table that is not replicated holds other rows on each node, so change() checks every host before it sends a
-     * type that refuses NULL.
+     * type that refuses NULL. The change that runs gives a default(), which ClickHouse 26.3 and 26.8 require when a
+     * MODIFY COLUMN turns a Nullable type into one without NULL.
      */
     public function testChangeRefusesNullValuesOfAnyNode(): void
     {
@@ -357,7 +360,7 @@ class SchemaBlueprintClusterTest extends TestCase
         }
 
         DB::connection('clickhouse2')->statement("ALTER TABLE `{$local}` UPDATE name = 'b' WHERE name IS NULL SETTINGS mutations_sync = 2");
-        $schema->table($local, fn (SchemaBlueprint $table) => $table->string('name')->change());
+        $schema->table($local, fn (SchemaBlueprint $table) => $table->string('name')->default('')->change());
 
         foreach ($this->onEveryNode("SELECT type FROM system.columns WHERE database = currentDatabase() AND table = '{$local}' AND name = 'name'") as $rows) {
             $this->assertSame([['type' => 'String']], $rows);
@@ -497,6 +500,24 @@ class SchemaBlueprintClusterTest extends TestCase
         $this->tables[] = $table;
 
         return $table;
+    }
+
+    /**
+     * Read the engine_full of a table on each node. A sorting key of one column is read without its parentheses:
+     * ClickHouse 26.8 keeps those of the ORDER BY (`id`) that the schema builder writes, as ORDER BY (id), where 24.8
+     * and 26.3 print ORDER BY id.
+     *
+     * @return array<string, array<int, array{engine_full: string}>> The rows, by connection name
+     */
+    private function engineFullOnEveryNode(string $table): array
+    {
+        return array_map(
+            fn (array $rows): array => array_map(
+                fn (array $row): array => ['engine_full' => preg_replace('/ ORDER BY \((\w+)\)/', ' ORDER BY $1', $row['engine_full'])],
+                $rows
+            ),
+            $this->onEveryNode("SELECT engine_full FROM system.tables WHERE database = currentDatabase() AND name = '{$table}'")
+        );
     }
 
     /**

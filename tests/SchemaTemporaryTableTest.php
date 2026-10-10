@@ -80,6 +80,10 @@ class SchemaTemporaryTableTest extends TestCase
         $this->assertSame('0', $this->countTables("name = '" . self::TEMPORARY . "'"));
     }
 
+    /**
+     * ClickHouse 26.8 keeps the parentheses of the ORDER BY (`id`) that the schema builder writes in
+     * create_table_query, ORDER BY (id), where 24.8 and 26.3 print ORDER BY id; the test reads it without them.
+     */
     public function test_a_temporary_table_takes_the_engine_of_the_blueprint(): void
     {
         $table = $this->connection()->session(function (Connection $connection): array {
@@ -95,6 +99,13 @@ class SchemaTemporaryTableTest extends TestCase
                 . self::TEMPORARY . "'"
             );
         });
+        $table = array_map(
+            fn (array $row): array => array_replace(
+                $row,
+                ['create_table_query' => str_replace(' ORDER BY (id)', ' ORDER BY id', $row['create_table_query'])]
+            ),
+            $table
+        );
 
         $this->assertSame(
             [[

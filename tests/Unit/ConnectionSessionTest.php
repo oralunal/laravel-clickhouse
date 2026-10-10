@@ -350,7 +350,11 @@ class ConnectionSessionTest extends TestCase
 
     public function test_rows_that_a_lazy_reader_read_inside_the_callback_are_returned(): void
     {
-        $connection = $this->connection();
+        $connection = $this->connection(new CannedAsyncClient(
+            fn (string $sql): CurlerResponse => str_ends_with($sql, "\nFORMAT JSONEachRow")
+                ? CannedAsyncClient::response(200, "{\"x\":\"1\"}\n", [], 'application/x-ndjson; charset=UTF-8')
+                : CannedAsyncClient::json([['x' => '1']])
+        ));
 
         $rows = $connection->session(
             fn (Connection $connection): array => iterator_to_array($connection->cursor('SELECT 2'))

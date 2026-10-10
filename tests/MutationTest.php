@@ -592,6 +592,11 @@ class MutationTest extends TestCase
     /**
      * A column name from user input is one identifier: the injected assignments
      * and comment become part of a column name that the table does not have.
+     *
+     * The test reads the error name and the SQL that the client appends to the
+     * message, not ClickHouse's wording, which 25.8 and later write with escaped
+     * backticks. ClickHouse 24.8 answers THERE_IS_NO_COLUMN, 26.3 and 26.8
+     * NO_SUCH_COLUMN_IN_TABLE.
      */
     public function testUpdateQuotesEachColumnNameAsOneIdentifier(): void
     {
@@ -608,7 +613,11 @@ class MutationTest extends TestCase
             $this->table()->where('id', 1)->update(["v` = 'x', `d` = '2000-01-01' WHERE 1 -- " => 'ignored']);
             $this->fail('ClickHouse should reject the unknown column');
         } catch (DatabaseException $exception) {
-            $this->assertStringContainsString("v` = 'x', `d` = '2000-01-01' WHERE 1 --", $exception->getMessage());
+            $this->assertContains($exception->getClickHouseExceptionName(), ['THERE_IS_NO_COLUMN', 'NO_SUCH_COLUMN_IN_TABLE']);
+            $this->assertStringEndsWith(
+                "\nIN:ALTER TABLE `mutation_rows` UPDATE `v`` = 'x', ``d`` = '2000-01-01' WHERE 1 -- ` = 'ignored' WHERE `id` = 1",
+                $exception->getMessage()
+            );
         }
         $this->waitForMutations();
 
@@ -1489,8 +1498,10 @@ class MutationTest extends TestCase
     /**
      * A sub-query that reads a column of the mutated table: ClickHouse 24.8 accepts it in ALTER TABLE ... DELETE and
      * UPDATE, and then fails the mutation again and again, which blocks every later mutation of the table. The
-     * EXPLAIN that runs first refuses it, so nothing is sent. On a server that runs such a sub-query, the mutation
-     * is sent and must finish.
+     * EXPLAIN that runs first refuses it, so nothing is sent. ClickHouse 26.3 and 26.8 run such a sub-query in a
+     * SELECT, so the EXPLAIN passes, and refuse the mutation itself before they register it (see
+     * assertTheServerRefusedACorrelatedMutation()). On a server that runs such a sub-query in a mutation, the
+     * mutation is sent and must finish.
      *
      * @param Closure(Builder): mixed $mutation
      */
@@ -1517,6 +1528,8 @@ class MutationTest extends TestCase
             $this->assertInstanceOf(DatabaseException::class, $exception->getPrevious());
             $this->assertSame([], $this->mutationCommands(), 'nothing is sent');
             $this->assertSame([[1, 'a'], [2, 'b'], [3, 'c'], [4, 'd']], $this->rows());
+        } catch (DatabaseException $exception) {
+            $this->assertTheServerRefusedACorrelatedMutation($exception);
         }
 
         $this->table()->where('id', 1)->delete(false);
@@ -1538,6 +1551,8 @@ class MutationTest extends TestCase
         } catch (QueryException $exception) {
             $this->assertStringStartsWith('Cannot delete with a where condition that ClickHouse cannot run: ', $exception->getMessage());
             $this->assertSame([], $this->mutationCommands(), 'nothing is sent');
+        } catch (DatabaseException $exception) {
+            $this->assertTheServerRefusedACorrelatedMutation($exception);
         }
 
         $connection->table(self::TABLE)->where('id', 1)->delete();
@@ -1867,6 +1882,23 @@ class MutationTest extends TestCase
     }
 
     /**
+     * Check that ClickHouse refused a mutation whose sub-query reads a column of the mutated table when it got the
+     * statement, so that no mutation stays behind to block later ones, and that the rows are unchanged.
+     *
+     * ClickHouse 26.3 answers UNKNOWN_IDENTIFIER and 26.8 NOT_IMPLEMENTED ('Correlated subqueries in mutation filter
+     * are not supported'), while their EXPLAIN of the same condition passes (26.3.46 and 26.8.21 checked).
+     *
+     * @param DatabaseException $exception
+     * @return void
+     */
+    private function assertTheServerRefusedACorrelatedMutation(DatabaseException $exception): void
+    {
+        $this->assertContains($exception->getClickHouseExceptionName(), ['UNKNOWN_IDENTIFIER', 'NOT_IMPLEMENTED']);
+        $this->assertSame([], $this->mutationCommands(), 'no mutation is registered');
+        $this->assertSame([[1, 'a'], [2, 'b'], [3, 'c'], [4, 'd']], $this->rows());
+    }
+
+    /**
      * Get the commands of the mutations that ClickHouse has registered on the table.
      *
      * A lightweight delete is registered as UPDATE _row_exists = 0.
@@ -1921,12 +1953,23 @@ class MutationTest extends TestCase
         );
     }
 
+    /**
+     * Get the command of the mutation that ClickHouse registered last on the table.
+     *
+     * ClickHouse 25.8 and later (25.8, 26.3 and 26.8 checked) write the command in parentheses, such as
+     * (DELETE WHERE id = 1), where 24.8 writes DELETE WHERE id = 1. One pair of surrounding parentheses is
+     * removed, so that the command reads the same on every version.
+     *
+     * @return string
+     */
     private function lastMutationCommand(): string
     {
-        return $this->client()->select(
+        $command = $this->client()->select(
             "SELECT command FROM system.mutations WHERE database = currentDatabase() AND table = '" . self::TABLE . "'"
             . ' ORDER BY create_time DESC, mutation_id DESC LIMIT 1'
         )->fetchOne('command');
+
+        return str_starts_with($command, '(') && str_ends_with($command, ')') ? substr($command, 1, -1) : $command;
     }
 
     /**

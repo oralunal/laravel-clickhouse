@@ -13,6 +13,7 @@ use Oralunal\LaravelClickHouse\ClientRequests;
 use Oralunal\LaravelClickHouse\Connection;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use Oralunal\LaravelClickHouse\JsonEachRowEncoder;
+use ReflectionMethod;
 use Throwable;
 
 /**
@@ -57,7 +58,8 @@ trait HasBufferedInserts
      *
      * While the model's connection pretends (see DB::pretend()), the rows are not buffered: they go through the
      * insert at once, which logs the INSERT and sends nothing, so that a flush after pretend() ends, such as the
-     * automatic one at the end of the request, cannot send them.
+     * automatic one at the end of the request, cannot send them. The model's connection is the one that its inserts
+     * go through, also when the model overrides resolveConnection() (see madeConnectionPretends()).
      *
      * @param array<string, mixed>|array<int|string, array<string, mixed>> $rowOrRows
      * @return void
@@ -97,8 +99,14 @@ trait HasBufferedInserts
      *
      * The rows are sent as insertAssoc() sends them (see insertKeyedRows()): in the
      * model's insert format, with each key sent as a column name with its backticks
-     * and backslashes escaped, and while the connection pretends, the INSERT is
-     * logged and not sent, and the buffer is emptied as after a flush.
+     * and backslashes escaped. While the model's connection pretends, the INSERT is
+     * logged and not sent, and the rows stay buffered, so that the first flush after
+     * pretend() ends, such as the automatic one at the end of the request, sends
+     * them: pretending must not lose rows that were buffered before it began.
+     *
+     * The model's connection is the one that its resolveConnection() returns, which
+     * the insert goes through, also when a model overrides resolveConnection(): the
+     * rows are kept exactly when that connection logs the INSERT instead of sending it.
      */
     public static function flushBuffer(): ?Statement
     {
@@ -114,7 +122,11 @@ trait HasBufferedInserts
         // has refused every row with another key set, so reordering is enough.
         $rows = static::reorderAssocRowKeys($rows);
 
+        $pretending = (new static())->resolveConnection()->pretending();
         $statement = self::insertKeyedRows($rows);
+        if ($pretending) {
+            return $statement;
+        }
 
         unset(static::$buffers[static::class], static::$modelsWithBuffer[static::class]);
         BufferedInsertRegistry::remove(static::class);
@@ -125,7 +137,8 @@ trait HasBufferedInserts
     /**
      * Flush every model that currently has buffered rows: those of every copy of
      * this trait (see BufferedInsertRegistry), whichever model it is called on.
-     * Each model's own flushBuffer() sends its rows.
+     * Each model's own flushBuffer() sends its rows, or, while that model's
+     * connection pretends, logs the INSERT and keeps them.
      *
      * @param bool $silent When true, exceptions are reported via report() instead of bubbling.
      *                     Used by the script-shutdown auto-flush hook.
@@ -344,19 +357,28 @@ trait HasBufferedInserts
     }
 
     /**
-     * Determine if the model's connection pretends, without making the connection: a connection that the database
-     * manager has not made yet, which pings a node, cannot be pretending.
+     * Determine if the model's connection, the one that its inserts go through, pretends, without making the
+     * connection: a connection that the database manager has not made yet, which pings a node, cannot be pretending.
+     *
+     * A model that overrides resolveConnection() chooses its connection itself, so its resolveConnection() is asked,
+     * which may make the connection. Otherwise the connection that the model's $connection names, or the default one,
+     * is looked up among the connections that the database manager has made.
      *
      * @return bool
      */
     private static function madeConnectionPretends(): bool
     {
+        $instance = new static();
+        if ((new ReflectionMethod($instance, 'resolveConnection'))->class !== BaseModel::class) {
+            return $instance->resolveConnection()->pretending();
+        }
+
         $container = Container::getInstance();
         if (!$container->bound('db') || !$container->bound('config')) {
             return false;
         }
 
-        $name = (new static())->connection ?? $container->make('config')->get('database.default');
+        $name = $instance->connection ?? $container->make('config')->get('database.default');
         $connection = $container->make('db')->getConnections()[$name] ?? null;
 
         return $connection instanceof Connection && $connection->pretending();

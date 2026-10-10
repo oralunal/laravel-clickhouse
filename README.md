@@ -21,6 +21,8 @@ this package's namespace; see [Credits](#credits).
 - ClickHouse SQL in the query builder: `PREWHERE`, `WITH [RECURSIVE]`, `SAMPLE ... OFFSET`, `ARRAY JOIN` over several arrays, `SEMI`/`ANTI`/`ASOF`/`CROSS` joins, `INTERSECT`/`EXCEPT`, `IS NULL` and `empty()` checks; dates, booleans and enums as query values
 - Laravel's where methods in the query builder: `whereColumn()`, `whereExists()`, `whereAll()`/`whereAny()`/`whereNone()`, `whereDate()` and the other date conditions, `whereLike()`, `when()`, `latest()` and `inRandomOrder()`
 - Laravel's own query builder as an option (`fix_default_query_builder` set to `false`), and `?` bindings in raw SQL, which the package writes into the query as escaped ClickHouse literals
+- `cursor()` reads a large result row by row with flat memory, on the connection and on Laravel's query builder
+- Laravel's migration commands on a ClickHouse connection: `migrate`, `migrate:rollback`, `migrate:refresh`, `migrate:status` and `schema:dump`
 - Eloquent attribute casts, accessors and mutators on model instances (`$model->column`, `fill()`, `create()`, `save()`, `toArray()`); `boolean` casts on `insertAssoc()`, `insertBulk()` and `buffer()` rows
 - Model events: `creating`, `created`, `saved`
 - Retries of failed requests (`retries`), optionally only of the requests that never reached the server (`retry_on`)
@@ -41,7 +43,94 @@ More: https://github.com/smi2/phpClickHouse#features
 
 - PHP 8.5+
 - Laravel 13+
-- ClickHouse server 24.x (older 20+ versions usually work but are no longer tested)
+- ClickHouse server 24.8 or later. The tests run on 24.8, 26.3 and 26.8; older
+  versions may work but are not tested.
+
+### Newer ClickHouse versions
+
+The package sends the same SQL to every version, but the defaults of
+ClickHouse changed after 24.8, and with them some results. The examples in this
+README show what 24.8 returns. These are the differences on 26.3 and 26.8, and
+the connection `settings`, or the server config, that bring back the behavior
+of 24.8 where one exists:
+
+- **64-bit integers.** 24.8 returns `UInt64` and `Int64` values, such as the
+  result of SQL's `count()`, as strings, such as `'3'`. From 25.8,
+  `output_format_json_quote_64bit_integers` is `0`, so they come back as JSON
+  numbers, which PHP reads as ints, or as floats above `PHP_INT_MAX`, where
+  digits are lost: `toUInt64('18446744073709551615')` gives
+  `1.8446744073709552E+19`. `'settings' => ['output_format_json_quote_64bit_integers' => 1]`,
+  or `->settings('output_format_json_quote_64bit_integers', 1)` on one query,
+  returns them as strings on every version. The query builder's `count()`
+  returns an int either way.
+- **Asynchronous inserts.** 26.3 and 26.8 insert asynchronously by default
+  (`async_insert = 1` with `wait_for_async_insert = 1`), so each `INSERT`
+  waits for the server to flush its buffer. The number of rows that
+  `affectingStatement()` and `insertUsing()` report changes with it (see
+  [Raw SQL with bindings](#raw-sql-with-bindings)), and 26.3 drops an
+  asynchronous insert into a replicated table that is identical to an earlier
+  one (see [The schema builder on a cluster](#the-schema-builder-on-a-cluster)).
+  `'settings' => ['async_insert' => 0]` inserts synchronously, as 24.8 does.
+  The migration repository and the load of a schema dump always insert
+  synchronously.
+- **Mutations on a server with little RAM.** When the server config does not
+  set `background_pool_size`, 26.8 lowers it from 16 to the server's RAM in
+  GiB, such as 3 on a server with 3.8 GiB and 2 in a container limited to
+  2 GiB, and then postpones a mutation while the pool has too few idle
+  threads. 24.8 and 26.3 keep 16. A statement that waits for its mutation
+  then takes a few hundred milliseconds, and now and then more than 2
+  seconds, where 24.8 and 26.3 usually take less than 20 ms: a
+  lightweight `DELETE`, an `ALTER TABLE ... DELETE` or `UPDATE` with
+  `mutations_sync`, and the delete with which a rollback removes a migration
+  from the `migrations` table (see
+  [Which connection holds the `migrations` table](#which-connection-holds-the-migrations-table)).
+  With the packaged `timeout_query` of 2 seconds, `migrate:rollback`,
+  `migrate:refresh` and `migrate:reset` can then fail with
+  `Operation timed out after 2001 milliseconds with 0 bytes received` after
+  the migration's `down()` ran, while the server still deletes the row. Raise
+  `timeout_query` for migration commands, or set
+  `<background_pool_size>16</background_pool_size>` in the server config,
+  which brings back the timing of 24.8.
+- **Dates with a sub-second part.** 26.8 parses a date with
+  `date_time_input_format` and `cast_string_to_date_time_mode` set to
+  `best_effort`, so a `DateTime` column cuts the sub-second part off, in
+  inserts and in conditions, where 24.8 and 26.3 refuse it (see
+  [Dates with microseconds](#dates-with-microseconds)). On 26.8, a condition
+  is refused again with `cast_string_to_date_time_mode` set to `basic`, an
+  insert in the JSONEachRow format with `date_time_input_format` set to
+  `basic`, and a `Values` insert only with both. 24.8 has no
+  `cast_string_to_date_time_mode` and fails every query of a connection whose
+  `settings` name it, with `UNKNOWN_SETTING`, so set it only on 26.x
+  connections.
+- **`change()` to a type without `NULL`.** 26.3 and 26.8 refuse to make a
+  `nullable()` column a type without `NULL` unless the new definition has a
+  default: `$table->string('note')->default('')->change()`. Without one, they
+  fail with `BAD_ARGUMENTS`,
+  ``Please specify `DEFAULT` expression in ALTER MODIFY COLUMN statement``.
+  `change()` still refuses the column while it holds `NULL` values (see
+  [Changing a column](#changing-a-column)).
+- **Sorting keys.** 26.8 prints a sorting key of one column that the schema
+  builder writes as ``ORDER BY (`id`)`` with its parentheses, as
+  `ORDER BY (id)` in `SHOW CREATE TABLE` and `schema:dump`, and as `(id)` in
+  `system.tables`, where 24.8 and 26.3 print `ORDER BY id`. The table is the
+  same, and `Schema::getIndexes()` gives `['id']` on every version.
+- **Correlated sub-queries.** 26.3 and 26.8 run a `SELECT` whose sub-query
+  reads a column of the outer query, which 24.8 refuses, and refuse a mutation
+  with such a condition at once (see [EXISTS sub-queries](#exists-sub-queries)).
+- **`INTERSECT` and `EXCEPT`.** From 25.8, a query that reads only some
+  columns of an `INTERSECT` or `EXCEPT` sub-query gets the right rows. The
+  package still reads every column for `exists()` and `count()`, which is
+  harmless (see [UNION, INTERSECT and EXCEPT](#union-intersect-and-except)).
+- **A lightweight delete with `UNION`, `INTERSECT` or `EXCEPT`** in its
+  condition runs on 26.8, while 24.8 and 26.3 fail it and leave a mutation
+  that blocks the later ones, so the package refuses it on every version (see
+  [Deletions](#deletions)).
+- **Floats.** 24.8 and 26.3 read some floats of an `INSERT` 1 or 2 units in
+  the last place off: between a fifth and a third of random doubles in the
+  samples checked, depending on how the doubles were drawn. 26.8 reads them
+  exactly. `precise_float_parsing = 1`, the default of 26.8, does not change
+  this on 24.8 or 26.3. `where('ratio', 1 / 3)` finds the row that an insert
+  of `1 / 3` stored on all three (see [Values in conditions](#values-in-conditions)).
 
 ## Installation
 
@@ -438,9 +527,9 @@ Model instances handle their attributes as Eloquent models do:
   `microsecond`, `Y-m-d H:i:s.u` for a date with a sub-second part (see
   [Dates with microseconds](#dates-with-microseconds)). Use `Y-m-d H:i:s.u` to
   keep the microseconds of a `DateTime64` column at either precision.
-  ClickHouse rejects microseconds for a `DateTime` column, so on a connection
-  at `microsecond`, give a model with such a column
-  `protected $dateFormat = 'Y-m-d H:i:s';`. Override `serializeDate()` to
+  ClickHouse 24.8 and 26.3 reject microseconds for a `DateTime` column, and
+  26.8 cuts them off, so on a connection at `microsecond`, give a model with
+  such a column `protected $dateFormat = 'Y-m-d H:i:s';`. Override `serializeDate()` to
   change how `toArray()` writes dates.
 
 ```php
@@ -650,21 +739,28 @@ only a smi2 client, `new Builder($client)`, follows no connection and writes
 whole seconds.
 
 What ClickHouse does with the sub-second part depends on the column type
-(ClickHouse 24.8 checked):
+(ClickHouse 24.8, 26.3 and 26.8 checked):
 
 | Column | A date with a sub-second part, at `microsecond` |
 | --- | --- |
 | `DateTime64(6)` | kept exactly, in inserts, conditions, `update()` and `delete()` |
 | `DateTime64(3)` | cut to milliseconds, in inserts and in conditions alike, so `where('d3', $at)` finds the row that the same `$at` inserted |
-| `DateTime` | refused: a condition fails with `TYPE_MISMATCH`, `Cannot convert string '2024-01-02 03:04:05.123456' to type DateTime`, and an insert with `CANNOT_PARSE_TEXT`, or `CANNOT_PARSE_INPUT_ASSERTION_FAILED` in the JSONEachRow format |
+| `DateTime` | refused on 24.8 and 26.3: a condition fails with `TYPE_MISMATCH`, `Cannot convert string '2024-01-02 03:04:05.123456' to type DateTime`, and an insert with `CANNOT_PARSE_TEXT`, or `CANNOT_PARSE_INPUT_ASSERTION_FAILED` in the JSONEachRow format. Cut to the second on 26.8, in inserts and in conditions alike, so `where('dt', '<', $at)` misses the row that the same `$at` inserted |
 | `Date`, `Date32` | as at `second`: ClickHouse does not compare them with a date and a time, so pass `$date->format('Y-m-d')` |
 
 On a connection that also writes to `DateTime` columns, pass those a string,
 such as `$date->format('Y-m-d H:i:s')`, and give models with such a column
-`protected $dateFormat = 'Y-m-d H:i:s';`. With
-`'date_time_input_format' => 'best_effort'` in the connection's `settings`,
-ClickHouse cuts the sub-second part off in inserts into a `DateTime` column,
-but conditions still fail.
+`protected $dateFormat = 'Y-m-d H:i:s';`. Two settings decide whether
+ClickHouse refuses the sub-second part or cuts it off: `date_time_input_format`
+and, on 26.x only, `cast_string_to_date_time_mode`. 24.8 and 26.3 set them to
+`basic`, which refuses, and 26.8 to `best_effort`, which cuts. A condition
+follows `cast_string_to_date_time_mode`, a JSONEachRow insert
+`date_time_input_format`, and on 26.x a `Values` insert is refused only when
+both are `basic`. With `'date_time_input_format' => 'best_effort'` in the
+connection's `settings`, every version cuts the sub-second part off in
+inserts, while conditions still fail on 24.8 and 26.3. On 26.8, both settings
+set to `basic` bring the refusals back (see
+[Newer ClickHouse versions](#newer-clickhouse-versions)).
 
 The option takes `second` or `microsecond` in any letter case; a missing key,
 `null` and `''` mean `second`. ClickHouse cuts a date to the precision of its
@@ -912,7 +1008,8 @@ reads one row more than a page instead of the total. `getQueryForCount()`,
 queries that `count()`, `exists()` and `paginate()` run, without running them:
 `MyTable::where('field_two', '>', 0)->getQueryForCount()->toSql()` gives
 ``SELECT count() as `count` FROM `my_table` WHERE `field_two` > 0``. ClickHouse
-returns the count as a string, such as `'2'`, which `count()` casts to an int.
+24.8 returns the count as a string, such as `'2'`, and 25.8 and later as an
+int, which `count()` returns on every version.
 
 ### First row, single values and collections
 
@@ -1084,7 +1181,8 @@ DB::connection('clickhouse')->selectParallelly([
 ```
 
 The queries that `count()`, `exists()` and `paginate()` run can share a batch.
-ClickHouse returns the count as a string:
+ClickHouse 24.8 returns the count as a string, and 25.8 and later as an int
+(see [Newer ClickHouse versions](#newer-clickhouse-versions)):
 
 ```php
 $query = MyTable::where('field_two', '>', 15)->orderBy('id');
@@ -1190,6 +1288,11 @@ the items of an `InsertArray::TYPE_DECIMAL` (see
 [Helpers for inserting different data types](#helpers-for-inserting-different-data-types)).
 So after `MyTable::insertAssoc([['ratio' => 1 / 3]])`, `where('ratio', 1 / 3)`
 finds the row. `NAN`, `INF` and `-INF` are sent as `nan`, `inf` and `-inf`.
+ClickHouse 24.8 and 26.3 do not read every float of an `INSERT` exactly:
+between a fifth and a third of random doubles, in the samples checked, are
+stored 1 or 2 units in the last place off, so an equality condition can miss
+such a row there. 26.8 reads them exactly (see
+[Newer ClickHouse versions](#newer-clickhouse-versions)).
 
 Named bindings such as `:ratio` in raw SQL still send a float with 14
 significant digits, as every insert of 3.0.0 did. So they store `1 / 3` as
@@ -1326,8 +1429,9 @@ operators take no value; `where('parent_id', 'IS NULL', 5)` throws an
 `InvalidArgumentException`.
 
 Only a column whose type accepts `NULL` holds it: `Nullable(...)`,
-`LowCardinality(Nullable(...))`, the experimental `Variant(...)` and `Dynamic`
-types, and a `SimpleAggregateFunction` over one of them. On any other column,
+`LowCardinality(Nullable(...))`, the `Variant(...)` and `Dynamic` types,
+experimental on ClickHouse 24.8, and a `SimpleAggregateFunction` over one of
+them. On any other column,
 `IS NULL` matches no row.
 
 #### Empty strings and arrays
@@ -1406,14 +1510,14 @@ MyTable::select('id')->whereExists(fn ($query) => $query->from('users')->where('
 `orWhereNotExists()` take a closure, which receives a new query, or a query
 builder of this package. The sub-query is compiled when the method is called.
 
-ClickHouse has no correlated sub-queries: a sub-query cannot read a column of
-the outer query, as Laravel code often does with
+ClickHouse 24.8 has no correlated sub-queries: a sub-query cannot read a
+column of the outer query, as Laravel code often does with
 `whereColumn('orders.user_id', 'users.id')`. A select with such a sub-query
-fails with `UNSUPPORTED_METHOD`. ClickHouse would accept a mutation with it,
-and then fail the mutation in the background again and again, which holds back
-every later mutation of the table. So `delete()` and `update()` check such a
-condition first, and throw a `QueryException` without sending the mutation
-(see [Deletions](#deletions)):
+fails with `UNSUPPORTED_METHOD`. ClickHouse 24.8 would accept a mutation with
+it, and then fail the mutation in the background again and again, which holds
+back every later mutation of the table. So `delete()` and `update()` check
+such a condition first, and throw a `QueryException` without sending the
+mutation (see [Deletions](#deletions)):
 
 ```php
 DB::connection('clickhouse')->table('users')
@@ -1424,12 +1528,18 @@ DB::connection('clickhouse')->table('users')
 // delete by them instead: whereIn('id', $query->pluck('id')).
 ```
 
-The same holds for `whereIn()` with such a sub-query.
+The same holds for `whereIn()` with such a sub-query. ClickHouse 26.3 and 26.8
+run a select with a correlated sub-query. They refuse a mutation with one at
+once, so the check passes and the mutation throws the `DatabaseException` of
+the server, and no mutation is left behind: `UNKNOWN_IDENTIFIER`
+(`Missing columns: 'users.id' ...`) on 26.3 and `NOT_IMPLEMENTED`
+(`Correlated subqueries in mutation filter are not supported`) on 26.8.
 
-ClickHouse's analyzer, on by default in 24.8, compares only some of the
-columns of an `INTERSECT` or `EXCEPT` query inside `EXISTS`, and gets wrong
-results. So a sub-query that uses `INTERSECT` or `EXCEPT` is compiled to read
-every column: `EXISTS (SELECT * FROM (<a> EXCEPT <b>) WHERE NOT ignore(*))`.
+ClickHouse's analyzer, on by default from 24.8, compares only some of the
+columns of an `INTERSECT` or `EXCEPT` query inside `EXISTS` on 24.8, and gets
+wrong results; 25.8 and later compare them all. So a sub-query that uses
+`INTERSECT` or `EXCEPT` is compiled to read every column, which gives the same
+rows on every version: `EXISTS (SELECT * FROM (<a> EXCEPT <b>) WHERE NOT ignore(*))`.
 So is a sub-query that reads rows from such a query, through `from()`, a join,
 or a `withExpression()` of its own or of the outer query, which must be added
 before `whereExists()` is called. An `INTERSECT` or `EXCEPT` written in raw SQL
@@ -1577,8 +1687,8 @@ query: `$a->unionAll($b->unionAll($c)->settings(['limit' => 1]))` compiles to
 `<a> UNION ALL <b> UNION ALL <c> SETTINGS limit=1`. Call `settings()` on the
 outer query instead.
 
-On ClickHouse 24.8, a query that ends with an operand in parentheses cannot
-have `settings()` when you use it as a sub-query, in `table()`, `whereIn()`,
+On ClickHouse 24.8, 26.3 and 26.8, a query that ends with an operand in
+parentheses cannot have `settings()` when you use it as a sub-query, in `table()`, `whereIn()`,
 `withExpression()` or another set operation: ClickHouse rejects
 `(<a> EXCEPT (<b> UNION ALL <c>) SETTINGS max_threads=1)` with a syntax error.
 Call `settings()` on the outer query instead, such as
@@ -1611,10 +1721,11 @@ DB::connection('clickhouse')->table($query)->orderBy('user_id')->chunk(1000, $ca
 // SELECT * FROM (<query>) ORDER BY `user_id` ASC LIMIT 0, 1000
 ```
 
-ClickHouse's analyzer, on by default in 24.8, gets wrong results when a query
-reads only some columns of an `INTERSECT` or `EXCEPT` sub-query: it compares
-only the columns that are read. For example, `SELECT count() FROM (<a> EXCEPT <b>)`
-returned `0` for a sub-query that returns two rows. `exists()`, `count()` and
+On ClickHouse 24.8, the analyzer gets wrong results when a query reads only
+some columns of an `INTERSECT` or `EXCEPT` sub-query: it compares only the
+columns that are read. For example, `SELECT count() FROM (<a> EXCEPT <b>)`
+returned `0` for a sub-query that returns two rows. 25.8 and later get them
+right, and the package's workaround gives the same rows there. `exists()`, `count()` and
 the total of `paginate()` read every column, with `WHERE NOT ignore(*)`, when
 the query uses `INTERSECT` or `EXCEPT`, or reads rows from a query that does: a
 sub-query in `from()` or a join, or a builder or closure given to
@@ -1667,11 +1778,13 @@ DB::connection('clickhouse')->table('r')
 // WITH RECURSIVE `r` AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM `r` WHERE `n` < 10) SELECT * FROM `r`
 ```
 
-`WITH RECURSIVE` needs ClickHouse's analyzer, which 24.8 enables by default.
-With `enable_analyzer = 0` the query fails with `UNKNOWN_TABLE`.
+`WITH RECURSIVE` needs ClickHouse's analyzer, which 24.8 and later enable by
+default. With `enable_analyzer = 0` the query fails: on 24.8 with
+`UNKNOWN_TABLE`, and from 25.8 with `UNSUPPORTED_METHOD`,
+``WITH RECURSIVE is not supported with the old analyzer. Please use `enable_analyzer=1`.``
 
 A sub-query used in `from()`, a join, `whereIn()` or a set operation can have
-its own `WITH` clause. On ClickHouse 24.8, a query in a set operation that has
+its own `WITH` clause. On ClickHouse 24.8, 26.3 and 26.8, a query in a set operation that has
 its own `WITH` clause does not see the sub-queries that `withExpression()`
 names in the outer query, and fails with `UNKNOWN_TABLE`; the outer
 `withAlias()` values stay visible. Select such a query from a sub-query
@@ -2098,14 +2211,16 @@ before the mutation is sent:
   `ACCESS_DENIED` for a user who may change the table but not read a table of
   the condition: delete by the keys instead, or grant `SELECT`. A condition
   without a sub-query or such an `IN` is left for ClickHouse to check when it
-  gets the mutation.
+  gets the mutation. ClickHouse 26.3 and 26.8 run the `EXPLAIN` of a
+  correlated sub-query, and then refuse the mutation themselves, at once and
+  without leaving it behind (see [EXISTS sub-queries](#exists-sub-queries)).
 - A lightweight delete, `delete(true)`, whose condition holds `UNION`,
   `INTERSECT` or `EXCEPT` outside quotes, as
   `whereIn('id', $a->unionAll($b))` or a `whereExists()` over an `EXCEPT` write
-  it, throws, because ClickHouse 24.8 fails such a delete and leaves its
-  mutation behind. `delete(false)` takes the same condition. Raw SQL with one
-  of these words for another reason, such as `SELECT * EXCEPT (col)`, is
-  refused too.
+  it, throws, because ClickHouse 24.8 and 26.3 fail such a delete and leave its
+  mutation behind; 26.8 runs it. `delete(false)` takes the same condition. Raw
+  SQL with one of these words for another reason, such as
+  `SELECT * EXCEPT (col)`, is refused too.
 
 A mutation that fails anyway, for example one sent with `statement()`, holds
 back the later mutations of the table until you kill it:
@@ -2285,10 +2400,20 @@ DB::connection('clickhouse')->table('my_table')->insert($rows, 'JSONEachRow');
   without it, the connection's `insert_format` decides. Any other format throws
   an `InvalidArgumentException` before anything is sent:
   `insert() takes the format 'Values' or 'JSONEachRow', [CSV] given.`
-  `insert()` returns the statement of the insert, whose
-  `summary('written_rows')` gives the number of rows, such as `'2'`.
-- Laravel's query builder, with `fix_default_query_builder` set to `false`,
-  and [`insertFiles()`](#inserting-files) keep their own formats.
+  The `insert()` of the package's query builder returns the statement of the
+  insert, whose `summary('written_rows')` gives the number of rows, such as
+  `'2'`.
+- [Laravel's query builder](#laravels-query-builder), with
+  `fix_default_query_builder` set to `false`, takes the same second argument
+  and returns `true`, as Laravel's `insert()` does:
+  `DB::connection('clickhouse')->table('my_table')->insert($rows, 'JSONEachRow')`
+  sends `insert into "my_table" ("model_name", "some_param") format JSONEachRow`,
+  which the query log lists without bindings. Without the argument, its
+  `insert()` and `insertGetId()`, and with them Eloquent's `create()` and
+  `save()`, follow the connection's `insert_format`; `'Values'` sends Laravel's
+  `insert into ... values (?, ?)`. An empty list inserts nothing and returns
+  `true`.
+- [`insertFiles()`](#inserting-files) keeps the format of its files.
 - `insert_format` and `$insertFormat` take `Values` or `JSONEachRow` in any
   letter case; a missing key, `null` and `''` mean `Values`. Any other value
   throws an `InvalidArgumentException`: for `insert_format` when Laravel
@@ -2316,6 +2441,7 @@ checked):
 | `true` into a `UInt8` column | fails: `Cannot parse string 'true' as UInt8` | `1` |
 | An array with keys, such as `['x' => 1]`, into a `Map` column | fails with `TYPE_MISMATCH` | `{'x':1}` |
 | An empty `Map` | `[]` | `new \stdClass()`; `[]` fails |
+| A list, such as `[1, 'a']`, into a `Tuple(UInt8, String)` column | fails with `NO_COMMON_TYPE`, because it is written as an array | `(1, 'a')` |
 | A date with a time, such as a Carbon, into a `Date` column | the date | fails: pass `$date->format('Y-m-d')` |
 | A float with a fraction, such as `2.5`, into an integer column | cut off: `2` | fails: cast it with `(int)` or `round()` |
 | A string that is not valid UTF-8 | stored | an `InvalidArgumentException` before anything is sent |
@@ -2427,11 +2553,11 @@ quotes is `#@` followed by a `?` placeholder, so
 `select('SELECT #@? AS a', [5])` sends `SELECT #@5 AS a`, which ClickHouse
 rejects. Write `?`.
 
-`select()`, `cursor()`, `scalar()`, `selectOne()`, `selectParallelly()` and
-Laravel's query builder read the rows of a JSON result. A `SELECT` whose
-`FORMAT` clause names `JSON`, `JSONStrings`, `JSONCompact` or
-`JSONCompactStrings`, in any letter case, returns its rows. Any other format
-throws an `Oralunal\LaravelClickHouse\Exceptions\QueryException`, which is a
+`select()`, `scalar()`, `selectOne()`, `selectParallelly()` and Laravel's
+query builder read the rows of a JSON result. A `SELECT` whose `FORMAT` clause
+names `JSON`, `JSONStrings`, `JSONCompact` or `JSONCompactStrings`, in any
+letter case, returns its rows. Any other format throws an
+`Oralunal\LaravelClickHouse\Exceptions\QueryException`, which is a
 `ClickHouseDB\Exception\QueryException`, before anything is sent, and the
 message names the ways that read that format:
 
@@ -2452,10 +2578,52 @@ with a `FORMAT` clause that is now refused was sent and failed: with
 `TSV`, or with no rows for `JSONCompactEachRow`.
 
 `unprepared()` sends the SQL exactly as written, `?` and `??` included, and
-returns `true`. `cursor()` yields the rows of `select()` one by one, but reads
-all of them first, because the smi2 client has no server-side cursor; the
-`cursor()` of [Laravel's query builder](#laravels-query-builder) uses it.
-`lazy()`, `lazyById()` and `chunk()` read page by page and use less memory.
+returns `true`.
+
+`cursor()` yields the rows of a `SELECT` one by one, as associative arrays, as
+`select()` returns them, and its memory stays flat however many rows the
+query returns:
+
+```php
+foreach ($clickhouse->cursor('SELECT id, field_one FROM my_table WHERE field_two > ? ORDER BY id', [0]) as $row) {
+    // ['id' => 1, 'field_one' => 'click'], then ['id' => 2, 'field_one' => 'view'], ...
+}
+// SELECT id, field_one FROM my_table WHERE field_two > 0 ORDER BY id
+// FORMAT JSONEachRow
+```
+
+- It asks for the result in `JSONEachRow`, on a line of its own after the
+  query, without a trailing `;`, and downloads it into a temporary stream,
+  `php://temp`, which keeps up to 2 MB in memory and moves to a temporary file
+  above that. It decodes each row as it yields it. The query runs when the
+  first row is asked for, and the whole result is downloaded before that row
+  is yielded, so the download must end within the connection's
+  `timeout_query`. On ClickHouse 24.8, two million rows of an `id` and a
+  string took 2 MB more memory, where `select()` took 193 MB for 200,000 of
+  them.
+- A query with a `FORMAT` clause of its own, `JSON` included, throws an
+  `Oralunal\LaravelClickHouse\Exceptions\QueryException` before anything is
+  sent:
+  `Cannot read the rows of a query whose FORMAT clause names CSV with cursor(): cursor() asks for the result in JSONEachRow itself and yields its rows one by one. Leave the FORMAT clause out.`
+- An error that ClickHouse reports throws a
+  `ClickHouseDB\Exception\DatabaseException` with its code and message before
+  any row is yielded, also when the query fails after its first rows (24.8,
+  26.3 and 26.8 checked). A timeout or a refused connection throws the smi2
+  client's `ClickHouseDB\Exception\QueryException`.
+- A string that is not valid UTF-8, such as a binary hash in a
+  `FixedString(16)` column, is yielded as `select()` returns it, with U+FFFD in
+  place of the invalid bytes: `SELECT unhex('C328') AS bad` gives
+  `['bad' => "\u{FFFD}("]`. For a read-only user, the connection's `readonly`
+  option, PHP replaces each invalid byte instead, so such a string can hold
+  more U+FFFD than `select()` gives.
+- The query is logged once, with its bindings. While the connection
+  [pretends](#pretending), it is logged, and nothing is sent or yielded.
+- The `cursor()` of [Laravel's query builder](#laravels-query-builder) and of
+  its Eloquent models uses it. `lazy()`, `lazyById()` and `chunk()` read page
+  by page, with a query for each page. Inside
+  [`session()`](#sessions-and-temporary-tables), read the rows before the
+  callback returns.
+
 In 3.0.0, `unprepared()` and `cursor()` failed with
 `Call to a member function exec() on null` and
 `Call to a member function prepare() on null`. `selectResultSets()` throws a
@@ -2464,12 +2632,23 @@ In 3.0.0, `unprepared()` and `cursor()` failed with
 `affectingStatement()`, which Laravel's `update()`, `delete()` and
 `insertUsing()` call, returns for an `INSERT` the number of rows that
 ClickHouse reports as written, `written_rows` of the `X-ClickHouse-Summary`
-header, where 3.0.0 returned `1`. `written_rows` also counts the rows that the
-materialized views of the table write, so an `INSERT` of 3 rows into a table
-with one materialized view returns `6`, and it is `0` for an asynchronous
-insert (`async_insert`). Any other statement returns `1`, as in 3.0.0, because
-ClickHouse does not report how many rows a mutation changes. `statement()` and
-`insert()` return `true`.
+header, where 3.0.0 returned `1`. Any other statement returns `1`, as in
+3.0.0, because ClickHouse does not report how many rows a mutation changes.
+`statement()` and `insert()` return `true`. `written_rows` is not always the
+number of rows that the `INSERT` inserted:
+
+- A synchronous insert also counts the rows that the materialized views of the
+  table write, so an `INSERT` of 3 rows into a table with one materialized view
+  returns `6`. An `INSERT ... SELECT`, as `insertUsing()` sends it, is always
+  synchronous.
+- An asynchronous insert (`async_insert`) leaves those rows out. ClickHouse
+  24.8 reports `0` for it, also when the query waits for the rows
+  (`wait_for_async_insert`). 26.3 and 26.8 report the rows of the table when
+  the query waits, `3` in the example, and `0` when it does not.
+- 26.3 and 26.8 insert asynchronously by default, so there the example returns
+  `3`. `'settings' => ['async_insert' => 0]` in the connection config makes an
+  insert that does not set `async_insert` itself synchronous, with the counts
+  of 24.8.
 
 `escape()` writes a value as a ClickHouse literal, for SQL that you write
 yourself:
@@ -2547,12 +2726,19 @@ $log = DB::connection('clickhouse')->pretend(function ($connection) {
 //  'ALTER TABLE `my_table` DELETE WHERE `id` = 1']
 ```
 
-- A JSONEachRow insert is listed with its `INSERT ... FORMAT JSONEachRow`
-  only. Its rows are not encoded, so a row that the insert would refuse, such
-  as one with raw SQL, is not refused while pretending.
+- A JSONEachRow insert, of a model, of `buffer()`, of either query builder,
+  is listed with its `INSERT ... FORMAT JSONEachRow` only, without the rows.
+  The rows are still encoded, so a row that the insert would refuse, such as
+  one with raw SQL or a string that is not valid UTF-8, throws an
+  `InvalidArgumentException` while pretending too, and nothing is listed.
 - `buffer()` lists the insert of its rows at once and does not buffer them.
-  `flushBuffer()` lists the insert of the rows buffered before `pretend()`,
-  and empties the buffer without sending them.
+  `flushBuffer()` and `flushAllBuffers()` list the insert of the rows buffered
+  before `pretend()`, such as
+  ``INSERT INTO `my_table` (`id`,`field_one`)  VALUES  (2,'before')``, send
+  nothing and keep the rows buffered, so the first flush after `pretend()`,
+  such as the automatic one at the end of the request, sends them once. Both
+  ask the connection that the model's inserts go through, which a model that
+  overrides `resolveConnection()` chooses itself.
 - The checks that `delete()` and `update()` send before a mutation, the
   `EXPLAIN` of a condition with a sub-query and the lookup of a session's
   temporary tables, are not sent.
@@ -2726,6 +2912,15 @@ In 3.0.0, `whereDay()` and `whereMonth()` failed that way everywhere,
   needs the key; set `$incrementing` to `false` for keys such as UUIDs. In
   3.0.0, `insertGetId()` inserted the row and then failed with
   `Call to a member function lastInsertId() on null`.
+- `insert($rows, 'JSONEachRow')` sends the rows in the JSONEachRow format, and
+  without a format, `insert()`, `insertGetId()`, `create()` and `save()`
+  follow the connection's `insert_format`, `Values` by default (see
+  [Inserting rows as JSONEachRow](#inserting-rows-as-jsoneachrow)). 3.0.0
+  ignored the second argument of `insert()` and always sent `values`.
+- `cursor()`, and Eloquent's `cursor()`, read the rows through the
+  connection's `cursor()`, with flat memory (see
+  [Raw SQL with bindings](#raw-sql-with-bindings)), where 3.0.0 failed with
+  `Call to a member function prepare() on null`.
 - `timeout(5)` sends `settings max_execution_time = 5` with the outermost
   `select`, and `forceIndex('idx_url')` and `ignoreIndex('idx_url')` send
   `settings force_data_skipping_indices = 'idx_url'` and
@@ -2878,7 +3073,7 @@ unless the query runs in a session, so outside `session()` it throws a
   that name, which their `ALTER TABLE` reaches.
 
 A temporary table can have the name of a table of the database. ClickHouse
-24.8 then runs `SELECT`, `INSERT`, `ALTER TABLE ... DELETE` and `UPDATE`,
+(24.8, 26.3 and 26.8 checked) then runs `SELECT`, `INSERT`, `ALTER TABLE ... DELETE` and `UPDATE`,
 `TRUNCATE`, `OPTIMIZE` and `DROP TABLE` on the temporary table, but a
 lightweight `DELETE FROM`, `RENAME TABLE`, `CREATE TABLE` and every statement
 with `ON CLUSTER` on the table of the database, with `ON CLUSTER` on every
@@ -3202,15 +3397,31 @@ Schema::dropIfExistsSync('events_old');
   renamed, can be created again at once, unlike a table of
   `createMergeTree()`, whose path is fixed. An engine named `Replicated...` or
   `Shared...`, and an engine outside the family, such as `Memory`, are kept.
-- `SETTINGS replicated_deduplication_window=0` keeps an insert that is
-  identical to an earlier one, as a `MergeTree` table does, where a replicated
-  table would drop it as a duplicate. This matters for Laravel's `migrations`
-  table, which logs the same row again after a rollback. `settings()` with
-  another value for it wins, and `null` leaves it to the server. An engine
-  that you name as replicated, and an `engine()` with a `SETTINGS` clause of
-  its own, get nothing. ClickHouse 26.3 (26.3.46 checked) drops such an insert
-  anyway: there, only an insert with `deduplicate_insert = 'disable'` or with
-  its own `insert_deduplication_token` keeps it.
+- `SETTINGS replicated_deduplication_window=0` keeps a synchronous insert that
+  is identical to an earlier one, as a `MergeTree` table does, where a
+  replicated table would drop it as a duplicate, on 24.8, 26.3 and 26.8.
+  `settings()` with another value for it wins, and `null` leaves it to the
+  server. An engine that you name as replicated, and an `engine()` with a
+  `SETTINGS` clause of its own, get nothing.
+- An asynchronous insert, the default of 26.3 and 26.8, is checked against
+  another window on some versions. 24.8 keeps it, unless
+  `async_insert_deduplicate` is `1`. 26.3 checks it against
+  `replicated_deduplication_window_for_async_inserts`, by default the last
+  10000 asynchronous inserts of the past 7 days, and drops an insert identical
+  to an earlier one, also
+  seconds later or after other inserts, whatever `insert_deduplicate` and
+  `async_insert_deduplicate` say. 26.8 keeps it. To keep such inserts on every
+  version, add the table setting
+  `$table->settings(['replicated_deduplication_window_for_async_inserts' => 0])`,
+  or insert synchronously, with `'settings' => ['async_insert' => 0]` in the
+  connection config or `SETTINGS async_insert = 0` in the `INSERT`. On 26.3, an
+  insert with `deduplicate_insert = 'disable'` or with an
+  `insert_deduplication_token` of its own is kept too.
+- Laravel's `migrations` table, which logs the same row again after a
+  rollback, keeps it on every version: the package's migration repository
+  inserts each row synchronously and with an `insert_deduplication_token` of
+  its own (see
+  [Which connection holds the `migrations` table](#which-connection-holds-the-migrations-table)).
 - `$table->replicated(false)` keeps the engine as given, for a table that each
   host keeps for itself. `$table->replicated()` makes it replicated on any
   connection, but outside `ON CLUSTER`, ClickHouse 24.8 refuses a replicated
@@ -3398,8 +3609,8 @@ is the column `` `n.a` ``, and a table name with a dot names its database, so
 `array()`, `map()`, `ipv4()`, `ipv6()` and `date32()` are `SchemaBlueprint`
 methods. An `IPv6` column stores the IPv4 address `127.0.0.1` as
 `::ffff:127.0.0.1`. `json()` stores the document as a string, because the
-`JSON` type of ClickHouse 24.8 is experimental; use
-`rawColumn('payload', 'JSON')` where your server allows it.
+`JSON` type of ClickHouse 24.8 is experimental; ClickHouse 25.8 and later
+enable it by default, so use `rawColumn('payload', 'JSON')` there.
 
 ClickHouse makes an enum an `Enum8` or an `Enum16` by its values. An `enum()`
 array with a string key maps each name to its number, and its integer keys are
@@ -3440,8 +3651,10 @@ to 65535 fit. Set `'exact_integer_types' => true`
 it changes the tables that are created after you set it, by `migrate:fresh` or
 in a new environment, and ClickHouse wraps a value that does not fit the
 narrower type without an error: `200` inserted into an `Int8` column reads
-back as `-56`, and `-1` in a `UInt32` column as `4294967295`. Laravel's `migrations` table keeps its 3.0.0 columns without the
-option: ``CREATE TABLE `migrations` (`id` Int32, `migration` String, `batch` Int32) ENGINE = MergeTree() ORDER BY (`id`)``.
+back as `-56`, and `-1` in a `UInt32` column as `4294967295`. Laravel's
+`migrations` table keeps its 3.0.0 columns, also with the option:
+``CREATE TABLE `migrations` (`id` Int32, `migration` String, `batch` Int32) ENGINE = MergeTree() ORDER BY (`id`)``
+(see [Which connection holds the `migrations` table](#which-connection-holds-the-migrations-table)).
 
 ClickHouse has no auto-increment: `id()` and the `increments()` methods create
 a plain integer column, and a row inserted without a value for it gets `0`.
@@ -3528,7 +3741,7 @@ Schema::create('visits', function (SchemaBlueprint $table) {
 
 | Method | Clause |
 | --- | --- |
-| `engine('ReplacingMergeTree(version)')` | `ENGINE = ReplacingMergeTree(version)`. Without it, the connection's `engine` option (`CLICKHOUSE_ENGINE`), and without that, `MergeTree()`. |
+| `engine('ReplacingMergeTree(version)')` | `ENGINE = ReplacingMergeTree(version)`. Without it, the connection's `engine` option (`CLICKHOUSE_ENGINE`), and without that, `MergeTree()`. Laravel's `migrations` table takes the option only when it is `MergeTree`, `ReplicatedMergeTree` or `SharedMergeTree` with its arguments alone, and `MergeTree()` otherwise. |
 | `orderBy('id', DB::raw('intHash32(id)'))` | ``ORDER BY (`id`, intHash32(id))``: a string is a column name and `DB::raw()` is SQL. The columns may come as an array; without any, `ORDER BY tuple()`. |
 | `primary($columns, $name)` | the sorting key, or with `orderBy()` the `PRIMARY KEY` (see below) |
 | `partitionBy('toYYYYMM(visited_at)')` | `PARTITION BY toYYYYMM(visited_at)` |
@@ -3574,6 +3787,13 @@ The clauses you set by name, `orderBy()`, `partitionBy()`, `sampleBy()`,
 ClickHouse accepts them, as an `S3` table takes `PARTITION BY`, or refuses
 them: a `Log` table with `orderBy()` fails with `BAD_ARGUMENTS`. An engine of
 another database, such as `engine('InnoDB')`, fails with `UNKNOWN_STORAGE`.
+
+Give the settings of a MergeTree table with `settings()`, not in the engine
+string: the sorting key follows the engine, so
+`engine('MergeTree() SETTINGS index_granularity = 1024')` gives
+``ENGINE = MergeTree() SETTINGS index_granularity = 1024 ORDER BY (`id`)``,
+which ClickHouse refuses with `SYNTAX_ERROR`. An engine string with a
+`SETTINGS` clause suits an engine without a sorting key, such as `Kafka`.
 
 #### Data-skipping indexes
 
@@ -3792,6 +4012,14 @@ column that becomes an `Int64`. A new type for a column of the sorting key
 fails with `ALTER_OF_COLUMN_IS_FORBIDDEN`, after the `REMOVE` statements
 before it have run.
 
+ClickHouse 26.3 and 26.8 refuse to make a `nullable()` column a type without
+`NULL` unless the new definition has a default, also when the column holds no
+`NULL`: `$table->string('referrer')->default('')->change()`. Without one, the
+`MODIFY COLUMN` fails with `BAD_ARGUMENTS`,
+``Cannot convert column 'referrer' from nullable type Nullable(String) to non-nullable type String. Please specify `DEFAULT` expression in ALTER MODIFY COLUMN statement.``,
+after the `REMOVE` statements before it have run. 24.8 takes it without a
+default.
+
 #### What throws, and what is not supported
 
 These calls throw before anything of the blueprint is sent, also the commands
@@ -3883,7 +4111,8 @@ ClickHouse is not your default connection, start with
 - `getIndexes()` returns the primary key, named `primary`, if the table has
   one, followed by the data-skipping indices. Their `columns` are the elements
   of the key or index expression: `ORDER BY (id, intHash32(id))` gives
-  `['id', 'intHash32(id)']`. `type` is `null` for the primary key, as on
+  `['id', 'intHash32(id)']`, and `ORDER BY (id)` gives `['id']`, also on
+  ClickHouse 26.8, which prints such a key as `(id)`. `type` is `null` for the primary key, as on
   Laravel's SQLite driver, and the index type, such as `minmax`, `set` or
   `bloom_filter`, for a data-skipping index; `primary` is `true` for the
   primary key only. Index names are lowercased, as Laravel's other drivers do,
@@ -3939,15 +4168,30 @@ are.
 
 When `php artisan migrate` runs against a ClickHouse database where no
 migrations have run yet, it loads the dump first. After that, it runs only the
-migrations created after the dump. On a `cluster` connection, the statements
-are sent to every node, the same way migrations are, without `ON CLUSTER`. So
-a dump of a connection with a `cluster_name` and nodes, whose schema builder
-creates replicated tables, does not load: such a table, Laravel's `migrations`
-table included, is dumped as
-`ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')`,
-which ClickHouse 24.8 refuses without `ON CLUSTER` with `BAD_ARGUMENTS`, after
-`migrate` has dropped the `migrations` table to load the dump. Do not squash
-the migrations of such a connection.
+migrations created after the dump. Before the load, Laravel drops the
+`migrations` table, which the package does with `SYNC`, so that the dump can
+create a replicated `migrations` table with a fixed replica path again at once.
+
+- Without a `cluster_name`, each statement of the dump goes to every node of
+  the connection, one after another, as `Migration::write()` sends a
+  statement.
+- With a `cluster_name`, each `CREATE TABLE`, `VIEW`, `MATERIALIZED VIEW` and
+  `DICTIONARY` statement gets `ON CLUSTER '<cluster_name>'` after the name of
+  the object and is sent once, so ClickHouse creates the object on every host
+  of the cluster, also on hosts that the connection does not list, whose
+  database must exist:
+  `CREATE TABLE migrations ON CLUSTER 'company_cluster' (...) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') ...`.
+  ClickHouse accepts the replica path that the schema builder's replicated
+  tables are dumped with only in such a statement. The rows that the dump
+  inserts into a table that it creates replicated are sent once, and the rows
+  of a table that is not replicated go to every node. Each statement waits
+  for every host, so raise `timeout_query` for the load, as for migrations
+  (see [The schema builder on a cluster](#the-schema-builder-on-a-cluster)).
+- Each `INSERT INTO <table> VALUES` of the dump, such as the rows of the
+  `migrations` table, is sent with `SETTINGS async_insert = 0` before
+  `VALUES`, so that its rows are written before `migrate` reads the
+  `migrations` table, whatever the connection's `settings` say. The dump file
+  itself is unchanged, and a dump that 3.0.0 wrote loads the same way.
 
 `--prune` is Laravel's own behavior. It deletes the whole `database/migrations`
 directory, including migrations for your other connections.
@@ -3971,6 +4215,52 @@ php artisan migrate:fresh --database=analytics
 
 If your ClickHouse connection has a name other than `clickhouse`, set it on the
 migrations: `protected $connection = 'analytics';`.
+
+**The `migrations` table on ClickHouse.** The package binds its migration
+repository, `Oralunal\LaravelClickHouse\ClickhouseMigrationRepository`, a
+subclass of Laravel's `DatabaseMigrationRepository`, in place of Laravel's. A
+repository that your application or another package binds is kept, and on
+other connections the repository works as Laravel's. On a ClickHouse
+connection:
+
+- Every migration command works, also while `fix_default_query_builder` is
+  on, where 3.0.0 failed `migrate:rollback`, with or without `--step`,
+  `--batch` or `--pretend`, and `migrate:refresh --step` with
+  `Call to undefined method ClickHouseDB\Statement::all()`. The repository
+  reads the table with Laravel's query builder, whatever that option says, as
+  in `select max("batch") as "aggregate" from "migrations"`, and returns the
+  migrations as objects, as on other connections.
+- `migrate:install`, or the first `migrate`, creates the table with the columns
+  of 3.0.0:
+  ``CREATE TABLE `migrations` (`id` Int32, `migration` String, `batch` Int32) ENGINE = MergeTree() ORDER BY (`id`)``.
+  `exact_integer_types` does not change them, and the `engine` option applies
+  only when it is `MergeTree`, `ReplicatedMergeTree` or `SharedMergeTree` with
+  its arguments alone, because another engine would merge or lose the rows,
+  whose `id` is always `0`. On a connection with a `cluster_name`, the table is
+  created `ON CLUSTER`, and replicated when the connection lists its nodes
+  (see [The schema builder on a cluster](#the-schema-builder-on-a-cluster)).
+- A migration is logged with
+  `insert into "migrations" ("migration", "batch") settings insert_deduplication_token = ?, async_insert = 0 values (?, ?)`.
+  The insert is synchronous, so the row is there when the next command reads
+  the table, also on a server that inserts asynchronously by default. The
+  token, the migration, the batch and 32 random hex digits, keeps a row that is
+  identical to an earlier one, such as the row of a migration that runs again
+  after a rollback, in a table that deduplicates inserts.
+- A rollback deletes the row with
+  `alter table "migrations" delete where "migration" = ? settings mutations_sync = 1`,
+  which returns once the active node has deleted it, so that `migrate:refresh`
+  runs every rolled-back migration again. 3.0.0 left the delete to the
+  background, so a migration right after a rollback could still read as run,
+  and be skipped. On ClickHouse 26.8 with a lowered `background_pool_size`,
+  the delete takes a few hundred milliseconds, and now and then more than 2
+  seconds, so raise `timeout_query` above the packaged 2 seconds for
+  migration commands there (see
+  [Newer ClickHouse versions](#newer-clickhouse-versions)).
+- Before a schema dump is loaded, the table is dropped with
+  ``DROP TABLE `migrations` SYNC``, `ON CLUSTER` on a connection with a
+  `cluster_name`.
+- The log and the deletes go to the active node, without `ON CLUSTER`. A
+  replicated `migrations` table passes them on to its other replicas.
 
 **ClickHouse is a secondary connection.** For example, MySQL is the default
 connection and some migrations write to ClickHouse. A ClickHouse connection
@@ -4163,6 +4453,17 @@ ClickHouse in Docker. To run the test suite locally:
 1. `docker compose -f docker-compose.test.yaml up -d`
 2. `composer install`
 3. `composer test`
+
+The test cluster runs ClickHouse 24.8. `CLICKHOUSE_VERSION` picks another
+release, as CI does for 26.3 and 26.8:
+`CLICKHOUSE_VERSION=26.8 docker compose -f docker-compose.test.yaml up -d`. To
+switch the version of a cluster that exists, remove it first with
+`docker compose -f docker-compose.test.yaml down -v`: `up -d` alone keeps the
+data volumes, and 24.8 cannot load the tables that 26.3 or 26.8 wrote there.
+Once those include ClickHouse's system log tables, which a server writes
+within seconds, 24.8 does not start at all. CI runs the suite twice on each
+of 24.8, 26.3 and 26.8: on two standalone servers, where the tests that need
+the cluster are skipped, and on this cluster.
 
 See [docs/howto_run_local_test.md](docs/howto_run_local_test.md) for
 prerequisites, cluster-test notes, and using `vendor/bin/testbench` /

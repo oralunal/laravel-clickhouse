@@ -1619,11 +1619,31 @@ class SchemaGrammar extends BaseGrammar
      * builder makes replicated would silently lose a second, identical
      * insert, such as the row that Laravel's migrator logs again in its
      * migrations table after a rollback. With the window at 0 it keeps every
-     * insert, as the MergeTree table that it replaces does (24.8.14 and
-     * 26.8.21 checked). ClickHouse 26.3 (26.3.46 checked) deduplicates such
-     * a table anyway: there, only an insert with deduplicate_insert =
-     * 'disable', or with an insert_deduplication_token of its own, keeps an
-     * identical block.
+     * synchronous insert (async_insert = 0), as the MergeTree table that it
+     * replaces does (24.8.14, 26.3.46 and 26.8.21 checked).
+     *
+     * Which window an asynchronous insert (async_insert = 1) is checked
+     * against depends on the version. This method leaves the other one,
+     * replicated_deduplication_window_for_async_inserts (by default 10000
+     * blocks within 7 days on all three), at the server's default:
+     * - ClickHouse 24.8 inserts synchronously by default. It checks an
+     *   asynchronous insert against replicated_deduplication_window, so the
+     *   window at 0 keeps it too, and with async_insert_deduplicate = 1 also
+     *   against replicated_deduplication_window_for_async_inserts, which then
+     *   drops it.
+     * - ClickHouse 26.3 inserts asynchronously by default, and checks such an
+     *   insert against replicated_deduplication_window_for_async_inserts
+     *   alone, whatever insert_deduplicate and async_insert_deduplicate say:
+     *   an insert identical to an earlier one is dropped, also 5 seconds
+     *   later or with another insert in between. An insert with
+     *   async_insert = 0, with deduplicate_insert = 'disable' (a setting that
+     *   24.8 does not have) or with an insert_deduplication_token of its own
+     *   keeps it, and so does a table with
+     *   replicated_deduplication_window_for_async_inserts = 0.
+     * - ClickHouse 26.8 inserts asynchronously by default too, but checks
+     *   such an insert against replicated_deduplication_window alone, so with
+     *   the window at 0 it keeps every insert, asynchronous ones included,
+     *   also with async_insert_deduplicate = 1.
      *
      * settings() with another value for the setting wins, and a null value
      * leaves it to the server's default. An engine that the blueprint or the

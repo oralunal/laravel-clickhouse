@@ -9,9 +9,10 @@ use Oralunal\LaravelClickHouse\Connection;
 
 /**
  * affectingStatement(), and with it Laravel's insertUsing(), update() and delete(): an INSERT returns the rows that
- * ClickHouse reports it wrote (X-ClickHouse-Summary written_rows), 0 included. That count includes the rows that the
- * table's materialized views wrote, and is 0 for an asynchronous insert. ClickHouse reports no count for a mutation or
- * DDL, so those return 1, as in 3.0.0.
+ * ClickHouse reports it wrote (X-ClickHouse-Summary written_rows), 0 included. The count of a synchronous insert
+ * includes the rows that the table's materialized views wrote; the count of an asynchronous insert depends on the
+ * server version (see test_the_count_of_an_asynchronous_insert_follows_the_server()). ClickHouse reports no count for a
+ * mutation or DDL, so those return 1, as in 3.0.0.
  */
 class AffectingStatementTest extends TestCase
 {
@@ -92,9 +93,11 @@ class AffectingStatementTest extends TestCase
     }
 
     /**
-     * ClickHouse 24.8 counts the rows that a materialized view writes into its target table in written_rows, so an
-     * INSERT of 3 rows into a table with one such view returns 6. A change of this count in a later ClickHouse
-     * version shows up here.
+     * ClickHouse counts the rows that a materialized view writes into its target table in written_rows of a
+     * synchronous insert, so an INSERT of 3 rows into a table with one such view returns 6. The INSERT ... VALUES
+     * turns async_insert off: ClickHouse 26.3 and 26.8 insert asynchronously by default (async_insert = 1), and the
+     * count of an asynchronous insert leaves the rows of the views out (3). An INSERT ... SELECT is never
+     * asynchronous. A change of these counts in a later ClickHouse version shows up here.
      */
     public function test_the_count_of_an_insert_includes_the_rows_of_materialized_views(): void
     {
@@ -107,7 +110,7 @@ class AffectingStatementTest extends TestCase
         $connection = DB::connection('clickhouse');
 
         $this->assertSame(6, $connection->affectingStatement(
-            'INSERT INTO ' . self::TABLE . ' (id, v) VALUES (?, ?), (?, ?), (?, ?)',
+            'INSERT INTO ' . self::TABLE . ' (id, v) SETTINGS async_insert = 0 VALUES (?, ?), (?, ?), (?, ?)',
             [1, 'a', 2, 'b', 3, 'c']
         ));
         $this->assertSame(4, $this->laravelBuilderConnection()->table(self::TABLE)->insertUsing(
@@ -118,19 +121,25 @@ class AffectingStatementTest extends TestCase
     }
 
     /**
-     * An asynchronous insert writes its rows in a batch that ClickHouse 24.8 does not count for the query, also when
-     * the query waits for it: written_rows is 0.
+     * An asynchronous insert writes its rows in a batch. When the query waits for the batch, ClickHouse 24.8 does not
+     * count its rows for the query (written_rows is 0), while 26.3 and 26.8 do (3). The count is the one that the
+     * server logged for the query in system.query_log, on every version. Either way the rows are written, and
+     * hasModifiedRecords() follows the count.
      */
-    public function test_the_count_of_an_asynchronous_insert_is_zero(): void
+    public function test_the_count_of_an_asynchronous_insert_follows_the_server(): void
     {
         $connection = DB::connection('clickhouse');
+        $comment = 'affecting_rows_' . bin2hex(random_bytes(8));
 
-        $this->assertSame(0, $connection->affectingStatement(
-            'INSERT INTO ' . self::TABLE . ' (id, v) SETTINGS async_insert = 1, wait_for_async_insert = 1'
-            . ' VALUES (?, ?), (?, ?), (?, ?)',
+        $count = $connection->affectingStatement(
+            'INSERT INTO ' . self::TABLE . ' (id, v) SETTINGS async_insert = 1, wait_for_async_insert = 1,'
+            . " log_comment = '{$comment}' VALUES (?, ?), (?, ?), (?, ?)",
             [1, 'a', 2, 'b', 3, 'c']
-        ));
-        $this->assertFalse($connection->hasModifiedRecords());
+        );
+
+        $this->assertSame($this->loggedWrittenRowsOfTheInsert($comment), $count);
+        $this->assertContains($count, [0, 3]);
+        $this->assertSame($count > 0, $connection->hasModifiedRecords());
         $this->assertSame(3, $this->countRows());
     }
 
@@ -166,6 +175,25 @@ class AffectingStatementTest extends TestCase
         foreach (['_view', '_target', '', '_created'] as $suffix) {
             $client->write('DROP TABLE IF EXISTS ' . self::TABLE . $suffix . ' SYNC');
         }
+    }
+
+    /**
+     * Read the written_rows that the server logged in system.query_log for the one INSERT query with the given
+     * log_comment. The flush of an asynchronous insert is logged with the same comment, as a query of the kind
+     * AsyncInsertFlush, and is left out.
+     */
+    private function loggedWrittenRowsOfTheInsert(string $comment): int
+    {
+        $client = DB::connection('clickhouse')->getClient();
+        $client->write('SYSTEM FLUSH LOGS');
+        $rows = $client->select(
+            'SELECT toString(written_rows) AS written_rows FROM system.query_log'
+            . " WHERE type = 'QueryFinish' AND query_kind = 'Insert' AND log_comment = '{$comment}'"
+        )->rows();
+
+        $this->assertCount(1, $rows, 'The server logged the insert once.');
+
+        return (int) $rows[0]['written_rows'];
     }
 
     private function countRows(): int

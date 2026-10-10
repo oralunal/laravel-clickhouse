@@ -13,7 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         php: ['8.5']
-        clickhouse: ['24.8']
+        # 24.8 is the oldest ClickHouse release this package supports; 26.3 and 26.8 are the current LTS releases.
+        clickhouse: ['24.8', '26.3', '26.8']
 
     services:
       clickhouse01:
@@ -67,6 +68,66 @@ jobs:
         run: |
           # Gate cluster tests off: CI service containers cannot mount
           # tests/docker/clickhouse0*/config.xml, so company_cluster and
-          # the {replica}/{shard} macros do not exist here.
+          # the {replica}/{shard} macros do not exist here. The cluster
+          # job below runs them.
           sed -i 's|CLICKHOUSE_CLUSTER_AVAILABLE" value="1"|CLICKHOUSE_CLUSTER_AVAILABLE" value="0"|' phpunit.xml
           vendor/bin/phpunit --testdox
+
+  cluster:
+    # The whole suite on the two-node test cluster of docker-compose.test.yaml
+    # (company_cluster, its macros and ZooKeeper), as it runs locally, so the
+    # tests gated by CLICKHOUSE_CLUSTER_AVAILABLE run too.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.5']
+        clickhouse: ['24.8', '26.3', '26.8']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ runner.os }}-${{ matrix.php }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ runner.os }}-${{ matrix.php }}-
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Start the ClickHouse cluster
+        env:
+          CLICKHOUSE_VERSION: ${{ matrix.clickhouse }}
+        run: docker compose -f docker-compose.test.yaml up -d
+
+      - name: Wait for ClickHouse and ZooKeeper
+        run: |
+          # Each node is ready once it answers and reaches ZooKeeper: the root
+          # znode always has a child (/zookeeper).
+          for port in 18123 18124; do
+            for i in {1..60}; do
+              children=$(curl -sf "http://127.0.0.1:${port}/" --data-binary "SELECT count() FROM system.zookeeper WHERE path = '/'" || true)
+              if [ "${children:-0}" -gt 0 ] 2> /dev/null; then
+                echo "clickhouse on :${port} reaches ZooKeeper"; continue 2
+              fi
+              sleep 2
+            done
+            echo "clickhouse on :${port} is not ready"; exit 1
+          done
+
+      - name: Run PHPUnit
+        env:
+          CLICKHOUSE_CLUSTER_AVAILABLE: '1'
+        run: vendor/bin/phpunit --testdox
+
+      - name: Show the ClickHouse logs
+        if: failure()
+        run: docker compose -f docker-compose.test.yaml logs --tail 200

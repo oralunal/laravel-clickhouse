@@ -8,6 +8,8 @@ use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Database\Console\Migrations\FreshCommand;
 use Illuminate\Database\Events\SchemaDumped;
 use Illuminate\Database\Events\SchemaLoaded;
+use Illuminate\Database\Migrations\DatabaseMigrationRepository;
+use Illuminate\Database\Migrations\MigrationRepositoryInterface;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Testing\ParallelTesting;
 
@@ -50,6 +52,23 @@ class ClickhouseServiceProvider extends ServiceProvider
                 array_merge($connectionDefaults, $existing)
             );
         }
+
+        // Laravel's migration repository reads the migrations table with get()->all(), which the package Builder
+        // of fix_default_query_builder cannot give; ClickhouseMigrationRepository reads it with Laravel's query
+        // builder on a ClickHouse connection, and is Laravel's repository on any other. A repository that the app
+        // or another package bound in its place is kept.
+        $this->app->extend(
+            'migration.repository',
+            function (MigrationRepositoryInterface $repository): MigrationRepositoryInterface {
+                if ($repository instanceof DatabaseMigrationRepository
+                    && $repository::class === DatabaseMigrationRepository::class
+                ) {
+                    return ClickhouseMigrationRepository::fromLaravelRepository($repository);
+                }
+
+                return $repository;
+            }
+        );
 
         // migrate:fresh must also empty the secondary ClickHouse connections.
         $this->app->extend(
