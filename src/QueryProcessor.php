@@ -91,9 +91,12 @@ class QueryProcessor extends Processor
      * SQLite driver: the primary flag already marks it, so `db:table` lists it
      * once as primary. Its columns, and those of a data-skipping index, are the
      * elements of the key or index expression: a column name, or an expression
-     * such as intHash32(id). A data-skipping index has its type, such as
-     * minmax or bloom_filter. No ClickHouse index is unique. Names are
-     * lowercased, as Laravel's other drivers do, so that hasIndex() finds them.
+     * such as intHash32(id). One pair of parentheses around the whole
+     * expression, which ClickHouse 26.8 keeps where the CREATE wrote it, such
+     * as (id) or (a + c), is removed first (see withoutEnclosingParentheses()).
+     * A data-skipping index has its type, such as minmax or bloom_filter. No
+     * ClickHouse index is unique. Names are lowercased, as Laravel's other
+     * drivers do, so that hasIndex() finds them.
      *
      * @param list<array{name: string, expression: string, type: string, is_primary: int|string}> $results
      * @return list<array{name: string, columns: list<string>, type: string|null, unique: false, primary: bool}>
@@ -146,11 +149,15 @@ class QueryProcessor extends Processor
     /**
      * Remove one pair of parentheses that encloses a whole expression.
      *
-     * ClickHouse 26.8 keeps the parentheses of a key of one column that the
-     * CREATE wrote in parentheses, such as ORDER BY (id), which the schema
-     * builder writes: system.tables prints its primary key as (id), where
-     * 24.8 and 26.3 print id. A list of more columns is printed without them
-     * on each version: id, intHash32(id). An expression whose first
+     * ClickHouse 26.8 keeps the parentheses that the CREATE wrote around a
+     * single element of a key or index expression: system.tables prints the
+     * primary key of ORDER BY (id), which the schema builder writes, as (id),
+     * and that of PRIMARY KEY (a) as (a), and system.data_skipping_indices
+     * prints the expression of INDEX i (a + c) as (a + c) and that of
+     * INDEX i (a) as (a), where 24.8 and 26.3 print id, a, a + c and a. A
+     * list of more elements, such as ORDER BY (id, intHash32(id)),
+     * INDEX i (a, b) or INDEX i tuple(a, b), is printed without them on each
+     * version: id, intHash32(id) and a, b. An expression whose first
      * parenthesis closes before its end, such as (a) + (b), is returned
      * unchanged.
      *

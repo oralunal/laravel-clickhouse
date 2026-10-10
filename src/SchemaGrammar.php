@@ -297,8 +297,10 @@ class SchemaGrammar extends BaseGrammar
      * unless the blueprint says replicated(false) (see replicatesTable() and
      * getReplicatedEngine()): MergeTree() gives ReplicatedMergeTree(), with
      * the server's default replica path, and the table gets
-     * SETTINGS replicated_deduplication_window=0, so that it keeps every
-     * insert as a MergeTree table does (see getReplicatedTableSettings()).
+     * SETTINGS replicated_deduplication_window=0,
+     * replicated_deduplication_window_for_async_inserts=0, so that it keeps
+     * every insert, synchronous or asynchronous, as a MergeTree table does
+     * (see getReplicatedTableSettings()).
      *
      * Inside a session, the CREATE is not checked against the temporary
      * tables of the session: with or without ON CLUSTER, ClickHouse (24.8
@@ -1608,48 +1610,43 @@ class SchemaGrammar extends BaseGrammar
 
     /**
      * Get the table settings that a new table starts from, before the
-     * blueprint's settings(): replicated_deduplication_window = 0 when
+     * blueprint's settings(): replicated_deduplication_window = 0 and
+     * replicated_deduplication_window_for_async_inserts = 0 when
      * getReplicatedEngine() made the engine replicated, and none otherwise.
      *
-     * A replicated table drops an inserted block that is identical to one of
-     * the last replicated_deduplication_window blocks (by default 1000
-     * within 7 days on 24.8, 10000 within an hour on 26.3 and 26.8) as a
-     * duplicate, while a MergeTree table keeps it (its
+     * A replicated table drops an inserted block that is identical to a
+     * recent one as a duplicate, while a MergeTree table keeps it (its
      * non_replicated_deduplication_window is 0). So a table that the schema
      * builder makes replicated would silently lose a second, identical
      * insert, such as the row that Laravel's migrator logs again in its
-     * migrations table after a rollback. With the window at 0 it keeps every
-     * synchronous insert (async_insert = 0), as the MergeTree table that it
-     * replaces does (24.8.14, 26.3.46 and 26.8.21 checked).
+     * migrations table after a rollback. A synchronous insert is checked
+     * against the last replicated_deduplication_window blocks (by default
+     * 1000 within 7 days on 24.8, 10000 within an hour on 26.3 and 26.8). An
+     * asynchronous insert (async_insert = 1) is checked:
+     * - on ClickHouse 24.8, which inserts synchronously by default, against
+     *   replicated_deduplication_window, and with async_insert_deduplicate = 1
+     *   also against the last
+     *   replicated_deduplication_window_for_async_inserts blocks (by default
+     *   10000 within 7 days on every version);
+     * - on ClickHouse 26.3, which inserts asynchronously by default, against
+     *   replicated_deduplication_window_for_async_inserts alone, whatever
+     *   insert_deduplicate and async_insert_deduplicate say: with
+     *   replicated_deduplication_window = 0 alone, an insert identical to an
+     *   earlier one was still dropped, also 5 seconds later or with another
+     *   insert in between;
+     * - on ClickHouse 26.8, which inserts asynchronously by default too,
+     *   against replicated_deduplication_window alone.
+     * With both windows at 0, a table that the schema builder makes
+     * replicated keeps every insert, synchronous or asynchronous, as the
+     * MergeTree table that it replaces does (24.8.14, 26.3.46 and 26.8.21
+     * checked).
      *
-     * Which window an asynchronous insert (async_insert = 1) is checked
-     * against depends on the version. This method leaves the other one,
-     * replicated_deduplication_window_for_async_inserts (by default 10000
-     * blocks within 7 days on all three), at the server's default:
-     * - ClickHouse 24.8 inserts synchronously by default. It checks an
-     *   asynchronous insert against replicated_deduplication_window, so the
-     *   window at 0 keeps it too, and with async_insert_deduplicate = 1 also
-     *   against replicated_deduplication_window_for_async_inserts, which then
-     *   drops it.
-     * - ClickHouse 26.3 inserts asynchronously by default, and checks such an
-     *   insert against replicated_deduplication_window_for_async_inserts
-     *   alone, whatever insert_deduplicate and async_insert_deduplicate say:
-     *   an insert identical to an earlier one is dropped, also 5 seconds
-     *   later or with another insert in between. An insert with
-     *   async_insert = 0, with deduplicate_insert = 'disable' (a setting that
-     *   24.8 does not have) or with an insert_deduplication_token of its own
-     *   keeps it, and so does a table with
-     *   replicated_deduplication_window_for_async_inserts = 0.
-     * - ClickHouse 26.8 inserts asynchronously by default too, but checks
-     *   such an insert against replicated_deduplication_window alone, so with
-     *   the window at 0 it keeps every insert, asynchronous ones included,
-     *   also with async_insert_deduplicate = 1.
-     *
-     * settings() with another value for the setting wins, and a null value
-     * leaves it to the server's default. An engine that the blueprint or the
-     * connection's engine option names as replicated keeps the server's
-     * default. So does an engine() with a SETTINGS clause of its own, since a
-     * second SETTINGS clause would make the statement invalid.
+     * settings() with another value for either setting wins, and a null
+     * value leaves that setting to the server's default. An engine that the
+     * blueprint or the connection's engine option names as replicated keeps
+     * the server's defaults. So does an engine() with a SETTINGS clause of
+     * its own, since a second SETTINGS clause would make the statement
+     * invalid.
      *
      * @param string $givenEngine The engine that the blueprint or the connection gives (see getTableEngine()).
      * @param string $engine The engine that the table gets (see getReplicatedEngine()).
@@ -1661,7 +1658,7 @@ class SchemaGrammar extends BaseGrammar
             return [];
         }
 
-        return ['replicated_deduplication_window' => 0];
+        return ['replicated_deduplication_window' => 0, 'replicated_deduplication_window_for_async_inserts' => 0];
     }
 
     /**

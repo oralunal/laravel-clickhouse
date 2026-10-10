@@ -18,19 +18,30 @@ Steps:
 
 Tear down: `docker compose -f docker-compose.test.yaml down -v`
 
+`docker-compose.test.yaml` runs ClickHouse 24.8. `CLICKHOUSE_VERSION`
+picks another release, as in
+`CLICKHOUSE_VERSION=26.8 docker compose -f docker-compose.test.yaml up -d`.
+To switch a cluster that exists to another release, tear it down first
+with `docker compose -f docker-compose.test.yaml down -v`: `up -d` alone
+recreates the ClickHouse containers on their data volumes, and 24.8
+cannot load the tables that 26.3 or 26.8 wrote there.
+
 ## Cluster tests
 
-`ClusterTest` needs the `company_cluster` definition and the
-`{replica}` / `{shard}` macros that live in
-`tests/docker/clickhouse01/config.xml` and
+The tests that need the test cluster, such as `ClusterTest`, need the
+`company_cluster` definition and the `{replica}` / `{shard}` macros that
+live in `tests/docker/clickhouse01/config.xml` and
 `tests/docker/clickhouse02/config.xml`, mounted into the ClickHouse
-containers by `docker-compose.test.yaml`. Locally this runs by default
-because `phpunit.xml` sets `CLICKHOUSE_CLUSTER_AVAILABLE=1`.
+containers by `docker-compose.test.yaml`, and its ZooKeeper. Locally they
+run by default because `phpunit.xml` sets `CLICKHOUSE_CLUSTER_AVAILABLE=1`.
 
-In CI, GitHub Actions service containers cannot mount these configs,
-so `.github/workflows/tests.yml` rewrites `phpunit.xml` before running
-the suite to flip the value to `0`, and the two cluster tests
-`markTestSkipped`.
+CI runs the suite in two jobs of `.github/workflows/tests.yml`, each on
+ClickHouse 24.8, 26.3 and 26.8. The `phpunit` job uses two GitHub Actions
+service containers, which cannot mount these configs, so it rewrites
+`phpunit.xml` before running the suite to flip the value to `0`, and the
+tests that need the cluster `markTestSkipped`. The `cluster` job starts
+`docker-compose.test.yaml` with `CLICKHOUSE_VERSION` set to the release
+and `CLICKHOUSE_CLUSTER_AVAILABLE=1`, so they run.
 
 ## Artisan and Laravel Boost
 

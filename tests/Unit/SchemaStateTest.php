@@ -28,7 +28,8 @@ class SchemaStateTest extends TestCase
      */
     private const REPLICATED_MIGRATIONS = "CREATE TABLE migrations\n(\n    `id` Int32,\n    `migration` String,\n"
         . "    `batch` Int32\n)\nENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')\n"
-        . "ORDER BY id\nSETTINGS replicated_deduplication_window = 0, index_granularity = 8192";
+        . "ORDER BY id\nSETTINGS replicated_deduplication_window = 0, replicated_deduplication_window_for_async_inserts = 0,"
+        . ' index_granularity = 8192';
 
     /**
      * The migrations table that 3.0.0, or replicated(false), makes: a MergeTree table on each node.

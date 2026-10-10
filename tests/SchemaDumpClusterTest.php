@@ -161,6 +161,13 @@ class SchemaDumpClusterTest extends TestCase
             . "ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')",
             $dump
         );
+        // The dump keeps both deduplication windows of the migrations table, so the table that it creates again keeps
+        // every insert too.
+        $this->assertMatchesRegularExpression(
+            "/CREATE TABLE migrations\n[^;]*\nORDER BY \\(?id\\)?\nSETTINGS replicated_deduplication_window = 0,"
+            . ' replicated_deduplication_window_for_async_inserts = 0, index_granularity = 8192;/',
+            $dump
+        );
         $this->assertStringContainsString("CREATE VIEW things_view\n", $dump);
         $this->assertStringContainsString("CREATE MATERIALIZED VIEW things_mv\n", $dump);
         $this->assertStringContainsString("CREATE DICTIONARY things_dict\n", $dump);
@@ -210,8 +217,9 @@ class SchemaDumpClusterTest extends TestCase
         );
 
         // The second round logs each row again, identical to the insert of the first round, which the replicated
-        // migrations table keeps: the schema builder made it with replicated_deduplication_window = 0, and each insert
-        // is synchronous and has a deduplication token of its own.
+        // migrations table keeps: the schema builder made it with replicated_deduplication_window = 0 and
+        // replicated_deduplication_window_for_async_inserts = 0, and each insert is synchronous and has a
+        // deduplication token of its own.
         for ($round = 1; $round <= 2; $round++) {
             $this->artisan('migrate:rollback', $arguments)->assertSuccessful();
             foreach (self::NODES as $node) {

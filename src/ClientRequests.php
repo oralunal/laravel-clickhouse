@@ -42,6 +42,8 @@ use Stringable;
  *   float, NaN and INF, and dates at the connection's datetime_precision.
  * - insertJsonEachRow() and insertJsonCompactEachRow() send rows in a JSON input format, with the INSERT head in
  *   the URL and the rows in the body.
+ *
+ * @internal The package's own helper: its public static methods are not public API and may change in any release.
  */
 final class ClientRequests
 {
