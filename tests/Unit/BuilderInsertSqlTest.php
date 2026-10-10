@@ -19,13 +19,15 @@ use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
 use Oralunal\LaravelClickHouse\Connection;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
+use Oralunal\LaravelClickHouse\QueryBuilder;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
  * Builder::insert(): the Values insert that the model inserts send too (see ClientRequests::compileValuesInsert()),
  * the JSONEachRow insert, the format the connection or the call chooses, the checks before anything is sent, and
- * pretend mode.
+ * pretend mode. The same for the insert() of Laravel's query builder (see QueryBuilder::insert()), whose Values
+ * insert is Laravel's.
  */
 class BuilderInsertSqlTest extends TestCase
 {
@@ -73,6 +75,32 @@ class BuilderInsertSqlTest extends TestCase
     private function builder(Client $client, array $config = []): Builder
     {
         return (new Builder($client))->followConnectionOptions($this->connection($config))->from('examples');
+    }
+
+    /**
+     * Laravel's query builder of the examples table, on a connection without a server whose active node is the
+     * client.
+     *
+     * @param Client $client
+     * @param array<string, mixed> $config
+     * @return QueryBuilder
+     */
+    private function laravelBuilder(Client $client, array $config = []): QueryBuilder
+    {
+        $connection = new class (null, 'db', '', $config + ['name' => 'clickhouse', 'fix_default_query_builder' => false]) extends Connection {
+            public Client $recordingClient;
+
+            public function getClient(): Client
+            {
+                return $this->recordingClient;
+            }
+        };
+        $connection->recordingClient = $client;
+
+        /** @var QueryBuilder $query */
+        $query = $connection->table('examples');
+
+        return $query;
     }
 
     /**
@@ -299,18 +327,27 @@ class BuilderInsertSqlTest extends TestCase
 
     /**
      * While the followed connection pretends, each insert is logged once, a JSONEachRow insert by its head, and
-     * nothing is sent.
+     * nothing is sent. A JSONEachRow insert still encodes its rows, so a value that the real insert refuses, raw SQL
+     * or a string that is not valid UTF-8, throws and is not logged.
      */
     public function test_inserts_are_logged_and_not_sent_while_the_connection_pretends(): void
     {
         [$client, $curler] = $this->recordingClient();
         $connection = $this->connection();
         $statements = [];
+        $refused = [];
 
-        $log = $connection->pretend(function () use ($client, $connection, &$statements): void {
+        $log = $connection->pretend(function () use ($client, $connection, &$statements, &$refused): void {
             $query = fn (): Builder => (new Builder($client))->followConnectionOptions($connection)->from('examples');
             $statements[] = $query()->insert([['f_int' => 1, 'f_float' => 0.1 + 0.2]]);
             $statements[] = $query()->insert([['f_int' => 2]], Format::JSON_EACH_ROW);
+            foreach ([new LaravelExpression("'x'"), "\xff"] as $value) {
+                try {
+                    $query()->insert([['f_int' => 3, 'f_string' => $value]], Format::JSON_EACH_ROW);
+                } catch (InvalidArgumentException $exception) {
+                    $refused[] = $exception->getMessage();
+                }
+            }
         });
 
         $this->assertSame(
@@ -324,6 +361,218 @@ class BuilderInsertSqlTest extends TestCase
         foreach ($statements as $statement) {
             $this->assertFalse($statement->isError());
         }
+        $this->assertCount(2, $refused);
+        $this->assertStringStartsWith('Cannot insert the value of column [f_string] in the row at index 0 as JSON: raw SQL', $refused[0]);
+        $this->assertStringStartsWith(
+            'Cannot insert the value of column [f_string] in the row at index 0 as JSON: Malformed UTF-8 characters',
+            $refused[1]
+        );
+    }
+
+    /**
+     * @return array<string, array{array<string, mixed>, string|null}>
+     */
+    public static function laravelJsonEachRowProvider(): array
+    {
+        return [
+            'the format of the call' => [[], Format::JSON_EACH_ROW],
+            'the format of the call in another letter case' => [[], ' jsoneachrow '],
+            "the connection's insert_format" => [['insert_format' => 'JSONEachRow'], null],
+        ];
+    }
+
+    /**
+     * Laravel's query builder sends a JSONEachRow insert with the head that its grammar writes in the URL and one
+     * JSON object per row in the body, in the first row's key order, logs the head once without bindings, and
+     * returns true. The values are written as the package builder writes them: floats with every digit, NaN as
+     * "nan", dates at the connection's datetime_precision, null, and arrays and collections as JSON arrays.
+     *
+     * @param array<string, mixed> $config
+     */
+    #[DataProvider('laravelJsonEachRowProvider')]
+    public function test_laravels_query_builder_inserts_json_each_row(array $config, ?string $format): void
+    {
+        [$client, $curler] = $this->recordingClient();
+        $query = $this->laravelBuilder($client, $config + ['datetime_precision' => 'microsecond']);
+        $query->getConnection()->enableQueryLog();
+        $date = Carbon::parse('2024-01-02 03:04:05.5', 'UTC');
+        $head = 'insert into "examples" ("f_int", "f_float", "d6", "tags", "note") format JSONEachRow';
+
+        $inserted = $query->insert([
+            ['f_int' => 1, 'f_float' => 0.1 + 0.2, 'd6' => $date, 'tags' => collect(['a', "it's"]), 'note' => null],
+            ['note' => 'n', 'tags' => [], 'd6' => $date, 'f_float' => NAN, 'f_int' => 2],
+        ], $format);
+
+        $this->assertTrue($inserted);
+        $this->assertCount(1, $curler->requests);
+        $this->assertSame($head, $this->urlQuery($curler->requests[0]));
+        $this->assertSame(
+            '{"f_int":1,"f_float":0.30000000000000004,"d6":"2024-01-02 03:04:05.500000","tags":["a","it\'s"],"note":null}' . "\n"
+            . '{"note":"n","tags":[],"d6":"2024-01-02 03:04:05.500000","f_float":"nan","f_int":2}',
+            $this->sentSql($curler->requests[0])
+        );
+        $this->assertSame(
+            [['query' => $head, 'bindings' => []]],
+            array_map(fn (array $entry): array => ['query' => $entry['query'], 'bindings' => $entry['bindings']], $query->getConnection()->getQueryLog())
+        );
+    }
+
+    /**
+     * Without JSONEachRow, the insert is Laravel's: insert ... values with bindings, which the connection writes as
+     * literals; Values as the format of the call wins over the connection's insert_format.
+     *
+     * @return array<string, array{array<string, mixed>, string|null}>
+     */
+    public static function laravelValuesProvider(): array
+    {
+        return [
+            'no format' => [[], null],
+            'Values as the format of the call' => [['insert_format' => 'JSONEachRow'], 'values'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    #[DataProvider('laravelValuesProvider')]
+    public function test_laravels_query_builder_inserts_values_as_laravel_does(array $config, ?string $format): void
+    {
+        [$client, $curler] = $this->recordingClient();
+
+        $this->assertTrue($this->laravelBuilder($client, $config)->insert(['f_int' => 1, 'f_float' => 0.1 + 0.2, 'tags' => collect(['a'])], $format));
+
+        $this->assertCount(1, $curler->requests);
+        $this->assertSame(
+            "insert into \"examples\" (\"f_float\", \"f_int\", \"tags\") values (0.30000000000000004, 1, ['a'])",
+            $this->sentSql($curler->requests[0])
+        );
+    }
+
+    /**
+     * Each check of the insert() of Laravel's query builder, which throws before anything is sent or logged.
+     *
+     * @return array<string, array{Closure(QueryBuilder): mixed, class-string, string}>
+     */
+    public static function laravelRefusedInsertProvider(): array
+    {
+        return [
+            'another format' => [
+                fn (QueryBuilder $query) => $query->insert([['f_int' => 1]], 'CSV'),
+                InvalidArgumentException::class,
+                "insert() takes the format 'Values' or 'JSONEachRow', [CSV] given.",
+            ],
+            'a row without keys' => [
+                fn (QueryBuilder $query) => $query->insert([['f_int' => 1], []], Format::JSON_EACH_ROW),
+                ClientQueryException::class,
+                'Inserting empty values array is not supported in ClickHouse',
+            ],
+            'other keys' => [
+                fn (QueryBuilder $query) => $query->insert([['f_int' => 1, 'f_string' => 'a'], ['f_int' => 2]], Format::JSON_EACH_ROW),
+                QueryException::class,
+                'Cannot insert the rows as JSONEachRow: the row at index 1 lacks the keys [f_string].',
+            ],
+            'a row that is no array' => [
+                fn (QueryBuilder $query) => $query->insert([['f_int' => 1], 2], Format::JSON_EACH_ROW),
+                InvalidArgumentException::class,
+                'Cannot insert the rows as JSONEachRow: the row at index 1 must be an array, int given.',
+            ],
+            'raw SQL' => [
+                fn (QueryBuilder $query) => $query->insert(['f_int' => 1, 'f_string' => new LaravelExpression("upper('x')")], Format::JSON_EACH_ROW),
+                InvalidArgumentException::class,
+                'Cannot insert the value of column [f_string] in the row at index 0 as JSON: raw SQL',
+            ],
+            'invalid UTF-8' => [
+                fn (QueryBuilder $query) => $query->insert(['f_int' => 1, 'f_string' => "\xff"], Format::JSON_EACH_ROW),
+                InvalidArgumentException::class,
+                'Cannot insert the value of column [f_string] in the row at index 0 as JSON: Malformed UTF-8 characters',
+            ],
+        ];
+    }
+
+    /**
+     * @param Closure(QueryBuilder): mixed $insert
+     * @param class-string $exception
+     */
+    #[DataProvider('laravelRefusedInsertProvider')]
+    public function test_a_refused_insert_of_laravels_query_builder_sends_and_logs_nothing(Closure $insert, string $exception, string $message): void
+    {
+        [$client, $curler] = $this->recordingClient();
+        $query = $this->laravelBuilder($client);
+        $query->getConnection()->enableQueryLog();
+
+        try {
+            $insert($query);
+            $this->fail('The insert should throw');
+        } catch (ClientQueryException|InvalidArgumentException $thrown) {
+            $this->assertInstanceOf($exception, $thrown);
+            $this->assertStringStartsWith($message, $thrown->getMessage());
+        }
+
+        $this->assertSame([], $curler->requests);
+        $this->assertSame([], $query->getConnection()->getQueryLog());
+    }
+
+    public function test_laravels_query_builder_inserts_no_rows_as_laravel_does(): void
+    {
+        [$client, $curler] = $this->recordingClient();
+        $query = $this->laravelBuilder($client);
+        $query->getConnection()->enableQueryLog();
+
+        $this->assertTrue($query->insert([], Format::JSON_EACH_ROW));
+        $this->assertTrue($query->insert([]));
+        $this->assertSame([], $curler->requests);
+        $this->assertSame([], $query->getConnection()->getQueryLog());
+    }
+
+    /**
+     * While the connection pretends, a JSONEachRow insert of Laravel's query builder is logged once by its head and
+     * not sent, and a row that the real insert refuses is refused.
+     */
+    public function test_laravels_query_builder_logs_and_sends_nothing_while_the_connection_pretends(): void
+    {
+        [$client, $curler] = $this->recordingClient();
+        $connection = $this->laravelBuilder($client)->getConnection();
+        $results = [];
+        $refused = null;
+
+        $log = $connection->pretend(function () use ($connection, &$results, &$refused): void {
+            $results[] = $connection->table('examples')->insert([['f_int' => 1]], Format::JSON_EACH_ROW);
+            $results[] = $connection->table('examples')->insert([['f_int' => 2]]);
+            try {
+                $connection->table('examples')->insert([['f_int' => 3, 'f_string' => "\xff"]], Format::JSON_EACH_ROW);
+            } catch (InvalidArgumentException $exception) {
+                $refused = $exception;
+            }
+        });
+
+        $this->assertSame([true, true], $results);
+        $this->assertSame(
+            ['insert into "examples" ("f_int") format JSONEachRow', 'insert into "examples" ("f_int") values (2)'],
+            array_column($log, 'query')
+        );
+        $this->assertSame([], $curler->requests);
+        $this->assertInstanceOf(InvalidArgumentException::class, $refused);
+    }
+
+    /**
+     * The beforeQuery() callbacks of the builder run before the head is written, and the beforeExecuting() callbacks
+     * of the connection get the head.
+     */
+    public function test_laravels_query_builder_runs_the_callbacks_of_a_json_each_row_insert(): void
+    {
+        [$client, $curler] = $this->recordingClient();
+        $query = $this->laravelBuilder($client);
+        $executing = [];
+        $query->getConnection()->beforeExecuting(function (string $sql, array $bindings) use (&$executing): void {
+            $executing[] = [$sql, $bindings];
+        });
+        $query->beforeQuery(fn (QueryBuilder $query) => $query->from('db.examples_copy'));
+
+        $query->insert(['f_int' => 1], Format::JSON_EACH_ROW);
+
+        $head = 'insert into "db"."examples_copy" ("f_int") format JSONEachRow';
+        $this->assertSame([[$head, []]], $executing);
+        $this->assertSame($head, $this->urlQuery($curler->requests[0]));
     }
 
     /**

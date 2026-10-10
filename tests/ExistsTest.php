@@ -347,6 +347,9 @@ class ExistsTest extends TestCase
     }
 
     /**
+     * The count that getQueryForCount() selects is a UInt64, which ClickHouse 24.8 quotes in JSON and 25.8 and later
+     * do not (output_format_json_quote_64bit_integers is 0), so it is compared as an int.
+     *
      * @param Closure(Builder): Builder $query
      * @param int $rows
      */
@@ -359,7 +362,7 @@ class ExistsTest extends TestCase
         $this->assertSame($rows, $builder()->count());
         $this->assertSame($rows, $builder()->paginate(2)->total());
         $this->assertSame($rows > 0, $builder()->exists());
-        $this->assertSame((string) $rows, $builder()->getQueryForCount()->getRows()[0]['count'], 'getQueryForCount()');
+        $this->assertSame($rows, (int) $builder()->getQueryForCount()->getRows()[0]['count'], 'getQueryForCount()');
         $this->assertSame($rows > 0, $builder()->getQueryForExists()->getRows() !== [], 'getQueryForExists()');
     }
 }

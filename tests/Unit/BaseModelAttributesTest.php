@@ -1150,6 +1150,131 @@ class BaseModelAttributesTest extends TestCase
     }
 
     /**
+     * Rows buffered before pretend() stay buffered when flushBuffer() or flushAllBuffers() runs while the model's
+     * connection pretends: the flush logs the insert and sends nothing, so that the first flush after pretend() ends
+     * sends them, once.
+     */
+    public function testAFlushWhileTheConnectionPretendsKeepsTheRowsBufferedBeforeIt(): void
+    {
+        $connection = $this->recordingConnection();
+        $this->makeConnection('clickhouse', $connection);
+        AttributesRecordingModel::buffer([['id' => 1], ['id' => 2]]);
+        AttributesRecordingJsonModel::buffer(['id' => 3]);
+        $flushed = null;
+
+        $log = $connection->pretend(function () use (&$flushed): void {
+            $flushed = AttributesRecordingModel::flushBuffer();
+            BaseModel::flushAllBuffers();
+        });
+
+        $this->assertSame(
+            [
+                'INSERT INTO `recorded_rows` (`id`)  VALUES  (1),  (2)',
+                'INSERT INTO `recorded_rows` (`id`)  VALUES  (1),  (2)',
+                'INSERT INTO `recorded_rows` (`id`) FORMAT JSONEachRow',
+            ],
+            array_column($log, 'query')
+        );
+        $this->assertInstanceOf(Statement::class, $flushed);
+        $this->assertFalse($flushed->isError());
+        $this->assertSame([], $connection->curler->requests, 'nothing is sent while pretending');
+        $this->assertSame([['id' => 1], ['id' => 2]], AttributesRecordingModel::getBufferedRows());
+        $this->assertSame([['id' => 3]], AttributesRecordingJsonModel::getBufferedRows());
+        $this->assertContains(AttributesRecordingModel::class, BufferedInsertRegistry::all());
+        $this->assertContains(AttributesRecordingJsonModel::class, BufferedInsertRegistry::all());
+
+        BaseModel::flushAllBuffers();
+        BaseModel::flushAllBuffers();
+
+        $this->assertSame(
+            ['INSERT INTO `recorded_rows` (`id`)  VALUES  (1),  (2)', 'INSERT INTO `recorded_rows` (`id`) FORMAT JSONEachRow'],
+            $this->sentSql($connection)
+        );
+        $this->assertSame(0, AttributesRecordingModel::bufferCount() + AttributesRecordingJsonModel::bufferCount());
+        $this->assertNotContains(AttributesRecordingModel::class, BufferedInsertRegistry::all());
+        $this->assertNotContains(AttributesRecordingJsonModel::class, BufferedInsertRegistry::all());
+    }
+
+    /**
+     * A model that overrides resolveConnection() flushes by the connection that it returns, which its inserts go
+     * through, and not by the connection that its $connection names. Here the recording connection is not registered
+     * in the database manager, so the default connection, which the model names, is not made and cannot pretend: a
+     * flush while the returned connection pretends keeps the rows. It used to log the insert and drop them.
+     */
+    public function testAFlushWhileTheResolvedConnectionPretendsKeepsTheRows(): void
+    {
+        $connection = $this->recordingConnection();
+        AttributesRecordingModel::buffer([['id' => 1], ['id' => 2]]);
+
+        $log = $connection->pretend(fn () => AttributesRecordingModel::flushBuffer());
+
+        $this->assertSame(['INSERT INTO `recorded_rows` (`id`)  VALUES  (1),  (2)'], array_column($log, 'query'));
+        $this->assertSame([], $connection->curler->requests);
+        $this->assertSame([['id' => 1], ['id' => 2]], AttributesRecordingModel::getBufferedRows());
+        $this->assertContains(AttributesRecordingModel::class, BufferedInsertRegistry::all());
+
+        AttributesRecordingModel::flushBuffer();
+        AttributesRecordingModel::flushBuffer();
+
+        $this->assertSame(['INSERT INTO `recorded_rows` (`id`)  VALUES  (1),  (2)'], $this->sentSql($connection));
+        $this->assertSame(0, AttributesRecordingModel::bufferCount());
+    }
+
+    /**
+     * While only the connection that the model's $connection names pretends, a flush sends the rows through the
+     * connection that resolveConnection() returns, which does not pretend, and empties the buffer. The rows used to
+     * stay buffered after they were sent, so the next flush sent them a second time.
+     */
+    public function testAFlushWhileOnlyTheNamedConnectionPretendsSendsTheRowsOnce(): void
+    {
+        $connection = $this->recordingConnection();
+        $named = $this->newRecordingConnection(['name' => 'clickhouse']);
+        $this->makeConnection('clickhouse', $named);
+        AttributesRecordingModel::buffer([['id' => 1], ['id' => 2]]);
+
+        $log = $named->pretend(fn () => AttributesRecordingModel::flushBuffer());
+        AttributesRecordingModel::flushBuffer();
+
+        $this->assertSame([], $log);
+        $this->assertSame(['INSERT INTO `recorded_rows` (`id`)  VALUES  (1),  (2)'], $this->sentSql($connection));
+        $this->assertSame([], $named->curler->requests);
+        $this->assertSame(0, AttributesRecordingModel::bufferCount());
+    }
+
+    /**
+     * buffer() also asks the connection that resolveConnection() returns. Rows buffered while it pretends are logged
+     * at once and never buffered, also when the connection that the model names is not made; they used to be buffered
+     * and sent by the first flush after pretend() ended. Rows buffered while only the named connection pretends are
+     * buffered and sent once by the next flush; they used to be sent at once.
+     */
+    public function testBufferAsksTheConnectionThatTheModelResolves(): void
+    {
+        $connection = $this->recordingConnection();
+
+        $log = $connection->pretend(fn () => AttributesRecordingModel::buffer([['id' => 1], ['id' => 2]]));
+        AttributesRecordingModel::flushBuffer();
+
+        $this->assertSame(['INSERT INTO `recorded_rows` (`id`)  VALUES  (1),  (2)'], array_column($log, 'query'));
+        $this->assertSame([], $connection->curler->requests);
+        $this->assertSame(0, AttributesRecordingModel::bufferCount());
+
+        $named = $this->newRecordingConnection(['name' => 'clickhouse']);
+        $this->makeConnection('clickhouse', $named);
+
+        $log = $named->pretend(fn () => AttributesRecordingModel::buffer(['id' => 3]));
+
+        $this->assertSame([], $log);
+        $this->assertSame([], $connection->curler->requests);
+        $this->assertSame([['id' => 3]], AttributesRecordingModel::getBufferedRows());
+
+        AttributesRecordingModel::flushBuffer();
+
+        $this->assertSame(['INSERT INTO `recorded_rows` (`id`)  VALUES  (3)'], $this->sentSql($connection));
+        $this->assertSame([], $named->curler->requests);
+        $this->assertSame(0, AttributesRecordingModel::bufferCount());
+    }
+
+    /**
      * @return array<string, array{bool, mixed, string}>
      */
     public static function optimizeCalls(): array

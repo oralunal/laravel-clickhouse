@@ -1,7 +1,12 @@
+# The test cluster: two ClickHouse nodes of company_cluster, and ZooKeeper. CLICKHOUSE_VERSION picks the ClickHouse
+# image (24.8 by default), as in: CLICKHOUSE_VERSION=26.8 docker compose -f docker-compose.test.yaml up -d
+# To switch the version of a cluster that exists, remove it first with
+# docker compose -f docker-compose.test.yaml down -v. Without it, up -d recreates the ClickHouse containers on their
+# data volumes, and an older version cannot load what a newer one wrote: 24.8 does not start after 26.3 or 26.8.
 services:
 
   clickhouse01:
-    image: clickhouse/clickhouse-server:24.8
+    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-24.8}
     ports:
       - "18123:8123"
     depends_on:
@@ -10,7 +15,7 @@ services:
       - ./tests/docker/clickhouse01:/etc/clickhouse-server
 
   clickhouse02:
-    image: clickhouse/clickhouse-server:24.8
+    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-24.8}
     ports:
       - "18124:8123"
     depends_on:

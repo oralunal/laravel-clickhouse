@@ -54,6 +54,10 @@ class SessionTest extends TestCase
         $this->fail('The query did not throw a DatabaseException.');
     }
 
+    /**
+     * The count of the raw select is selected as a string, since ClickHouse 24.8 quotes a UInt64 in JSON and 25.8
+     * and later do not.
+     */
     public function test_a_temporary_table_is_used_by_every_query_path_of_the_session(): void
     {
         $connection = DB::connection('clickhouse');
@@ -66,7 +70,7 @@ class SessionTest extends TestCase
             return [
                 'model' => SessionTemporaryRow::select(['id', 'name'])->orderBy('id')->getRows(),
                 'builder' => $connection->table('session_test_rows')->where('id', '>', 1)->orderBy('id')->getRows(),
-                'select' => $connection->select('SELECT count() AS rows FROM session_test_rows'),
+                'select' => $connection->select('SELECT toString(count()) AS rows FROM session_test_rows'),
             ];
         });
 
@@ -194,6 +198,10 @@ class SessionTest extends TestCase
         $this->assertFalse($connection->inSession());
     }
 
+    /**
+     * The count of the outer session is selected as a string, since ClickHouse 24.8 quotes a UInt64 in JSON and
+     * 25.8 and later do not.
+     */
     public function test_a_nested_session_is_a_separate_session(): void
     {
         $connection = DB::connection('clickhouse');
@@ -206,7 +214,7 @@ class SessionTest extends TestCase
                 fn (Connection $connection): int => $this->codeOf(fn () => $connection->select('SELECT count() FROM session_test_rows'))
             );
 
-            return [$inner, $connection->select('SELECT count() AS rows FROM session_test_rows')];
+            return [$inner, $connection->select('SELECT toString(count()) AS rows FROM session_test_rows')];
         });
 
         $this->assertSame([60, [['rows' => '1']]], $counts);
@@ -309,6 +317,9 @@ class SessionTest extends TestCase
         $this->assertSame($original, $connection->getClient()->transport()->getCurler());
     }
 
+    /**
+     * The counts are selected as strings, since ClickHouse 24.8 quotes a UInt64 in JSON and 25.8 and later do not.
+     */
     public function test_a_session_on_a_cluster_connection_stays_on_its_node(): void
     {
         if (! env('CLICKHOUSE_CLUSTER_AVAILABLE')) {
@@ -332,7 +343,7 @@ class SessionTest extends TestCase
             $this->assertSame($node, $connection->getClient());
             $counts = [];
             for ($query = 0; $query < 5; $query++) {
-                $counts[] = $connection->select('SELECT count() AS rows FROM session_test_rows')[0]['rows'];
+                $counts[] = $connection->select('SELECT toString(count()) AS rows FROM session_test_rows')[0]['rows'];
             }
 
             return $counts;

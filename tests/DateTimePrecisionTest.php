@@ -171,25 +171,41 @@ class DateTimePrecisionTest extends TestCase
     }
 
     /**
-     * A DateTime column refuses a date with a sub-second part at microsecond precision, loudly: in an insert
-     * (24.8 and 25.8 checked; 26.8 cuts it) and in a condition.
+     * A DateTime column refuses a date with a sub-second part at microsecond precision, loudly, in an insert and in
+     * a condition, on a server that parses date strings strictly. The package writes the fraction either way; what
+     * the server does with it follows two settings, read from system.settings (24.8, 26.3 and 26.8 checked):
+     * - a condition is refused (TYPE_MISMATCH) when cast_string_to_date_time_mode is basic. ClickHouse 24.8 has no
+     *   such setting and refuses it too.
+     * - a VALUES insert is refused (CANNOT_PARSE_TEXT) only when date_time_input_format is basic as well. With
+     *   cast_string_to_date_time_mode best_effort, 26.8 stores the second even when date_time_input_format is basic.
+     *
+     * Both are basic on 26.3, as date_time_input_format is on 24.8. ClickHouse 26.8 defaults both to best_effort and
+     * cuts the fraction: the insert stores the second, and the condition compares with the second, so it matches the
+     * row that the insert stored.
      */
     public function testADateTimeColumnRefusesAFractionAtMicrosecondPrecision(): void
     {
         $this->usePrecision('microsecond');
         $date = Carbon::parse('2024-01-02 03:04:05.5', 'UTC');
+        $settings = $this->dateTimeParsingSettings();
+        $refusesTheCondition = $settings['cast_string_to_date_time_mode'] === 'basic';
+        $refusesTheInsert = $refusesTheCondition && $settings['date_time_input_format'] === 'basic';
 
         try {
             DateTimePrecisionRow::insertAssoc([['id' => 1, 'dt' => $date]]);
+            $this->assertFalse($refusesTheInsert, 'The insert did not throw.');
             $this->assertSame('2024-01-02 03:04:05', $this->rows()[0][1], 'A server that cuts the fraction stores the second.');
         } catch (DatabaseException $exception) {
+            $this->assertTrue($refusesTheInsert, 'The insert threw: ' . $exception->getMessage());
             $this->assertSame('CANNOT_PARSE_TEXT', $exception->getClickHouseExceptionName());
         }
 
         try {
-            DateTimePrecisionRow::where('dt', $date)->getRows();
-            $this->fail('The condition did not throw.');
+            $rows = DateTimePrecisionRow::where('dt', $date)->getRows();
+            $this->assertFalse($refusesTheCondition, 'The condition did not throw.');
+            $this->assertSame([1], $this->ids($rows), 'A server that cuts the fraction compares with the second.');
         } catch (DatabaseException $exception) {
+            $this->assertTrue($refusesTheCondition, 'The condition threw: ' . $exception->getMessage());
             $this->assertSame('TYPE_MISMATCH', $exception->getClickHouseExceptionName());
         }
     }
@@ -288,6 +304,30 @@ class DateTimePrecisionTest extends TestCase
                 . self::TABLE . ' ORDER BY id SETTINGS prefer_column_name_to_alias = 1'
             )->rows()
         );
+    }
+
+    /**
+     * Read the settings with which the server parses a date string, as they apply to the clickhouse connection.
+     * ClickHouse 24.8 has no cast_string_to_date_time_mode and casts as its basic mode does, so it reads as basic
+     * there. getSettingOrDefault() would read it in one query, but 24.8 does not have that function either.
+     *
+     * @return array{date_time_input_format: string, cast_string_to_date_time_mode: string}
+     */
+    private function dateTimeParsingSettings(): array
+    {
+        $values = array_column(
+            $this->client()->select(
+                'SELECT name, value FROM system.settings'
+                . " WHERE name IN ('date_time_input_format', 'cast_string_to_date_time_mode')"
+            )->rows(),
+            'value',
+            'name'
+        );
+
+        return [
+            'date_time_input_format' => $values['date_time_input_format'],
+            'cast_string_to_date_time_mode' => $values['cast_string_to_date_time_mode'] ?? 'basic',
+        ];
     }
 
     /**

@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace Oralunal\LaravelClickHouse;
 
+use ClickHouseDB\Exception\QueryException as ClientQueryException;
 use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Expression;
 use Illuminate\Support\Enumerable;
 use Illuminate\Support\Stringable;
+use InvalidArgumentException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
+use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use RuntimeException;
 
 /**
@@ -21,7 +25,8 @@ use RuntimeException;
  *   query without a select list counts its groups. sum(), avg(), min(), max() and count($column) are Laravel's;
  * - whereDay(), whereMonth() and whereYear() compare with numbers, integers for whole numbers, and whereTime() with
  *   a time padded to 'HH:MM:SS' (see addDateBasedWhere());
- * - insert() writes a collection value as an array, as update() does;
+ * - insert() writes a collection value as an array, as update() does, and takes an insert format, Values or
+ *   JSONEachRow, as the package builder's insert() does; without one, the connection's insert_format decides;
  * - insertGetId() returns the key that the row carries, and refuses a row without one before anything is sent.
  *
  * @property QueryGrammar $grammar
@@ -108,9 +113,10 @@ class QueryBuilder extends Builder
      *   count(distinct "column");
      * - a select alias or expression, such as selectRaw('arrayJoin(tags) as tag') (see
      *   QueryGrammar::selectsAnAliasOrAnExpression());
-     * - an order that defines an alias, calls arrayJoin(), adds rows with WITH FILL, or limits the rows with raw
-     *   LIMIT, LIMIT ... BY, OFFSET or FETCH (see QueryGrammar::hasAnOrderThatDefinesAnAlias(),
-     *   hasAnOrderThatCallsArrayJoin(), hasAnOrderThatAddsRows() and hasAnOrderThatLimitsRows()).
+     * - an order that defines an alias, calls arrayJoin(), adds rows with WITH FILL, limits the rows with raw
+     *   LIMIT, LIMIT ... BY, OFFSET or FETCH, or changes them with a raw UNION, INTERSECT or EXCEPT (see
+     *   QueryGrammar::hasAnOrderThatDefinesAnAlias(), hasAnOrderThatCallsArrayJoin(), hasAnOrderThatAddsRows() and
+     *   hasAnOrderThatLimitsRows()).
      *
      * @return bool
      */
@@ -197,28 +203,139 @@ class QueryBuilder extends Builder
     }
 
     /**
-     * Insert one row, or a list of rows. A collection value, such as a Collection or a LazyCollection, is inserted as
-     * the array of its toArray(), which the connection writes as a ClickHouse array literal, as update() writes it
-     * (see QueryGrammar::compileUpdateColumns()); the connection refuses a collection binding. One row is passed on
-     * as a list of one row, so that Laravel does not read it as a list of rows when its first value was a collection.
+     * Insert one row, or a list of rows, and return true, as Laravel's insert() does.
      *
-     * @param array<int|string, mixed> $values
+     * A collection value, such as a Collection or a LazyCollection, is inserted as the array of its toArray(), as
+     * update() writes it (see QueryGrammar::compileUpdateColumns()); the connection refuses a collection binding. One
+     * row is passed on as a list of one row, so that Laravel does not read it as a list of rows when its first value
+     * was a collection. An empty array inserts nothing and returns true.
+     *
+     * The format is $format, or else the insert_format option of the connection (see Connection::getInsertFormat()),
+     * Values when it is left out:
+     * - Values: Laravel's insert, insert into "t" ("a", "b") values (?, ?), whose bindings the connection writes as
+     *   ClickHouse literals;
+     * - JSONEachRow: insert into "t" ("a", "b") format JSONEachRow, followed by one JSON object per row (see
+     *   insertJsonEachRow()), as the package builder's insert() sends it. The values that both formats take are
+     *   stored alike, such as floats with every digit, dates at the connection's datetime_precision into DateTime
+     *   columns, null, arrays and collections. ClickHouse reads some values differently in JSONEachRow (24.8
+     *   checked): a Date column refuses a date with a time, such as a Carbon; a Map column refuses [] and takes an
+     *   array with keys, which Values refuses; a Tuple column takes a list, which Values refuses; an integer column
+     *   refuses a float with a fraction, which Values cuts off. Raw SQL, such as DB::raw(), and a string that is not
+     *   valid UTF-8 are refused before anything is sent.
+     *
+     * @param array<int|string, mixed> $values One row, or a list of rows
+     * @param string|null $format 'Values' or 'JSONEachRow', in any letter case; null uses the connection's
+     *                            insert_format
      * @return bool
+     * @throws InvalidArgumentException When the format is neither Values nor JSONEachRow, or, in JSONEachRow, a
+     *                                  value cannot be sent as JSON or the connection is not a ClickHouse connection
+     * @throws QueryException When, in JSONEachRow, a row's keys differ from the first row's
+     * @throws ClientQueryException When, in JSONEachRow, a row has no keys, or the insert fails
      */
-    public function insert(array $values)
+    public function insert(array $values, ?string $format = null)
     {
+        $format = $this->insertFormat($format);
+
         if ($values === []) {
             return parent::insert($values);
         }
 
-        $rows = is_array(array_first($values)) ? $values : [$values];
-
-        return parent::insert(array_map(
+        $rows = array_map(
             fn (mixed $row): mixed => is_array($row)
                 ? array_map(fn (mixed $value): mixed => $value instanceof Enumerable ? $value->toArray() : $value, $row)
                 : $row,
-            $rows
+            is_array(array_first($values)) ? $values : [$values]
+        );
+
+        return $format === Format::JSON_EACH_ROW ? $this->insertJsonEachRow($rows) : parent::insert($rows);
+    }
+
+    /**
+     * Get the input format of an insert: 'Values' or 'JSONEachRow', as Format spells it, from a name in any letter
+     * case and with surrounding spaces, or, for null, the insert_format option of the connection. A connection other
+     * than this package's inserts in Values.
+     *
+     * @param string|null $format
+     * @return string Format::VALUES or Format::JSON_EACH_ROW
+     * @throws InvalidArgumentException For any other format
+     */
+    protected function insertFormat(?string $format): string
+    {
+        if ($format === null) {
+            return $this->connection instanceof Connection ? $this->connection->getInsertFormat() : Format::VALUES;
+        }
+
+        foreach ([Format::VALUES, Format::JSON_EACH_ROW] as $allowed) {
+            if (strcasecmp(trim($format), $allowed) === 0) {
+                return $allowed;
+            }
+        }
+
+        throw new InvalidArgumentException(sprintf(
+            "insert() takes the format '%s' or '%s', [%s] given.",
+            Format::VALUES,
+            Format::JSON_EACH_ROW,
+            $format
         ));
+    }
+
+    /**
+     * Insert rows as JSONEachRow: insert into <table> (<keys of the first row>) format JSONEachRow, written by this
+     * builder's grammar, with the rows as one JSON object per line in the request body (see
+     * ClientRequests::encodeJsonEachRow() and sendInsert()). Every row must have the first row's keys, in any order.
+     *
+     * The beforeQuery() callbacks of the builder run first, as in Laravel's insert(). Then the rows are checked and
+     * encoded, before anything is sent or logged, and the INSERT runs as the connection runs a statement: the
+     * beforeExecuting() callbacks of the connection get it, and it is logged once, with no bindings, when it
+     * succeeds. While the connection pretends, the rows are still checked and encoded, so that a row the real insert
+     * refuses is refused, and the INSERT is logged and not sent.
+     *
+     * @param array<int|string, mixed> $rows
+     * @return bool
+     * @throws InvalidArgumentException When the connection is not a ClickHouse connection, a row is not an array, or
+     *                                  a value cannot be sent as JSON
+     * @throws QueryException When a row's keys differ from the first row's
+     * @throws ClientQueryException When a row has no keys, or the insert fails
+     */
+    protected function insertJsonEachRow(array $rows): bool
+    {
+        $connection = $this->connection;
+        if (!$connection instanceof Connection) {
+            throw new InvalidArgumentException(sprintf(
+                'Cannot insert in %s on a %s connection: only a ClickHouse connection sends JSONEachRow rows.',
+                Format::JSON_EACH_ROW,
+                get_debug_type($connection)
+            ));
+        }
+
+        if (in_array([], $rows, true)) {
+            throw ClientQueryException::cannotInsertEmptyValues();
+        }
+
+        $this->applyBeforeQueryCallbacks();
+
+        [$columns, $body] = ClientRequests::encodeJsonEachRow(
+            $rows,
+            new JsonEachRowEncoder($connection->newBuilderGrammar()->formatDateTime(...))
+        );
+        $head = sprintf(
+            'insert into %s (%s) format %s',
+            $this->grammar->wrapTable($this->from),
+            $this->grammar->columnize(array_map(fn (int|string $column): string => (string) $column, $columns)),
+            Format::JSON_EACH_ROW
+        );
+
+        $connection->runBeforeExecutingCallbacks($head, []);
+        $start = microtime(true);
+
+        if (!$connection->pretending()) {
+            ClientRequests::sendInsert($connection->getClient(), $head, $body, Format::JSON_EACH_ROW);
+            $connection->recordsHaveBeenModified();
+        }
+
+        $connection->logQuery($head, [], round((microtime(true) - $start) * 1000, 2));
+
+        return true;
     }
 
     /**

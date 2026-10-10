@@ -200,7 +200,12 @@ class Connection extends BaseConnection
         return 'ClickHouse';
     }
 
-    /** @inheritDoc */
+    /**
+     * Get a schema builder for the connection: the package's SchemaBuilder, with the ClickHouse methods such as
+     * dropSync(), dropIfExistsSync() and hasDictionary().
+     *
+     * @return SchemaBuilder
+     */
     public function getSchemaBuilder()
     {
         if (is_null($this->schemaGrammar)) {
@@ -296,20 +301,86 @@ class Connection extends BaseConnection
     }
 
     /**
-     * Run a select statement and yield its rows one by one, as select() returns them.
+     * Run a select statement on the active node and yield its rows one by one, as associative arrays, as select()
+     * returns them. The cursor() of Laravel's query builder and of Eloquent reads its rows with it.
      *
-     * The smi2 client has no server-side cursor, so every row is read before the first one is yielded. While the
-     * connection pretends, nothing is sent and nothing is yielded. The query runs when the first row is asked for.
+     * The result is asked for in JSONEachRow and written to a temporary stream, php://temp, which keeps up to 2 MB
+     * in memory and moves to a temporary file above that (see ClientRequests::selectIntoStream()). The whole result
+     * is downloaded before the first row is yielded, so the query runs only once, and memory stays flat however
+     * many rows it has. Each line of the result is then decoded as it is yielded. An error that ClickHouse reports,
+     * also one after the first rows of the result, is thrown as a DatabaseException with its message before any row
+     * is yielded.
+     *
+     * A string that is not valid UTF-8, such as a binary MD5 hash in a FixedString(16) column, is yielded as select()
+     * returns it: ClickHouse replaces its invalid bytes with U+FFFD (see ClientRequests::selectIntoStream()). For a
+     * read-only user, the readonly option of the connection, ClickHouse cannot be asked to, so PHP replaces each
+     * invalid byte with U+FFFD as the line is decoded, and such a string can hold more U+FFFD than select() gives.
+     *
+     * The query runs when the first row is asked for, and is logged once with its bindings, as given, after the
+     * result has been downloaded. While the connection pretends, it is logged, nothing is sent and nothing is
+     * yielded. The bindings are prepared as select() prepares them (see prepareQueryForClient()). A query with a
+     * FORMAT clause of its own is refused before anything is sent: cursor() asks for JSONEachRow itself.
      *
      * @param string $query
      * @param array<int|string, mixed> $bindings
      * @param bool $useReadPdo Ignored: every query runs on the active node
      * @param array<int, mixed> $fetchUsing Ignored
      * @return Generator<int, array<string, mixed>>
+     * @throws InvalidArgumentException When the bindings do not fit the query's placeholders
+     * @throws QueryException When the query has a FORMAT clause, before anything is sent
+     * @throws DatabaseException When ClickHouse reports an error
+     * @throws \ClickHouseDB\Exception\QueryException When the request fails without a ClickHouse error, such as a
+     *                                                timeout or a refused connection
+     * @throws RuntimeException When the temporary stream cannot be opened
      */
     public function cursor($query, $bindings = [], $useReadPdo = true, array $fetchUsing = []): Generator
     {
-        yield from $this->select($query, $bindings, $useReadPdo, $fetchUsing);
+        $stream = $this->run($query, $bindings, function (string $query, array $bindings): mixed {
+            if ($this->pretending()) {
+                return null;
+            }
+
+            [$sql, $clientBindings] = $this->prepareQueryForClient($query, $bindings);
+            $format = $this->findFormatClause($sql);
+            if ($format !== null) {
+                throw new QueryException(sprintf(
+                    'Cannot read the rows of a query whose FORMAT clause names %s with cursor(): cursor() asks for the'
+                    . ' result in %s itself and yields its rows one by one. Leave the FORMAT clause out.',
+                    $format,
+                    Format::JSON_EACH_ROW
+                ));
+            }
+
+            $stream = fopen('php://temp', 'w+b');
+            if ($stream === false) {
+                throw new RuntimeException('Cannot open a temporary stream for the result of cursor().');
+            }
+
+            try {
+                ClientRequests::selectIntoStream($this->getClient(), $sql, $clientBindings, $stream);
+            } catch (Throwable $exception) {
+                fclose($stream);
+
+                throw $exception;
+            }
+
+            return $stream;
+        });
+
+        if ($stream === null) {
+            return;
+        }
+
+        try {
+            rewind($stream);
+            while (($line = fgets($stream)) !== false) {
+                if (trim($line) !== '') {
+                    yield json_decode($line, true, 512, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+                }
+            }
+        } finally {
+            fclose($stream);
+        }
     }
 
     /**
@@ -361,8 +432,9 @@ class Connection extends BaseConnection
     /**
      * Execute a statement on the active node and return the number of rows it affected, as far as ClickHouse
      * reports it (see countAffectedRows()): for an INSERT, the rows that ClickHouse reports as written, which include
-     * the rows that the materialized views of the table wrote and are 0 for an asynchronous insert; 1 for any other
-     * statement. Laravel's update(), delete() and insertUsing() run through this method.
+     * the rows that the materialized views of the table wrote when the insert is synchronous, and depend on the server
+     * version when it is asynchronous; 1 for any other statement. Laravel's update(), delete() and insertUsing() run
+     * through this method.
      *
      * The query and its bindings are logged as given. While the connection pretends, nothing is sent and 0 is
      * returned.
@@ -396,12 +468,19 @@ class Connection extends BaseConnection
      * leading comments, returns that number, 0 included. Any other statement, and an INSERT whose response has no
      * number, returns 1, as in 3.0.0, so that code which checks the result of update() or delete() goes on as before.
      *
-     * written_rows is not always the number of rows that the INSERT inserted (24.8 checked):
-     * - it also counts the rows that the materialized views of the table wrote, so an INSERT of 3 rows into a table
-     *   with one materialized view that keeps every row returns 6;
-     * - it is 0 for an asynchronous insert (the async_insert setting, from the query, the connection's settings or
-     *   the user's profile), also when the query waits for its rows to be written (wait_for_async_insert). The
-     *   response does not tell such an insert apart from one that wrote nothing.
+     * written_rows is not always the number of rows that the INSERT inserted (24.8, 26.3 and 26.8 checked):
+     * - a synchronous insert also counts the rows that the materialized views of the table wrote, so an INSERT of 3
+     *   rows into a table with one materialized view that keeps every row returns 6. An INSERT ... SELECT, such as
+     *   insertUsing() sends, is always synchronous;
+     * - an asynchronous insert (the async_insert setting, from the query, the connection's settings or the user's
+     *   profile) leaves those rows out. ClickHouse 24.8 reports 0 for it, also when the query waits for its rows to
+     *   be written (wait_for_async_insert). 26.3 and 26.8 report the rows of the table when the query waits (3 in
+     *   the example above), and 0 when it does not. A count of 0 does not tell such an insert apart from one that
+     *   wrote nothing.
+     *
+     * ClickHouse 26.3 and 26.8 insert asynchronously by default (async_insert = 1, wait_for_async_insert = 1), so
+     * there the example returns 3. 'settings' => ['async_insert' => 0] in the connection's config makes an insert
+     * that does not set async_insert itself synchronous, with the counts of 24.8.
      *
      * @param string $query The statement that was sent
      * @param Statement $statement

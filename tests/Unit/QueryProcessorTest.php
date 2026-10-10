@@ -162,6 +162,12 @@ class QueryProcessorTest extends TestCase
             'double-quoted identifier' => ['"my col", b', ['my col', 'b']],
             'quoted identifier inside an expression' => ['intHash32(`my col`)', ['intHash32(`my col`)']],
             'extra whitespace' => ["  a ,\n b  ", ['a', 'b']],
+            'one column in parentheses, as 26.8 prints it' => ['(id)', ['id']],
+            'quoted column in parentheses' => ['(`we\\`ird`)', ['we`ird']],
+            'columns in parentheses' => ['(a, intHash32(b))', ['a', 'intHash32(b)']],
+            'parentheses that do not enclose the whole expression' => ['(a) + (b)', ['(a) + (b)']],
+            'parenthesis inside a string' => ["(concat(s, ')'))", ["concat(s, ')')"]],
+            'tuple element' => ['(x, y).1', ['(x, y).1']],
         ];
     }
 

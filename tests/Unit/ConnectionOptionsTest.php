@@ -1023,16 +1023,19 @@ class ConnectionOptionsTest extends TestCase
         $this->assertSame("SELECT '?' ?? :0", $connection->getQueryLog()[0]['query']);
     }
 
-    public function test_cursor_yields_the_rows_of_select_once_it_is_iterated(): void
+    public function test_cursor_yields_the_rows_of_a_json_each_row_result_once_it_is_iterated(): void
     {
-        [$connection, $curler] = $this->connectionWithCannedClient([], self::jsonResponse([['n' => '1'], ['n' => '2']]));
+        [$connection, $curler] = $this->connectionWithCannedClient(
+            [],
+            self::response(200, "{\"n\":\"1\"}\n{\"n\":\"2\"}\n", ['X-ClickHouse-Format' => 'JSONEachRow'], 'application/x-ndjson; charset=UTF-8')
+        );
 
         $cursor = $connection->cursor('SELECT number AS n FROM numbers(?) WHERE number > ?', [3, 0]);
         $this->assertSame([], $curler->requests);
 
         $this->assertSame([['n' => '1'], ['n' => '2']], iterator_to_array($cursor));
         $this->assertSame(
-            'SELECT number AS n FROM numbers(3) WHERE number > 0 FORMAT JSON',
+            "SELECT number AS n FROM numbers(3) WHERE number > 0\nFORMAT JSONEachRow",
             self::sentSql($curler->requests[0])
         );
     }

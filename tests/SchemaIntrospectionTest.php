@@ -242,6 +242,8 @@ class SchemaIntrospectionTest extends TestCase
     /**
      * Variant and Dynamic columns, and a SimpleAggregateFunction over a type that
      * accepts NULL, store NULL too. Both types are experimental in ClickHouse 24.8.
+     * The table is a plain MergeTree: 26.8 refuses Variant and Dynamic columns
+     * outside the sorting key of an AggregatingMergeTree table (BAD_ARGUMENTS).
      */
     public function testColumnsWhoseTypeAcceptsNullAreNullable(): void
     {
@@ -255,7 +257,7 @@ class SchemaIntrospectionTest extends TestCase
                 total SimpleAggregateFunction(sum, UInt64),
                 variants Array(Variant(String, UInt64))
             )
-            ENGINE = AggregatingMergeTree ORDER BY id',
+            ENGINE = MergeTree ORDER BY id',
             [],
             true,
             ['allow_experimental_variant_type' => 1, 'allow_experimental_dynamic_type' => 1]

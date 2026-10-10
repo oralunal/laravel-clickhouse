@@ -82,6 +82,8 @@ class ModelWhereTest extends TestCase
 
     /**
      * The query that query() begins has the sources table attached, so a mutation writes to it, as with where().
+     * The integer column is read as a string, or compared as an int, since ClickHouse 24.8 quotes 64-bit integers in
+     * JSON and 25.8 and later do not.
      */
     public function testQueryMutationsWriteToTheSourcesTable(): void
     {
@@ -95,7 +97,7 @@ class ModelWhereTest extends TestCase
         $client = DB::connection('clickhouse')->getClient();
         $this->assertSame(['1', '2'], array_column($client->select('SELECT toString(f_int) AS i FROM examples ORDER BY f_int')->rows(), 'i'));
         $this->assertSame(['2'], array_column($client->select('SELECT toString(f_int) AS i FROM examples3 ORDER BY f_int')->rows(), 'i'));
-        $this->assertSame(['1', '2'], array_column(ModelWithSourcesTable::query()->select(['f_int'])->orderBy('f_int')->getRows(), 'f_int'));
+        $this->assertSame([1, 2], array_map('intval', array_column(ModelWithSourcesTable::query()->select(['f_int'])->orderBy('f_int')->getRows(), 'f_int')));
     }
 
     /**

@@ -35,7 +35,10 @@ return [
         'username'        => env('CLICKHOUSE_USERNAME', 'default'),
         'password'        => env('CLICKHOUSE_PASSWORD', ''),
         // Seconds, and a fraction is allowed: 0.5 is 500 ms. The query
-        // timeout is applied in whole seconds, rounded up (see README).
+        // timeout is applied in whole seconds, rounded up. Migration commands
+        // can need more: an ON CLUSTER statement waits for every host, and on
+        // a ClickHouse 26.8 server with little RAM a rollback's delete can
+        // take more than 2 seconds (see README).
         'timeout_connect' => env('CLICKHOUSE_TIMEOUT_CONNECT', 2),
         'timeout_query'   => env('CLICKHOUSE_TIMEOUT_QUERY', 2),
         'https'           => (bool) env('CLICKHOUSE_HTTPS', false),
@@ -44,6 +47,10 @@ return [
         // 'unsent' only those that never reached the server. With 'any', a
         // write that timed out on the client can run twice (see README).
         'retry_on'        => env('CLICKHOUSE_RETRY_ON', 'any'),
+        // ClickHouse settings sent with every query of the connection, such as
+        // 'output_format_json_quote_64bit_integers' => 1, which returns 64-bit
+        // integers as strings on 25.8 and later as 24.8 does, or
+        // 'async_insert' => 0 (see README).
         'settings'        => [],
         // DB::connection('clickhouse')->table() returns the package's query
         // builder when true, and Laravel's own query builder, with ClickHouse
@@ -76,6 +83,16 @@ return [
         // a cluster_name, and every such statement then waits for every host
         // (see README).
         'use_on_cluster' => (bool) env('CLICKHOUSE_USE_ON_CLUSTER', false),
+        // For a cluster, replace host and port with the nodes, of which the
+        // connection talks to the first that answers, and name the cluster of
+        // the server config (remote_servers) for ON CLUSTER. With a
+        // cluster_name, the schema builder sends ON CLUSTER, and with the
+        // nodes as well, it creates replicated tables (see README).
+        // 'cluster' => [
+        //     ['host' => 'clickhouse01', 'port' => '8123'],
+        //     ['host' => 'clickhouse02', 'port' => '8123'],
+        // ],
+        // 'cluster_name' => 'company_cluster',
     ],
 
     // Additional connections — uncomment or add your own.

@@ -354,10 +354,19 @@ class RegressionTest extends TestCase
         $this->assertSame([3], $pages);
     }
 
+    /**
+     * Read the rows of regression_cast, with the Int64 column p as an int: ClickHouse 24.8 quotes 64-bit integers
+     * in JSON, 25.8 and later do not (output_format_json_quote_64bit_integers is 0), so the column comes back as a
+     * string or as an int depending on the server.
+     *
+     * @return list<array{p: int, b: int}>
+     */
     private function castRows(): array
     {
-        return DB::connection('clickhouse')->getClient()
-            ->select('SELECT p, b FROM regression_cast ORDER BY p')->rows();
+        return array_map(
+            fn (array $row): array => ['p' => (int) $row['p'], 'b' => $row['b']],
+            DB::connection('clickhouse')->getClient()->select('SELECT p, b FROM regression_cast ORDER BY p')->rows()
+        );
     }
 
     /**
@@ -369,7 +378,7 @@ class RegressionTest extends TestCase
         CastFirstColumn::insertBulk([[false, 1]], ['b', 'p']);
 
         $this->assertSame(
-            [['p' => '1', 'b' => 0]],
+            [['p' => 1, 'b' => 0]],
             $this->castRows(),
             'boolean cast must apply to the first column too'
         );
@@ -380,7 +389,7 @@ class RegressionTest extends TestCase
     {
         CastFirstColumn::insertBulk([[2, false]], ['p', 'b']);
 
-        $this->assertSame([['p' => '2', 'b' => 0]], $this->castRows());
+        $this->assertSame([['p' => 2, 'b' => 0]], $this->castRows());
     }
 
     /** A column with no cast configured must be left alone. */
@@ -388,7 +397,7 @@ class RegressionTest extends TestCase
     {
         CastFirstColumn::insertBulk([[1, 3]], ['b', 'p']);
 
-        $this->assertSame([['p' => '3', 'b' => 1]], $this->castRows());
+        $this->assertSame([['p' => 3, 'b' => 1]], $this->castRows());
     }
 
     /**

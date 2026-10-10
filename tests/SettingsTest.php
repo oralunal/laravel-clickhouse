@@ -6,6 +6,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Oralunal\LaravelClickHouse\Builder;
+use Oralunal\LaravelClickHouse\Connection;
 use Oralunal\LaravelClickHouse\RawColumn;
 use Tests\Unit\ClickhouseBuilder\IntBackedEnumFixture;
 use Tests\Unit\ClickhouseBuilder\StringBackedEnumFixture;
@@ -49,6 +50,10 @@ class SettingsTest extends TestCase
         $this->assertSame("it's a \\ test", $row['log_comment']);
     }
 
+    /**
+     * The UInt64 column number is compared as ints: ClickHouse 24.8 quotes 64-bit integers in JSON, 25.8 and later
+     * do not (output_format_json_quote_64bit_integers is 0).
+     */
     public function testExpressionValueIsSentAsWritten(): void
     {
         $rows = DB::connection('clickhouse')->table('system.numbers')
@@ -57,7 +62,7 @@ class SettingsTest extends TestCase
             ->settings('additional_table_filters', new RawColumn("{'system.numbers': 'number < 3'}"))
             ->getRows();
 
-        $this->assertSame(['0', '1', '2'], array_column($rows, 'number'));
+        $this->assertSame([0, 1, 2], array_map('intval', array_column($rows, 'number')));
     }
 
     public function testServerAppliesStringableAndBackedEnumValues(): void
@@ -102,6 +107,55 @@ class SettingsTest extends TestCase
         ], array_column($connection->getQueryLog(), 'query'));
     }
 
+    /**
+     * output_format_json_quote_64bit_integers = 1 in the connection's settings keeps 64-bit integers exact: they come
+     * back as strings, as ClickHouse 24.8 returns them by default. 25.8 and later default it to 0 and return JSON
+     * numbers, which PHP reads as an int, or as a float above PHP_INT_MAX: 18446744073709551615 becomes
+     * 1.8446744073709552E+19.
+     *
+     * A connection with the setting at 0 reads such numbers on every version, 24.8 included, so the connection's
+     * settings are shown to reach the server whatever its default. settings() on one query overrides the
+     * connection's value in both directions.
+     */
+    public function testQuotedSixtyFourBitIntegersStayExactOnEveryPath(): void
+    {
+        $quoted = $this->connectionWithSettings('clickhouse-quoted-integers', ['output_format_json_quote_64bit_integers' => 1]);
+        $unquoted = $this->connectionWithSettings('clickhouse-unquoted-integers', ['output_format_json_quote_64bit_integers' => 0]);
+        $sql = "SELECT toUInt64('18446744073709551615') AS big, toInt64('-9223372036854775808') AS small";
+        $columns = [
+            new RawColumn("toUInt64('18446744073709551615')", 'big'),
+            new RawColumn("toInt64('-9223372036854775808')", 'small'),
+        ];
+        $exact = [['big' => '18446744073709551615', 'small' => '-9223372036854775808']];
+        $numbers = [['big' => 1.8446744073709552E+19, 'small' => PHP_INT_MIN]];
+
+        try {
+            foreach ([[$quoted, $exact], [$unquoted, $numbers]] as [$connection, $expected]) {
+                $this->assertSame($expected, $connection->select($sql), $connection->getName());
+                $this->assertSame($expected, $connection->getClient()->select($sql)->rows(), $connection->getName());
+                $this->assertSame($expected, $connection->table('system.one')->select($columns)->getRows(), $connection->getName());
+            }
+
+            $this->assertSame(
+                $exact,
+                $unquoted->table('system.one')->select($columns)
+                    ->settings('output_format_json_quote_64bit_integers', 1)
+                    ->getRows(),
+                "The setting of one query overrides the connection's 0."
+            );
+            $this->assertSame(
+                $numbers,
+                $quoted->table('system.one')->select($columns)
+                    ->settings('output_format_json_quote_64bit_integers', 0)
+                    ->getRows(),
+                "The setting of one query overrides the connection's 1."
+            );
+        } finally {
+            DB::purge('clickhouse-quoted-integers');
+            DB::purge('clickhouse-unquoted-integers');
+        }
+    }
+
     public function testLaterCallsAddToTheSettingsAndOverrideSameNames(): void
     {
         $row = $this->selectSettings(['max_threads', 'log_comment'])
@@ -111,5 +165,22 @@ class SettingsTest extends TestCase
 
         $this->assertSame(1, $row['max_threads']);
         $this->assertSame('first', $row['log_comment']);
+    }
+
+    /**
+     * Configure a copy of the clickhouse connection with the given settings, and connect it.
+     *
+     * @param string $name
+     * @param array<string, int|string> $settings
+     * @return Connection
+     */
+    private function connectionWithSettings(string $name, array $settings): Connection
+    {
+        $this->app['config']->set("database.connections.{$name}", array_merge(
+            $this->app['config']->get('database.connections.clickhouse'),
+            ['settings' => $settings]
+        ));
+
+        return DB::connection($name);
     }
 }

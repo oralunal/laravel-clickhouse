@@ -79,6 +79,9 @@ class ParallelTest extends TestCase
         };
     }
 
+    /**
+     * The count is selected as a string, since ClickHouse 24.8 quotes a UInt64 in JSON and 25.8 and later do not.
+     */
     public function test_the_queries_of_a_batch_overlap_on_the_server(): void
     {
         $prefix = 'parallel_overlap_' . bin2hex(random_bytes(6));
@@ -93,7 +96,7 @@ class ParallelTest extends TestCase
         $this->assertSame(
             [['queries' => '3', 'overlapped' => 1]],
             DB::connection('clickhouse')->select(
-                'SELECT count() AS queries, max(query_start_time_microseconds) < min(event_time_microseconds) AS overlapped'
+                'SELECT toString(count()) AS queries, max(query_start_time_microseconds) < min(event_time_microseconds) AS overlapped'
                 . " FROM system.query_log WHERE type = 'QueryFinish' AND log_comment LIKE ?",
                 ["{$prefix}%"]
             )
@@ -194,6 +197,10 @@ class ParallelTest extends TestCase
         $this->assertSame(['first' => [['id' => 1]], 'second' => [['id' => 2]], 'laravel' => [['id' => 3]]], $rows);
     }
 
+    /**
+     * The counts are UInt64 values, which ClickHouse 24.8 quotes in JSON and 25.8 and later do not, so they are
+     * compared as ints.
+     */
     public function test_a_batch_runs_queries_on_two_nodes(): void
     {
         if (! env('CLICKHOUSE_CLUSTER_AVAILABLE')) {
@@ -206,8 +213,11 @@ class ParallelTest extends TestCase
         ]);
 
         $this->assertSame(
-            ['node1' => [['count' => (string) Example::select()->count()]], 'node2' => [['count' => (string) Example2::select()->count()]]],
-            $rows
+            ['node1' => [['count' => Example::select()->count()]], 'node2' => [['count' => Example2::select()->count()]]],
+            array_map(
+                fn (array $counts): array => array_map(fn (array $row): array => array_replace($row, ['count' => (int) $row['count']]), $counts),
+                $rows
+            )
         );
     }
 
@@ -231,6 +241,9 @@ class ParallelTest extends TestCase
         }
     }
 
+    /**
+     * The count is selected as a string, since ClickHouse 24.8 quotes a UInt64 in JSON and 25.8 and later do not.
+     */
     public function test_a_failed_request_is_sent_again_as_often_as_the_retries_say(): void
     {
         $comment = 'parallel_retries_' . bin2hex(random_bytes(6));
@@ -248,7 +261,7 @@ class ParallelTest extends TestCase
         $this->assertSame(
             [['attempts' => '3']],
             DB::connection('clickhouse')->select(
-                "SELECT count() AS attempts FROM system.query_log WHERE type = 'ExceptionBeforeStart' AND log_comment = ?",
+                "SELECT toString(count()) AS attempts FROM system.query_log WHERE type = 'ExceptionBeforeStart' AND log_comment = ?",
                 [$comment]
             )
         );
@@ -280,6 +293,10 @@ class ParallelTest extends TestCase
         $this->assertGreaterThan(0, $log[0]['time']);
     }
 
+    /**
+     * The count is a UInt64, which ClickHouse 24.8 quotes in JSON and 25.8 and later do not, so it is compared as an
+     * int.
+     */
     public function test_a_count_and_an_existence_check_run_next_to_a_page(): void
     {
         $query = fn (): Builder => DB::connection('clickhouse')->table(self::TABLE)->where('kind', 'a')->orderBy('id');
@@ -289,8 +306,9 @@ class ParallelTest extends TestCase
             'exists' => $query()->getQueryForExists(),
             'page' => $query()->select('id')->getQueryForPage(1, 2),
         ]);
+        $rows['total'][0]['count'] = (int) $rows['total'][0]['count'];
 
-        $this->assertSame(['total' => [['count' => '2']], 'exists' => [['1' => 1]], 'page' => [['id' => 2]]], $rows);
+        $this->assertSame(['total' => [['count' => 2]], 'exists' => [['1' => 1]], 'page' => [['id' => 2]]], $rows);
     }
 
     public function test_get_returns_the_statements(): void
@@ -334,10 +352,13 @@ class ParallelTest extends TestCase
         }
     }
 
+    /**
+     * The sum is selected as a string, since ClickHouse 24.8 quotes a UInt64 in JSON and 25.8 and later do not.
+     */
     public function test_select_parallelly_fills_the_bindings(): void
     {
         $rows = DB::connection('clickhouse')->selectParallelly([
-            'total' => ['sql' => 'SELECT sum(number) AS total FROM numbers(:count)', 'bindings' => ['count' => 4]],
+            'total' => ['sql' => 'SELECT toString(sum(number)) AS total FROM numbers(:count)', 'bindings' => ['count' => 4]],
             'question mark' => ['sql' => 'SELECT ? AS value', 'bindings' => ['a']],
             'plain' => 'SELECT 1 AS one',
         ]);
