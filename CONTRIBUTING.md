@@ -15,9 +15,10 @@ composer install
 composer test
 ```
 
-See [docs/howto_run_local_test.md](docs/howto_run_local_test.md) for
-prerequisites, cluster-test notes, and using `vendor/bin/testbench` during
-development. There is no `php artisan` in this repo — it is a package, so use
+See [Contribute](https://laravel-clickhouse.oralunal.com/reference/contributing)
+(`docs/reference/contributing.md`) for prerequisites, cluster-test notes, the
+documentation site, and using `vendor/bin/testbench` during development.
+There is no `php artisan` in this repo — it is a package, so use
 `vendor/bin/testbench <artisan-command>` instead.
 
 ## Branches

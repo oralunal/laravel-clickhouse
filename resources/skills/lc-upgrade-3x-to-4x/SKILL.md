@@ -393,6 +393,7 @@ End with a short summary for the user:
 - for a cluster connection, the notes of step 6.4;
 - the test results compared with the baseline, and any failures that already
   existed;
-- if the ClickHouse servers run 25.8 or later, a pointer to the README section
-  "Newer ClickHouse versions" of the package, which lists what they do
-  otherwise than 24.8 and the settings that bring back its behavior.
+- if the ClickHouse servers run 25.8 or later, a pointer to
+  https://laravel-clickhouse.oralunal.com/reference/clickhouse-versions, which
+  lists what they do otherwise than 24.8 and the settings that bring back its
+  behavior.
