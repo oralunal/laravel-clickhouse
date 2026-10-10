@@ -53,6 +53,11 @@ jobs:
       - name: Install dependencies
         run: composer update --prefer-dist --no-interaction --no-progress
 
+      # GrammarLiteralTest checks that floats are written with a dot under a locale with a decimal comma, and skips
+      # when none is installed; the runner image has none.
+      - name: Generate a locale with a decimal comma
+        run: sudo locale-gen de_DE.UTF-8
+
       - name: Wait for ClickHouse
         run: |
           for host in 18123 18124; do
@@ -102,6 +107,11 @@ jobs:
 
       - name: Install dependencies
         run: composer update --prefer-dist --no-interaction --no-progress
+
+      # GrammarLiteralTest checks that floats are written with a dot under a locale with a decimal comma, and skips
+      # when none is installed; the runner image has none.
+      - name: Generate a locale with a decimal comma
+        run: sudo locale-gen de_DE.UTF-8
 
       - name: Start the ClickHouse cluster
         env:

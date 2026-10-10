@@ -211,6 +211,11 @@ class FormattedInsertSqlTest extends TestCase
             'text/plain; charset=UTF-8'
         ));
 
+        // (string) $exception is what Laravel writes to the log as the stack trace, with argument values when
+        // zend.exception_ignore_args is off, the php.ini-development default. The php.ini-production default, which
+        // CI runners use, leaves every argument out, so the test turns it off to see the frames with their values.
+        $ignoreArgs = ini_set('zend.exception_ignore_args', '0');
+
         try {
             ClientRequests::insertJsonEachRow(
                 $client,
@@ -221,12 +226,14 @@ class FormattedInsertSqlTest extends TestCase
             );
             $this->fail('The failed insert did not throw.');
         } catch (DatabaseException $exception) {
-            // (string) $exception is what Laravel writes to the log as the stack trace, with argument values when
-            // zend.exception_ignore_args is off (the php.ini-development default). #[\SensitiveParameter] on the
-            // body parameter of sendInsert() keeps the row values (the payload) out of that frame, while the head,
-            // which names only columns, still appears.
+            // #[\SensitiveParameter] on the body parameter of sendInsert() keeps the row values (the payload) out
+            // of that frame, while the head, which names only columns, still appears.
             $this->assertStringNotContainsString('secret-payload-value', (string) $exception);
             $this->assertStringContainsString('SensitiveParameterValue', (string) $exception);
+        } finally {
+            if ($ignoreArgs !== false) {
+                ini_set('zend.exception_ignore_args', $ignoreArgs);
+            }
         }
     }
 
