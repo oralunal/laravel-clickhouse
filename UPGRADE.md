@@ -526,7 +526,7 @@ The ClickHouse user needs permission to create and drop databases. Test runs
 without `--parallel` keep using the configured database.
 
 See
-[Which connection holds the `migrations` table](README.md#which-connection-holds-the-migrations-table).
+[The connection that holds the migrations table](https://laravel-clickhouse.oralunal.com/schema/migration-commands#the-connection-that-holds-the-migrations-table).
 
 ### 8. Enums extend the bundled `Enum` class
 
