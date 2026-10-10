@@ -1,28 +1,30 @@
 ---
-name: lc-upgrade-2x-to-3x
-description: Upgrades a Laravel application from oralunal/phpclickhouse-laravel 2.x to oralunal/laravel-clickhouse 3.x. Switches the Composer package, renames the PhpClickHouseLaravel namespace to Oralunal\LaravelClickHouse in code, migrations, config and tests, refreshes Laravel's package caches, and verifies the result. Use when the user runs /lc-upgrade-2x-to-3x or asks to upgrade phpclickhouse-laravel or laravel-clickhouse to version 3.
+name: lc-upgrade-2x-to-4x
+description: Upgrades a Laravel application from oralunal/phpclickhouse-laravel 2.x to oralunal/laravel-clickhouse 4.x. Switches the Composer package, renames the PhpClickHouseLaravel namespace to Oralunal\LaravelClickHouse in code, migrations, config and tests, refreshes Laravel's package caches, then fixes and reviews what 4.0 changes, and verifies the result. Use when the user runs /lc-upgrade-2x-to-4x or asks to upgrade phpclickhouse-laravel 2.x to laravel-clickhouse 4.
 ---
 
-# phpclickhouse-laravel 2.x → laravel-clickhouse 3.x upgrade
+# phpclickhouse-laravel 2.x → laravel-clickhouse 4.x upgrade
 
 You are upgrading this Laravel application from `oralunal/phpclickhouse-laravel`
-2.x to `oralunal/laravel-clickhouse` 3.x. Two things change, nothing else:
+2.x to `oralunal/laravel-clickhouse` 4.x. It is done in two parts:
 
-- the Composer package name: `oralunal/phpclickhouse-laravel` →
-  `oralunal/laravel-clickhouse`;
-- the namespace prefix: `PhpClickHouseLaravel\` → `Oralunal\LaravelClickHouse\`.
+1. **The rename (this skill, steps 1 to 5).** 3.0 renamed the Composer package
+   and the namespace prefix, and nothing else:
+   - `oralunal/phpclickhouse-laravel` → `oralunal/laravel-clickhouse`;
+   - `PhpClickHouseLaravel\` → `Oralunal\LaravelClickHouse\`.
 
-Class names, the folder layout below the prefix, configuration, the generated
-SQL and the behavior are the same as in 2.0.2:
+   | 2.x | 4.x |
+   | --- | --- |
+   | `PhpClickHouseLaravel\BaseModel` | `Oralunal\LaravelClickHouse\BaseModel` |
+   | `PhpClickHouseLaravel\Migration` | `Oralunal\LaravelClickHouse\Migration` |
+   | `PhpClickHouseLaravel\ClickhouseBuilder\…` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\…` |
+   | `PhpClickHouseLaravel\ClickhouseSchemaBuilder\…` | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\…` |
+   | `PhpClickHouseLaravel\Enum\Enum` | `Oralunal\LaravelClickHouse\Enum\Enum` |
+   | `use function PhpClickHouseLaravel\ClickhouseBuilder\raw;` | `use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;` |
 
-| 2.x | 3.x |
-| --- | --- |
-| `PhpClickHouseLaravel\BaseModel` | `Oralunal\LaravelClickHouse\BaseModel` |
-| `PhpClickHouseLaravel\Migration` | `Oralunal\LaravelClickHouse\Migration` |
-| `PhpClickHouseLaravel\ClickhouseBuilder\…` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\…` |
-| `PhpClickHouseLaravel\ClickhouseSchemaBuilder\…` | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\…` |
-| `PhpClickHouseLaravel\Enum\Enum` | `Oralunal\LaravelClickHouse\Enum\Enum` |
-| `use function PhpClickHouseLaravel\ClickhouseBuilder\raw;` | `use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;` |
+2. **The 4.0 changes (step 6).** 4.0 keeps the name and namespace, and brings
+   breaking changes and behavior changes. They are handled by the steps of the
+   `lc-upgrade-3x-to-4x` skill, which you follow from its step 3.
 
 Work through the steps in order. Do not skip the checks, and do not stop at the
 first file you fix: the goal is zero remaining references. Once the package is
@@ -40,6 +42,8 @@ is unclear.
   non-PHP files that name classes, such as `phpstan.neon`, `psalm.xml`,
   `rector.php` or IDE helper files. Exclude `vendor/`, `node_modules/`,
   `storage/`, `bootstrap/cache/` and `.git/`.
+- Never run `migrate:fresh`, `db:wipe`, `migrate:rollback` or any statement
+  that changes data or tables of a real ClickHouse database.
 - When a change needs a decision only the user can make, stop and ask. The
   steps below say when.
 - Do not commit unless the user asks you to.
@@ -50,9 +54,11 @@ is unclear.
    required and installed versions.
    - `oralunal/phpclickhouse-laravel` 2.x: do every step.
    - `oralunal/phpclickhouse-laravel` 1.x: stop. Tell the user to run
-     `/plc-upgrade-1x-to-2x` first and to come back to this skill afterwards.
-   - `oralunal/laravel-clickhouse` 3.x is already installed: do step 1's
-     searches and then every step from step 3 on for what they find.
+     `/lc-upgrade-1x-to-4x` instead.
+   - `oralunal/laravel-clickhouse` 3.x: stop. Tell the user to run
+     `/lc-upgrade-3x-to-4x` instead.
+   - `oralunal/laravel-clickhouse` 4.x is already installed: do step 1's
+     searches, then every step from step 3 on for what they find.
 2. Check `git status`. If the tree has uncommitted changes that are not yours,
    tell the user and suggest committing them or working on a new branch before
    you continue.
@@ -70,14 +76,14 @@ is unclear.
    - `oralunal/phpclickhouse-laravel`: the requirement in `composer.json`
      (and in the `composer.json` of any local package in the project).
    - `Tinderbox\\ClickhouseBuilder|PhpClickHouseSchemaBuilder\\`: 1.x code. If
-     this finds anything, stop and tell the user to finish
-     `/plc-upgrade-1x-to-2x` first.
+     this finds anything, stop and tell the user to run `/lc-upgrade-1x-to-4x`
+     instead.
 
 ## Step 2: Switch the dependency
 
 ```bash
 composer remove oralunal/phpclickhouse-laravel --no-update
-composer require oralunal/laravel-clickhouse:^3.0 --with-all-dependencies
+composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
 ```
 
 `oralunal/laravel-clickhouse` conflicts with `oralunal/phpclickhouse-laravel`,
@@ -128,7 +134,7 @@ renames it to `Oralunal\LaravelClickHouse\ClickhouseServiceProvider`; keep it.
    `bootstrap/cache/services.php` (Laravel regenerates them), then run
    `php artisan package:discover` again.
 
-2. Values serialized with the 2.x class names cannot be unserialized by 3.x:
+2. Values serialized with the 2.x class names cannot be unserialized by 4.x:
    cache entries, queued jobs and sessions that hold objects of the package's
    classes, such as `RawColumn` or the builder enums. Do not change code for
    this and do not clear caches or queues yourself. Look for places that put
@@ -136,9 +142,7 @@ renames it to `Oralunal\LaravelClickHouse\ClickhouseServiceProvider`; keep it.
    found, and that a deploy of this upgrade should let the queues drain first
    and clear the application cache afterwards if any such values exist.
 
-## Step 5: Verify
-
-Run all of these and fix what they report:
+## Step 5: Check the rename
 
 1. `composer dump-autoload` and `php artisan package:discover`. Both must
    finish without errors.
@@ -146,21 +150,19 @@ Run all of these and fix what they report:
 3. Run every search from step 1 again.
    - `oralunal/phpclickhouse-laravel` must not be required anywhere.
    - `PhpClickHouseLaravel` only remains where step 3 deliberately left it.
-4. `php artisan migrate:status`. This loads the migration files, so a missing
-   class shows up here. If the database cannot be reached, run
-   `php -l database/migrations/*.php` instead and say so in the report.
-5. Run the test suite and compare it with the baseline from step 1. Every
-   failure that is new must be fixed or explained.
 
-## Step 6: Report
+## Step 6: Apply the 4.0 changes
 
-End with a short summary for the user:
+Read the `lc-upgrade-3x-to-4x` skill. `php artisan clickhouse:install-skills`
+installed it next to this one, in the same skills directory; the package
+also ships it as
+`vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-3x-to-4x/SKILL.md`.
 
-- the package and version change in `composer.json`, and any other package you
-  had to change;
-- how many files changed in step 3, with the file list, and every remaining
-  `PhpClickHouseLaravel` mention you left on purpose;
-- what step 4 found about serialized values, cache and queues;
-- every question you asked and the decision taken;
-- the test results compared with the baseline, and any failures that already
-  existed.
+Follow its rules, then its step 1 items 4 and 5 (the ClickHouse connections
+and the code that uses them), and then every step from its step 3 on. Skip its
+steps 1.1 to 1.3 and 2: the version check, the `git status` check, the baseline
+and the dependency are done. Its verification and report replace a separate
+verification and report of this skill: add to its report the package and
+namespace change, the files of step 3, every `PhpClickHouseLaravel` mention
+you left on purpose, and what step 4 found about serialized values, cache and
+queues.

@@ -10,7 +10,8 @@ use Illuminate\Filesystem\Filesystem;
 use function Laravel\Prompts\multiselect;
 
 /**
- * Installs the package's AI agent skills, such as `/lc-upgrade-2x-to-3x`,
+ * Installs the package's AI agent skills, the upgrades to 4.x
+ * (`/lc-upgrade-3x-to-4x`, `/lc-upgrade-2x-to-4x` and `/lc-upgrade-1x-to-4x`),
  * into the skills directory of every coding agent used in the project.
  *
  * Skills follow the SKILL.md format that these agents load from their skills
@@ -46,6 +47,14 @@ class InstallSkillsCommand extends Command
     ];
 
     /**
+     * Skills that earlier releases installed and this one no longer ships: they upgrade to 2.x and 3.x, which the
+     * upgrades to 4.x replace. The command removes them from the skills directory of each agent it installs for.
+     *
+     * @var list<string>
+     */
+    public const RETIRED_SKILLS = ['plc-upgrade-1x-to-2x', 'lc-upgrade-2x-to-3x'];
+
+    /**
      * @var string
      */
     protected $signature = 'clickhouse:install-skills
@@ -54,7 +63,7 @@ class InstallSkillsCommand extends Command
     /**
      * @var string
      */
-    protected $description = 'Install the laravel-clickhouse AI agent skills, such as /lc-upgrade-2x-to-3x';
+    protected $description = 'Install the laravel-clickhouse AI agent skills, such as /lc-upgrade-3x-to-4x';
 
     public function __construct(
         protected Filesystem $files,
@@ -99,9 +108,19 @@ class InstallSkillsCommand extends Command
 
         $skills = $this->files->directories($this->skillsSource());
         $installed = [];
+        $removed = [];
 
         foreach ($agents as $agent) {
             $directory = self::AGENTS[$agent]['skills'];
+
+            foreach (self::RETIRED_SKILLS as $retired) {
+                $target = $directory . '/' . $retired;
+
+                if (!isset($removed[$target]) && $this->isPackageSkill(base_path($target), $retired)) {
+                    $this->files->deleteDirectory(base_path($target));
+                    $removed[$target] = true;
+                }
+            }
 
             foreach ($skills as $skill) {
                 $target = $directory . '/' . basename($skill);
@@ -121,10 +140,14 @@ class InstallSkillsCommand extends Command
             $this->components->twoColumnDetail(implode(', ', $names), $target);
         }
 
+        foreach (array_keys($removed) as $target) {
+            $this->components->twoColumnDetail('Removed, no longer shipped', $target);
+        }
+
         $this->newLine();
         $this->components->info(
-            'Skills installed. Ask your agent to run /lc-upgrade-2x-to-3x to upgrade from 2.x to 3.x.'
-            . ' On 1.x, run /plc-upgrade-1x-to-2x first.'
+            'Skills installed. Ask your agent to run /lc-upgrade-3x-to-4x to upgrade from 3.x to 4.x,'
+            . ' /lc-upgrade-2x-to-4x from 2.x, or /lc-upgrade-1x-to-4x from 1.x.'
         );
 
         return self::SUCCESS;
@@ -144,6 +167,22 @@ class InstallSkillsCommand extends Command
                 fn (string $path): bool => $this->files->exists(base_path($path))
             ) !== []
         ));
+    }
+
+    /**
+     * Determine if the directory holds a copy of the given skill: a SKILL.md whose front matter has its name. A
+     * directory of that name without such a file is not the package's, and is kept.
+     *
+     * @param string $directory
+     * @param string $name
+     * @return bool
+     */
+    protected function isPackageSkill(string $directory, string $name): bool
+    {
+        $file = $directory . '/SKILL.md';
+
+        return $this->files->isFile($file)
+            && preg_match('/\A---\n.*?^name: ' . preg_quote($name, '/') . '$.*?\n---\n/ms', $this->files->get($file)) === 1;
     }
 
     /**

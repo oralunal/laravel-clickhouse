@@ -36,7 +36,7 @@ class QueryGrammar extends Grammar
      * The placeholder that parameter() wrote before Laravel's "?" was used.
      *
      * @deprecated parameter() writes "?", and the connection writes the bindings into the SQL. Nothing writes or
-     *             reads this marker any more; it will be removed in 4.0.
+     *             reads this marker any more; it will be removed in 5.0.
      */
     const PARAMETER_SIGN = '#@?';
 
@@ -69,7 +69,7 @@ class QueryGrammar extends Grammar
      *
      * @deprecated parameter() writes Laravel's "?", so queries have no such markers, and the connection writes "?"
      *             bindings into the SQL itself (see SubstitutesBindings::prepareQueryForClient()). A query without
-     *             a marker is returned as it is. It will be removed in 4.0.
+     *             a marker is returned as it is. It will be removed in 5.0.
      *
      * @param string $sql
      * @return string
