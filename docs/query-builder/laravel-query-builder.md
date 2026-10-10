@@ -87,11 +87,167 @@ These are the functions of the package's query builder, but Laravel prepares the
 | Names | Double quotes, with backslashes and double quotes doubled: `select('na\me')` sends `select "na\\me"` |
 
 ClickHouse has no auto-increment. For Eloquent's `create()` on a model with `$incrementing = true`, give the key. For keys such as UUIDs, set `$incrementing` to `false`.
+For a model with ClickHouse defaults, see [Eloquent models](/models/eloquent).
+
+## ClickHouse clauses
+
+The query builder has the ClickHouse clauses of the package's query builder. Their names are the same, but their arguments follow Laravel's methods.
+The examples use a query on `DB::connection('clickhouse')->table('t')`.
+
+### FINAL and SAMPLE
+
+```php
+$query->final();                       // select * from "t" final
+DB::connection('clickhouse')->table('t', 'x', true); // select * from "t" as "x" final
+$query->from('t', null, true);         // select * from "t" final
+$query->sample(0.1, 0.5);              // select * from "t" sample 0.1 offset 0.5
+$query->sample(1_000_000);             // select * from "t" sample 1000000
+```
+
+- `final(false)` removes `FINAL`. A query on a sub-query cannot have `FINAL`: `toSql()` throws a `LogicException`.
+- `sample()` needs a coefficient above 0. A coefficient above 1 is a number of rows. The offset is from 0 to 1. The table needs a `SAMPLE BY` key.
+
+### ARRAY JOIN
+
+```php
+$query->select('id', 'tag')->arrayJoin('tags', 'tag');
+// select "id", "tag" from "t" array join "tags" as "tag"
+
+$query->arrayJoin(['tag' => 'tags', 'scores']);
+// select * from "t" array join "tags" as "tag", "scores"
+
+$query->leftArrayJoin('tags');
+// select * from "t" left array join "tags"
+
+$query->arrayJoinSub(fn ($q) => $q->from('u')->selectRaw('groupArray(id)'), 'ids');
+// select * from "t" array join (select groupArray(id) from "u") as "ids"
+```
+
+- A string key of the array is the alias of its array. The package does not add the aliases to the select list.
+- `leftArrayJoin()` and `leftArrayJoinSub()` keep a row with an empty array one time.
+- Each call adds an `ARRAY JOIN` clause. `count()` counts such a query in a sub-query.
+
+### Joins
+
+Each join method takes the arguments of Laravel's `join()`, and has a `Sub` form that takes the arguments of `joinSub()`:
+
+| Method | SQL |
+| --- | --- |
+| `innerJoin()`, `innerJoinSub()` | `inner join`, as `join()` |
+| `anyInnerJoin()`, `anyInnerJoinSub()`, `allInnerJoin()`, `allInnerJoinSub()` | `any inner join`, `all inner join` |
+| `anyLeftJoin()`, `anyLeftJoinSub()`, `allLeftJoin()`, `allLeftJoinSub()` | `any left join`, `all left join` |
+| `anyRightJoin()`, `anyRightJoinSub()`, `allRightJoin()`, `allRightJoinSub()` | `any right join`, `all right join` |
+| `fullJoin()`, `fullJoinSub()` | `full join` |
+| `semiLeftJoin()`, `semiLeftJoinSub()`, `semiRightJoin()`, `semiRightJoinSub()` | `semi left join`, `semi right join` |
+| `antiLeftJoin()`, `antiLeftJoinSub()`, `antiRightJoin()`, `antiRightJoinSub()` | `anti left join`, `anti right join` |
+| `asofJoin()`, `asofJoinSub()`, `asofLeftJoin()`, `asofLeftJoinSub()` | `asof join`, `asof left join` |
+
+```php
+$query->anyLeftJoin('u', 't.uid', '=', 'u.id');
+// select * from "t" any left join "u" on "t"."uid" = "u"."id"
+
+$query->asofLeftJoin('q', fn ($join) => $join->on('t.sym', '=', 'q.sym')->on('t.ts', '>=', 'q.ts'));
+// select * from "t" asof left join "q" on "t"."sym" = "q"."sym" and "t"."ts" >= "q"."ts"
+```
+
+An ASOF join needs one inequality in its conditions. It selects the closest match.
+
+### PREWHERE
+
+The `preWhere` methods take the arguments of the `where` methods, closures and sub-queries included:
+
+```php
+$query->preWhere('a', 1)->orPreWhere('b', '>', 2)->preWhereIn('c', [3, 4])->where('h', 8);
+// select * from "t" prewhere "a" = ? or "b" > ? and "c" in (?, ?) where "h" = ?
+```
+
+The methods are `preWhere()`, `orPreWhere()`, `preWhereRaw()`, `orPreWhereRaw()`, `preWhereIn()`, `orPreWhereIn()`, `preWhereNotIn()`, `orPreWhereNotIn()`, `preWhereNull()`, `orPreWhereNull()`, `preWhereNotNull()`, `orPreWhereNotNull()`, `preWhereBetween()`, `orPreWhereBetween()`, `preWhereNotBetween()` and `orPreWhereNotBetween()`.
+
+### GLOBAL IN and empty()
+
+```php
+$query->whereGlobalIn('user_id', fn ($q) => $q->from('u')->select('id'));
+// select * from "t" where "user_id" global in (select "id" from "u")
+
+$query->whereEmpty('name')->orWhereNotEmpty(['tags', 'notes']);
+// select * from "t" where empty("name") or notEmpty("tags") or notEmpty("notes")
+
+$query->select('g')->groupBy('g')->havingNotEmpty('g');
+// select "g" from "t" group by "g" having notEmpty("g")
+```
+
+- `whereGlobalIn()`, `orWhereGlobalIn()`, `whereGlobalNotIn()` and `orWhereGlobalNotIn()` take the values of `whereIn()`.
+- `whereEmpty()`, `orWhereEmpty()`, `whereNotEmpty()`, `orWhereNotEmpty()` and the `HAVING` forms `havingEmpty()`, `orHavingEmpty()`, `havingNotEmpty()` and `orHavingNotEmpty()` take a column or a list.
+
+### LIMIT BY
+
+```php
+$query->orderByDesc('ts')->limitBy(3, 'user_id')->limit(100);
+// select * from "t" order by "ts" desc limit 3 by "user_id" limit 100
+
+$query->limitByWithOffset(1, 2, ['user_id', 'day']);
+// select * from "t" limit 1 offset 2 by "user_id", "day"
+```
+
+`count()` counts such a query in a sub-query.
+
+### SETTINGS
+
+```php
+$query->settings(['max_threads' => 2, 'optimize_read_in_order' => true])->settings('max_threads', 4);
+// select * from "t" settings max_threads=4, optimize_read_in_order=1
+```
+
+- A later value of a name replaces the earlier value. `null` removes a setting.
+- Booleans become `1` and `0`. Strings become string literals. `DB::raw()` is SQL. A name that is not a plain identifier throws an `InvalidArgumentException`.
+- The settings of `timeout()`, `forceIndex()` and `ignoreIndex()` come first. With a set operation, the query is selected from as a sub-query.
+
+### WITH
+
+```php
+$query->from('recent')
+    ->withExpression('recent', fn ($q) => $q->from('events')->where('a', 1))
+    ->withAlias('total', fn ($q) => $q->from('events')->selectRaw('count()'))
+    ->withAlias('ids', [1, 2]);
+// with "recent" as (select * from "events" where "a" = ?), (select count() from "events") as "total",
+//   [1, 2] as "ids" select * from "recent"
+```
+
+- `withExpression($name, $query)` adds a named sub-query. `$query` is a builder, a closure, `DB::raw()` or SQL.
+- `withRecursiveExpression()` does the same and writes `with recursive`.
+- `withAlias($alias, $value)` adds a value. A builder or a closure is a scalar sub-query, and another value is a literal.
+
+### INTERSECT and EXCEPT
+
+```php
+$query->intersect($other)->exceptDistinct(fn ($q) => $q->from('v'));
+// (select * from "t") intersect (select * from "u") except distinct (select * from "v")
+```
+
+`intersect()`, `intersectDistinct()`, `except()` and `exceptDistinct()` take a builder or a closure. `unionDistinct()` is the same as `union()`.
+ClickHouse calculates `INTERSECT` before `UNION` and `EXCEPT`. See [Order of the operations](/query-builder/clickhouse-sql#order-of-the-operations).
 
 ## Mutations
 
 `delete()` and `update()` refuse the same clauses and conditions as the package's query builder. See [Updates and deletions](/query-builder/writing-data).
 On this query builder, they also refuse `limit()`, `groupLimit()`, an `offset()` above `0`, `groupBy()`, `having()`, unions, joins and a select alias or expression.
+They also refuse `final()`, `sample()`, `arrayJoin()`, `limitBy()`, `withExpression()`, `settings()`, `intersect()` and `except()`.
+The `preWhere` conditions join the `where` conditions: `where ("a" = ?) and ("b" = ?)`.
+
+```php
+$query->where('a', 1)->delete(lightweight: true);
+// delete from "t" where "a" = ?
+
+$query->where('a', 1)->delete(null, false, 202401);
+// alter table "t" delete in partition 202401 where "a" = ?
+
+$query->onCluster('c1')->where('a', 1)->update(['b' => 2], '202401');
+// alter table "t" on cluster 'c1' update "b" = ? in partition '202401' where "a" = ?
+```
+
+- `delete($id = null, $lightweight = null, $partition = null)`: `true` sends a lightweight `delete from`, `false` an `alter table ... delete`, and `null` follows `use_lightweight_delete`.
+- `update($values, $partition = null)` and `delete()` take a partition: an int is a number, a string is a string literal, and `DB::raw()` is SQL. A lightweight delete with a partition needs ClickHouse 24.9 or later.
+- `onCluster('c1')` adds `on cluster 'c1'` to `delete()`, `update()` and `truncate()`. `withoutOnCluster()` removes the cluster of `use_on_cluster`.
 
 - Laravel's `first()`, `value()`, `find()`, `sole()`, `chunk()` and `paginate()` keep a `LIMIT` on the builder. Start a new query for a mutation.
 - `updateOrInsert()` adds `limit(1)` to its update, so it throws when the row exists.

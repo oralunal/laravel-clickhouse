@@ -123,6 +123,26 @@ static unsetEventDispatcher(): void
 static withoutEvents(callable $callback): mixed
 ```
 
+### Eloquent\Builder
+
+Class `Oralunal\LaravelClickHouse\Eloquent\Builder`, extends `Illuminate\Database\Eloquent\Builder`.
+See [the guide](/models/eloquent).
+
+```php
+delete(?bool $lightweight = null, Illuminate\Contracts\Database\Query\Expression|string|int|null $partition = null)
+forceDelete(?bool $lightweight = null, Illuminate\Contracts\Database\Query\Expression|string|int|null $partition = null)
+update(array $values, Illuminate\Contracts\Database\Query\Expression|string|int|null $partition = null)
+```
+
+### Eloquent\Model
+
+Abstract class `Oralunal\LaravelClickHouse\Eloquent\Model`, extends `Illuminate\Database\Eloquent\Model`.
+See [the guide](/models/eloquent).
+
+```php
+newEloquentBuilder($query)
+```
+
 ### RawColumn
 
 Class `Oralunal\LaravelClickHouse\RawColumn`, extends `ClickhouseBuilder\Query\Expression`.
@@ -539,8 +559,86 @@ See [the guide](/query-builder/laravel-query-builder).
 
 ```php
 aggregate($function, $columns = ['*'])
+allInnerJoin($table, $first, $operator = null, $second = null): static
+allInnerJoinSub($query, $as, $first, $operator = null, $second = null): static
+allLeftJoin($table, $first, $operator = null, $second = null): static
+allLeftJoinSub($query, $as, $first, $operator = null, $second = null): static
+allRightJoin($table, $first, $operator = null, $second = null): static
+allRightJoinSub($query, $as, $first, $operator = null, $second = null): static
+antiLeftJoin($table, $first, $operator = null, $second = null): static
+antiLeftJoinSub($query, $as, $first, $operator = null, $second = null): static
+antiRightJoin($table, $first, $operator = null, $second = null): static
+antiRightJoinSub($query, $as, $first, $operator = null, $second = null): static
+anyInnerJoin($table, $first, $operator = null, $second = null): static
+anyInnerJoinSub($query, $as, $first, $operator = null, $second = null): static
+anyLeftJoin($table, $first, $operator = null, $second = null): static
+anyLeftJoinSub($query, $as, $first, $operator = null, $second = null): static
+anyRightJoin($table, $first, $operator = null, $second = null): static
+anyRightJoinSub($query, $as, $first, $operator = null, $second = null): static
+arrayJoin($arrays, ?string $as = null): static
+arrayJoinSub($query, string $as): static
+asofJoin($table, $first, $operator = null, $second = null): static
+asofJoinSub($query, $as, $first, $operator = null, $second = null): static
+asofLeftJoin($table, $first, $operator = null, $second = null): static
+asofLeftJoinSub($query, $as, $first, $operator = null, $second = null): static
+delete($id = null, ?bool $lightweight = null, Illuminate\Contracts\Database\Query\Expression|string|int|null $partition = null)
+except($query): static
+exceptDistinct($query): static
+final(bool $final = true): static
+from($table, $as = null, ?bool $final = null)
+fullJoin($table, $first, $operator = null, $second = null): static
+fullJoinSub($query, $as, $first, $operator = null, $second = null): static
+havingEmpty($columns, $boolean = 'and', $not = false): static
+havingNotEmpty($columns, $boolean = 'and'): static
+innerJoin($table, $first, $operator = null, $second = null): static
+innerJoinSub($query, $as, $first, $operator = null, $second = null): static
 insert(array $values, ?string $format = null)
 insertGetId(array $values, $sequence = null)
+intersect($query): static
+intersectDistinct($query): static
+leftArrayJoin($arrays, ?string $as = null): static
+leftArrayJoinSub($query, string $as): static
+limitBy(int $count, Illuminate\Contracts\Database\Query\Expression|array|string ...$columns): static
+limitByWithOffset(int $count, ?int $offset, Illuminate\Contracts\Database\Query\Expression|array|string ...$columns): static
+onCluster(string $cluster): static
+orHavingEmpty($columns): static
+orHavingNotEmpty($columns): static
+orPreWhere($column, $operator = null, $value = null): static
+orPreWhereBetween($column, iterable $values): static
+orPreWhereIn($column, $values): static
+orPreWhereNotBetween($column, iterable $values): static
+orPreWhereNotIn($column, $values): static
+orPreWhereNotNull($columns): static
+orPreWhereNull($columns): static
+orPreWhereRaw($sql, $bindings = []): static
+orWhereEmpty($columns): static
+orWhereGlobalIn($column, $values): static
+orWhereGlobalNotIn($column, $values): static
+orWhereNotEmpty($columns): static
+preWhere($column, $operator = null, $value = null, $boolean = 'and'): static
+preWhereBetween($column, iterable $values, $boolean = 'and', $not = false): static
+preWhereIn($column, $values, $boolean = 'and', $not = false): static
+preWhereNotBetween($column, iterable $values, $boolean = 'and'): static
+preWhereNotIn($column, $values, $boolean = 'and'): static
+preWhereNotNull($columns, $boolean = 'and'): static
+preWhereNull($columns, $boolean = 'and', $not = false): static
+preWhereRaw($sql, $bindings = [], $boolean = 'and'): static
+sample(int|float $coefficient, int|float|null $offset = null): static
+semiLeftJoin($table, $first, $operator = null, $second = null): static
+semiLeftJoinSub($query, $as, $first, $operator = null, $second = null): static
+semiRightJoin($table, $first, $operator = null, $second = null): static
+semiRightJoinSub($query, $as, $first, $operator = null, $second = null): static
+settings(array|string $settings, mixed $value = null): static
+unionDistinct($query): static
+update(array $values, Illuminate\Contracts\Database\Query\Expression|string|int|null $partition = null)
+whereEmpty($columns, $boolean = 'and', $not = false): static
+whereGlobalIn($column, $values, $boolean = 'and', $not = false): static
+whereGlobalNotIn($column, $values, $boolean = 'and'): static
+whereNotEmpty($columns, $boolean = 'and'): static
+withAlias(string $alias, mixed $value): static
+withExpression(string $name, $query): static
+withoutOnCluster(): static
+withRecursiveExpression(string $name, $query): static
 ```
 
 ## Schema and migrations
@@ -753,6 +851,7 @@ selectResultSets($query, $bindings = [], $useReadPdo = true, array $fetchUsing =
 session(callable $callback, int $timeout = 60): mixed
 statement($query, $bindings = []): bool
 statementOnEveryNode(string $query): bool
+table($table, $as = null, ?bool $final = null)
 transaction(Closure $callback, $attempts = 1): never
 unprepared($query): bool
 withoutOnCluster(callable $callback): mixed

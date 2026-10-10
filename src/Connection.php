@@ -1521,4 +1521,18 @@ class Connection extends BaseConnection
 
         return new QueryBuilder($this, $this->getQueryGrammar(), $this->getPostProcessor());
     }
+
+    /**
+     * Begin a query of a table, with the query builder of query(). $final adds FINAL after the table:
+     * table('events', null, true) selects from "events" final, or `events` FINAL with the package's builder.
+     *
+     * @param \Closure|\Illuminate\Database\Query\Builder|\Illuminate\Contracts\Database\Query\Expression|string $table
+     * @param string|null $as
+     * @param bool|null $final True adds FINAL; null leaves it out
+     * @return Builder|QueryBuilder
+     */
+    public function table($table, $as = null, ?bool $final = null)
+    {
+        return $final === null ? $this->query()->from($table, $as) : $this->query()->from($table, $as, $final);
+    }
 }
