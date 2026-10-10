@@ -64,6 +64,7 @@
         ],
         "clear": "@php vendor/bin/testbench package:purge-skeleton --ansi",
         "test": "vendor/bin/phpunit",
+        "docs:api": "@php tests/Unit/Documentation/write-api-reference.php",
         "boost": "@php vendor/bin/testbench boost:install",
         "prepare": "@php vendor/bin/testbench package:discover --ansi",
         "build": "@php vendor/bin/testbench workbench:build --ansi",

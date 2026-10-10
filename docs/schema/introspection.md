@@ -11,9 +11,13 @@ Schema::getViews();                             // Views and materialized views
 Schema::getColumns('my_table');
 Schema::getColumnListing('my_table');           // ['id', 'created_at', ...]
 Schema::hasColumn('my_table', 'field_one');     // true
+Schema::hasColumns('my_table', ['id', 'field_one']); // true
 Schema::getColumnType('my_table', 'field_one'); // 'String'
 Schema::getIndexes('my_table');
+Schema::getIndexListing('my_table');            // ['primary']
 Schema::hasIndex('my_table', 'primary');        // true
+Schema::getCurrentSchemaName();                 // 'default', the database of the connection
+Schema::getCurrentSchemaListing();              // ['default']
 Schema::hasTable('my_table');                   // true for a table, false for a view or a dictionary
 Schema::hasView('my_view');                     // Views and materialized views
 Schema::hasDictionary('my_dictionary');         // Dictionaries
@@ -32,7 +36,7 @@ When ClickHouse is not the default connection, use `Schema::connection('clickhou
 | `hasTable()` | `true` for a table only. Use `hasView()` for a view and `hasDictionary()` for a dictionary. |
 | `getColumns()` | The full type, such as `LowCardinality(Nullable(String))`, as `type` and `type_name`. `default` is the `DEFAULT` expression. `MATERIALIZED` columns have a `stored` generation. `ALIAS` columns have a `virtual` generation. |
 | `getIndexes()` | The primary key, with the name `primary`, then the data-skipping indexes |
-| `getForeignKeys()` | `[]`. ClickHouse has no foreign keys. |
+| `getForeignKeys()`, `hasForeignKey()` | `[]` and `false`. ClickHouse has no foreign keys. |
 
 - A column is `nullable` when its type accepts `NULL`: `Nullable(...)`, `LowCardinality(Nullable(...))`, `Variant(...)`, `Dynamic`, or a `SimpleAggregateFunction` over one of them. `Array(Nullable(String))` is not nullable.
 - The `columns` of an index are the parts of its expression: `ORDER BY (id, intHash32(id))` gives `['id', 'intHash32(id)']`. `ORDER BY (id)` gives `['id']` on all versions.

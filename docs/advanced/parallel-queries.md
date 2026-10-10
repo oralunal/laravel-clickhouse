@@ -35,6 +35,9 @@ $results = Parallel::getRows([
 
 - An Eloquent builder throws an `InvalidArgumentException`. Give `$query->toBase()`. Its rows come back as arrays.
 - The package compiles and checks each entry before it sends the batch. An incorrect entry stops the batch.
+- Before the batch, the connection of each Laravel query builder and each SQL entry calls its `beforeExecuting()` callbacks.
+  `Connection::runBeforeExecutingCallbacks($sql, $bindings)` calls them.
+- After the batch, the connection logs each query, and `DB::listen()` gets a `QueryExecuted` event. The package logs a failed query of its own query builder, but not a failed Laravel query or SQL entry.
 
 ## Statements
 

@@ -56,6 +56,18 @@ echo $row->getThisClient()->getConnectHost();
 `slideNode()` tries the next nodes in turn and skips a node that does not answer. If no other node answers, it stays on the current node.
 While `session()` runs, `slideNode()` throws a `LogicException`, because the session exists on the active node only.
 
+| Method | Does |
+| --- | --- |
+| `Connection::getCluster()` | Returns the `Oralunal\LaravelClickHouse\Cluster` of the connection. A connection without `cluster` has a cluster of one node. |
+| `Cluster::getActiveNode()` | Returns the smi2 client of the active node |
+| `Cluster::slideNode()` | Makes the next node that answers the active node |
+| `Cluster::pinActiveNode()`, `unpinActiveNode()` | Keep the active node. While it is pinned, `slideNode()` throws. `session()` uses them. Each `pinActiveNode()` needs one `unpinActiveNode()`. |
+| `Cluster::isActiveNodePinned()` | `true` while the active node is pinned |
+| `Cluster::write($sql)` | Sends a statement to all nodes, one after the other |
+| `Connection::getClusterName()` | The trimmed `cluster_name`, or `null` |
+| `Connection::hasClusterNodes()` | `true` when `cluster` lists nodes |
+| `Connection::getDefaultCluster()` | The cluster of the `ON CLUSTER` clause of mutations: `cluster_name` when `use_on_cluster` is on, else `null` |
+
 ## Statements on all nodes
 
 - `Migration::write()` and `createMergeTree()` run on all nodes, one after the other. If a node does not answer, the migration throws.
