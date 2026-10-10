@@ -1,7 +1,7 @@
 # Define a model
 
 A model extends `Oralunal\LaravelClickHouse\BaseModel`. It is not an Eloquent model.
-It has no primary key, timestamps or relationships.
+It has no primary key, timestamps or relationships. For an Eloquent model with relations, see [Eloquent models](/models/eloquent).
 
 ```php
 namespace App\Models\Clickhouse;

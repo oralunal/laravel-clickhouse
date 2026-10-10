@@ -130,6 +130,7 @@ export default defineConfig({
         items: [
           { text: 'Define a model', link: '/models/defining-models' },
           { text: 'Insert rows', link: '/models/inserting-rows' },
+          { text: 'Eloquent models', link: '/models/eloquent' },
         ],
       },
       {

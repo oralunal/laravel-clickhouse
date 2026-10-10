@@ -65,6 +65,33 @@ class QueryGrammar extends Grammar
     protected int $queryDepth = 0;
 
     /**
+     * The components of a select, in the order of ClickHouse's SELECT: Laravel's, with WITH first, ARRAY JOIN before
+     * JOIN, PREWHERE before WHERE and LIMIT ... BY before LIMIT. FINAL and SAMPLE are part of the FROM clause (see
+     * compileFrom()), and SETTINGS goes at the end of the outermost query (see compileQuerySettings()). The
+     * ClickHouse components are those of QueryBuilder, which another builder does not have.
+     *
+     * @var list<string>
+     */
+    protected $selectComponents = [
+        'withs',
+        'aggregate',
+        'columns',
+        'from',
+        'indexHint',
+        'arrayJoins',
+        'joins',
+        'prewheres',
+        'wheres',
+        'groups',
+        'havings',
+        'orders',
+        'limitBy',
+        'limit',
+        'offset',
+        'lock',
+    ];
+
+    /**
      * Turn the deprecated "#@?" markers in a query into smi2's placeholders :0, :1 and so on, in order.
      *
      * @deprecated parameter() writes Laravel's "?", so queries have no such markers, and the connection writes "?"
@@ -284,6 +311,10 @@ class QueryGrammar extends Grammar
             $settings[] = $setting . ' = ' . $this->compileLiteral((string) $query->indexHint->index);
         }
 
+        if ($query instanceof QueryBuilder && $query->settings !== []) {
+            $settings[] = substr($this->getLiteralGrammar()->compileSettingsComponent(null, $query->settings), strlen('SETTINGS '));
+        }
+
         if ($settings === []) {
             return $sql;
         }
@@ -326,6 +357,11 @@ class QueryGrammar extends Grammar
      */
     protected function compileUnion(array $union)
     {
+        if (isset($union['type'])) {
+            return ' ' . $union['type'] . (empty($union['distinct']) ? '' : ' distinct') . ' '
+                . $this->wrapUnion($union['query']->toSql());
+        }
+
         $conjunction = match (true) {
             (bool) $union['all'] => ' union all ',
             $this->hasUnionDefaultMode() => ' union ',
@@ -345,6 +381,195 @@ class QueryGrammar extends Grammar
         $settings = $this->connection->getConfig('settings');
 
         return is_array($settings) && (string) ($settings['union_default_mode'] ?? '') !== '';
+    }
+
+    /**
+     * Compile the WITH clause of QueryBuilder::withExpression(), withRecursiveExpression() and withAlias():
+     * with "name" as (<query>), <value> as "alias", or with recursive ... when one of them is recursive.
+     *
+     * @param Builder $query
+     * @param list<array{type: string, name: string, query: \Illuminate\Contracts\Database\Query\Expression|string}> $withs
+     * @return string
+     */
+    protected function compileWiths(Builder $query, array $withs): string
+    {
+        if ($withs === []) {
+            return '';
+        }
+
+        $entries = array_map(
+            fn (array $with): string => $with['type'] === 'alias'
+                ? $this->getValue($with['query']) . ' as ' . $this->wrap($with['name'])
+                : $this->wrap($with['name']) . ' as ' . $this->getValue($with['query']),
+            $withs
+        );
+
+        return 'with ' . ($query instanceof QueryBuilder && $query->recursiveWith ? 'recursive ' : '')
+            . implode(', ', $entries);
+    }
+
+    /**
+     * Compile the FROM clause, with FINAL (see QueryBuilder::final()) and SAMPLE (see QueryBuilder::sample()):
+     * from "t" as "x" final sample 0.1 offset 0.5.
+     *
+     * @param Builder $query
+     * @param \Illuminate\Contracts\Database\Query\Expression|string $table
+     * @return string
+     * @throws \LogicException When a query that selects from a sub-query has FINAL, which ClickHouse rejects
+     */
+    protected function compileFrom(Builder $query, $table)
+    {
+        $sql = parent::compileFrom($query, $table);
+
+        if (!$query instanceof QueryBuilder) {
+            return $sql;
+        }
+
+        if ($query->final) {
+            if ($this->isExpression($table) && str_starts_with(ltrim((string) $this->getValue($table)), '(')) {
+                throw new \LogicException(
+                    'FINAL applies to a table, not to a sub-query: put final() on the query of the sub-query.'
+                );
+            }
+
+            $sql .= ' final';
+        }
+
+        if ($query->sample !== null) {
+            $sql .= ' sample ' . $this->compileNumber($query->sample['coefficient'])
+                . ($query->sample['offset'] === null ? '' : ' offset ' . $this->compileNumber($query->sample['offset']));
+        }
+
+        return $sql;
+    }
+
+    /**
+     * Write a number of a SAMPLE clause: an int as it is, and a float with all its digits.
+     *
+     * @param int|float $number
+     * @return string
+     */
+    protected function compileNumber(int|float $number): string
+    {
+        return is_int($number) ? (string) $number : $this->compileLiteral($number);
+    }
+
+    /**
+     * Compile the ARRAY JOIN clauses of QueryBuilder::arrayJoin() and leftArrayJoin(), in the order of the calls:
+     * array join "tags" as "tag", "scores", or left array join ....
+     *
+     * @param Builder $query
+     * @param list<array{left: bool, arrays: list<array{array: \Illuminate\Contracts\Database\Query\Expression|string, as: string|null}>}> $arrayJoins
+     * @return string
+     */
+    protected function compileArrayJoins(Builder $query, array $arrayJoins): string
+    {
+        return implode(' ', array_map(
+            fn (array $arrayJoin): string => ($arrayJoin['left'] ? 'left ' : '') . 'array join ' . implode(', ', array_map(
+                fn (array $array): string => $this->wrap($array['array'])
+                    . ($array['as'] === null ? '' : ' as ' . $this->wrap($array['as'])),
+                $arrayJoin['arrays']
+            )),
+            $arrayJoins
+        ));
+    }
+
+    /**
+     * Compile the PREWHERE clause of QueryBuilder::preWhere() and its forms, as the where conditions are compiled.
+     *
+     * @param Builder $query
+     * @param array<int, array<string, mixed>> $prewheres
+     * @return string
+     */
+    protected function compilePrewheres(Builder $query, array $prewheres): string
+    {
+        if ($prewheres === []) {
+            return '';
+        }
+
+        $wheres = $query->wheres;
+        $query->wheres = $prewheres;
+
+        try {
+            return preg_replace('/^where /', 'prewhere ', $this->compileWheres($query)) ?? '';
+        } finally {
+            $query->wheres = $wheres;
+        }
+    }
+
+    /**
+     * Compile a GLOBAL IN condition of QueryBuilder::whereGlobalIn(). An empty list matches no row, as whereIn().
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereGlobalIn(Builder $query, $where): string
+    {
+        if (!empty($where['values'])) {
+            return $this->wrap($where['column']) . ' global in (' . $this->parameterize($where['values']) . ')';
+        }
+
+        return '0 = 1';
+    }
+
+    /**
+     * Compile a GLOBAL NOT IN condition of QueryBuilder::whereGlobalNotIn(). An empty list matches every row, as
+     * whereNotIn().
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereGlobalNotIn(Builder $query, $where): string
+    {
+        if (!empty($where['values'])) {
+            return $this->wrap($where['column']) . ' global not in (' . $this->parameterize($where['values']) . ')';
+        }
+
+        return '1 = 1';
+    }
+
+    /**
+     * Compile an empty() or notEmpty() condition of QueryBuilder::whereEmpty() and whereNotEmpty().
+     *
+     * @param Builder $query
+     * @param array{column: \Illuminate\Contracts\Database\Query\Expression|string, not: bool} $where
+     * @return string
+     */
+    protected function whereEmpty(Builder $query, $where): string
+    {
+        return ($where['not'] ? 'notEmpty(' : 'empty(') . $this->wrap($where['column']) . ')';
+    }
+
+    /**
+     * Compile a having condition, with the empty() and notEmpty() conditions of QueryBuilder::havingEmpty().
+     *
+     * @param array<string, mixed> $having
+     * @return string
+     */
+    protected function compileHaving(array $having)
+    {
+        if ($having['type'] === 'Empty') {
+            return ($having['not'] ? 'notEmpty(' : 'empty(') . $this->wrap($having['column']) . ')';
+        }
+
+        return parent::compileHaving($having);
+    }
+
+    /**
+     * Compile the LIMIT ... BY clause of QueryBuilder::limitBy(): limit 3 by "user_id", or limit 3 offset 1 by
+     * "user_id", "day".
+     *
+     * @param Builder $query
+     * @param array{count: int, offset: int|null, columns: list<\Illuminate\Contracts\Database\Query\Expression|string>} $limitBy
+     * @return string
+     */
+    protected function compileLimitBy(Builder $query, array $limitBy): string
+    {
+        return 'limit ' . $limitBy['count']
+            . ($limitBy['offset'] === null ? '' : ' offset ' . $limitBy['offset'])
+            . ' by ' . $this->columnize($limitBy['columns']);
     }
 
     /**
@@ -608,6 +833,11 @@ class QueryGrammar extends Grammar
             }
         }
 
+        $wheres = $query->wheres;
+        if ($query instanceof QueryBuilder && $query->prewheres !== []) {
+            $query->wheres = $this->joinPrewheresToWheres($query);
+        }
+
         $this->queryDepth++;
 
         try {
@@ -616,7 +846,34 @@ class QueryGrammar extends Grammar
             $this->queryDepth--;
             $this->mutationTableQualifiers = $qualifiers;
             $query->from = $from;
+            $query->wheres = $wheres;
         }
+    }
+
+    /**
+     * Get the where conditions of a mutation of a query with prewhere conditions. A mutation has no PREWHERE, so the
+     * prewhere conditions are joined to the where conditions: where (<prewheres>) and (<wheres>), or the prewhere
+     * conditions alone when the query has no where condition. Their bindings come in the same order (see the
+     * bindings of QueryBuilder).
+     *
+     * @param QueryBuilder $query
+     * @return array<int, array<string, mixed>>
+     */
+    protected function joinPrewheresToWheres(QueryBuilder $query): array
+    {
+        if ($query->wheres === []) {
+            return $query->prewheres;
+        }
+
+        $prewheres = $query->newQuery();
+        $prewheres->wheres = $query->prewheres;
+        $wheres = $query->newQuery();
+        $wheres->wheres = $query->wheres;
+
+        return [
+            ['type' => 'Nested', 'query' => $prewheres, 'boolean' => 'and'],
+            ['type' => 'Nested', 'query' => $wheres, 'boolean' => 'and'],
+        ];
     }
 
     /**
@@ -771,12 +1028,13 @@ class QueryGrammar extends Grammar
         }
         $this->verifyClausesOfMutation($query, 'delete');
 
-        $lightweight = (bool) $this->connection->getConfig('use_lightweight_delete');
+        $lightweight = ($query instanceof QueryBuilder ? $query->lightweightDelete : null)
+            ?? (bool) $this->connection->getConfig('use_lightweight_delete');
         if ($lightweight) {
             $this->refuseASetOperationInALightweightDelete($where);
         }
 
-        $cluster = $this->getDefaultCluster();
+        $cluster = $this->getClusterOf($query);
         if ($lightweight) {
             $this->refuseATemporaryTableThatTheStatementMisses(
                 $query,
@@ -795,9 +1053,10 @@ class QueryGrammar extends Grammar
 
         $this->refuseConditionsThatClickHouseCannotRun($query, 'delete', $table, $where, $lightweight || $cluster !== null);
 
-        $table .= $this->compileOnClusterClause();
+        $table .= $this->compileOnClusterClause($cluster);
+        $partition = $this->compilePartitionClause($query);
 
-        return $lightweight ? "delete from $table $where" : "alter table $table delete $where";
+        return $lightweight ? "delete from {$table}{$partition} $where" : "alter table $table delete{$partition} $where";
     }
 
     /**
@@ -819,7 +1078,8 @@ class QueryGrammar extends Grammar
             $from = preg_split('/\s+as\s+/i', trim($from))[0];
         }
 
-        if ($this->getDefaultCluster() !== null) {
+        $cluster = $this->getClusterOf($query);
+        if ($cluster !== null) {
             $this->refuseATemporaryTableThatTheStatementMisses(
                 $query,
                 'TRUNCATE TABLE ... ON CLUSTER',
@@ -827,7 +1087,7 @@ class QueryGrammar extends Grammar
             );
         }
 
-        return ['truncate table ' . $this->wrapTable($from) . $this->compileOnClusterClause() => []];
+        return ['truncate table ' . $this->wrapTable($from) . $this->compileOnClusterClause($cluster) => []];
     }
 
     /**
@@ -844,17 +1104,54 @@ class QueryGrammar extends Grammar
     }
 
     /**
-     * Compile the ON CLUSTER clause that follows the table of a delete, an update or a truncate, for the default
-     * cluster (see getDefaultCluster()): on cluster '<name>', with the name written as a string literal. Nothing
-     * without a default cluster.
+     * Get the cluster that a delete, an update or a truncate of a query is sent ON CLUSTER to: the cluster of
+     * QueryBuilder::onCluster(), else none after QueryBuilder::withoutOnCluster(), else the default cluster of the
+     * connection (see getDefaultCluster()).
      *
+     * @param Builder $query
+     * @return string|null
+     */
+    protected function getClusterOf(Builder $query): ?string
+    {
+        if ($query instanceof QueryBuilder) {
+            if ($query->onCluster !== null) {
+                return $query->onCluster;
+            }
+
+            if (!$query->usesTheDefaultCluster) {
+                return null;
+            }
+        }
+
+        return $this->getDefaultCluster();
+    }
+
+    /**
+     * Compile the ON CLUSTER clause that follows the table of a delete, an update or a truncate (see
+     * getClusterOf()): on cluster '<name>', with the name written as a string literal. Nothing without a cluster.
+     *
+     * @param string|null $cluster
      * @return string
      */
-    protected function compileOnClusterClause(): string
+    protected function compileOnClusterClause(?string $cluster): string
     {
-        $cluster = $this->getDefaultCluster();
-
         return $cluster === null ? '' : ' on cluster ' . (new LiteralGrammar())->quoteString($cluster);
+    }
+
+    /**
+     * Compile the IN PARTITION clause of a delete or an update (see QueryBuilder::delete()): an int is written as a
+     * number, a string as a string literal, and an expression as its SQL. Nothing without a partition.
+     *
+     * @param Builder $query
+     * @return string
+     */
+    protected function compilePartitionClause(Builder $query): string
+    {
+        if (!$query instanceof QueryBuilder || $query->partition === null) {
+            return '';
+        }
+
+        return ' in partition ' . $this->compileLiteral($query->partition);
     }
 
     /**
@@ -1153,7 +1450,7 @@ class QueryGrammar extends Grammar
         }
         $this->verifyClausesOfMutation($query, 'update');
 
-        $cluster = $this->getDefaultCluster();
+        $cluster = $this->getClusterOf($query);
         if ($cluster !== null) {
             $this->refuseATemporaryTableThatTheStatementMisses(
                 $query,
@@ -1164,7 +1461,7 @@ class QueryGrammar extends Grammar
 
         $this->refuseConditionsThatClickHouseCannotRun($query, 'update', $table, $where, $cluster !== null);
 
-        return "alter table {$table}{$this->compileOnClusterClause()} update $columns $where";
+        return "alter table {$table}{$this->compileOnClusterClause($cluster)} update $columns{$this->compilePartitionClause($query)} $where";
     }
 
     /**
@@ -1244,8 +1541,21 @@ class QueryGrammar extends Grammar
                 || $this->hasAnOrderThatLimitsRows($query),
             'LIMIT' => $query->limit !== null || $query->groupLimit !== null,
             'OFFSET' => !empty($query->offset),
+            'FINAL' => $query instanceof QueryBuilder && $query->final,
+            'SAMPLE' => $query instanceof QueryBuilder && $query->sample !== null,
+            'ARRAY JOIN' => $query instanceof QueryBuilder && $query->arrayJoins !== [],
+            'LIMIT BY' => $query instanceof QueryBuilder && $query->limitBy !== null,
+            'WITH' => $query instanceof QueryBuilder && $query->withs !== [],
+            'SETTINGS' => $query instanceof QueryBuilder && $query->settings !== [],
         ]));
-        $unions = array_map(fn (array $union): string => empty($union['all']) ? 'UNION' : 'UNION ALL', $query->unions ?? []);
+        $unions = array_map(
+            fn (array $union): string => match (true) {
+                isset($union['type']) => strtoupper($union['type']) . (empty($union['distinct']) ? '' : ' DISTINCT'),
+                empty($union['all']) => 'UNION',
+                default => 'UNION ALL',
+            },
+            $query->unions ?? []
+        );
         $clauses = array_merge($clauses, array_values(array_unique($unions)));
 
         if ($clauses !== []) {

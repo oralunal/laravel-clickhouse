@@ -14,7 +14,6 @@ use ClickHouseDB\Transport\CurlerRolling;
 use DateTimeImmutable;
 use Illuminate\Container\Container;
 use Illuminate\Database\Connection as LaravelConnection;
-use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder as LaravelBuilder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Facade;
@@ -548,24 +547,17 @@ class ParallelTest extends TestCase
                 QueryException::class,
                 'Cannot read rows from a query whose FORMAT clause names CSV',
             ],
-            'an Eloquent builder' => [
-                fn (Connection $connection): array => [['sql' => 'SELECT 1'], 'model' => new EloquentBuilder(self::laravelQuery($connection))],
-                InvalidArgumentException::class,
-                'Parallel query [model] must be a query builder of this package, a Laravel query builder or an array'
-                . ' with an sql string, Illuminate\\Database\\Eloquent\\Builder given. Pass $query->toBase() to run the'
-                . ' query of an Eloquent builder: its rows come back as arrays, not as models.',
-            ],
             'an entry of another type' => [
                 fn (): array => [['sql' => 'SELECT 1'], 'number' => 42],
                 InvalidArgumentException::class,
-                'Parallel query [number] must be a query builder of this package, a Laravel query builder or an array'
-                . ' with an sql string, int given.',
+                'Parallel query [number] must be a query builder of this package, a Laravel or Eloquent query builder'
+                . ' or an array with an sql string, int given.',
             ],
             'an array without sql' => [
                 fn (): array => ['query' => ['query' => 'SELECT 1']],
                 InvalidArgumentException::class,
-                'Parallel query [query] must be a query builder of this package, a Laravel query builder or an array'
-                . ' with an sql string, array given.',
+                'Parallel query [query] must be a query builder of this package, a Laravel or Eloquent query builder'
+                . ' or an array with an sql string, array given.',
             ],
             'empty SQL' => [
                 fn (): array => ['blank' => ['sql' => ' ']],

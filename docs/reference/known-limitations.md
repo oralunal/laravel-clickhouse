@@ -7,7 +7,7 @@ These limits come from ClickHouse or from the design of the package.
 | No transactions. `beginTransaction()`, `transaction()` and `commit()` throw a `LogicException`. | Use the `DatabaseTruncation` test trait. See [Tests](/advanced/testing). |
 | No auto-increment. `insertGetId()` needs the key in the row. | Set the key, for example with `Str::uuid()`. Set `$incrementing` to `false` on Eloquent models. |
 | No foreign keys, unique constraints or spatial indexes. | The schema builder sends nothing for them. |
-| `BaseModel` is not an Eloquent model: no relationships, timestamps or primary key. | See [Differences from Eloquent](/models/defining-models#differences-from-eloquent). |
+| `BaseModel` is not an Eloquent model: no relationships, timestamps or primary key. | Use the Eloquent model of the package. See [Eloquent models](/models/eloquent). |
 | `save()` inserts a new row. It does not update a row. | Use `update()` on a query. See [Updates](/query-builder/writing-data#updates). |
 | A mutation uses only the `where` and `prewhere` conditions. | The package refuses other clauses. Select the keys first. See [Refused clauses](/query-builder/writing-data#refused-clauses). |
 | A mutation with a float writes it as `Float64`. A `Decimal` column stores less than you meant. | Give a numeric string or an int. |

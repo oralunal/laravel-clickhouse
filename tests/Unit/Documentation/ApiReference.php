@@ -38,6 +38,7 @@ final class ApiReference
             'Concerns\\HasAttributes' => '/models/defining-models#attribute-methods',
             'Concerns\\HasEvents' => '/models/defining-models#events',
             'Concerns\\HasBufferedInserts' => '/models/inserting-rows',
+            'Eloquent\\' => '/models/eloquent',
             'WithClient' => '/advanced/multiple-connections',
             'RawColumn' => '/query-builder/basics#select-columns',
         ],

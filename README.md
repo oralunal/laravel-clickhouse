@@ -101,17 +101,18 @@ MyTable::where('id', 123)->delete(true);
 | --- | --- |
 | Models with casts, accessors, mutators and events | [Define a model](https://laravel-clickhouse.oralunal.com/models/defining-models) |
 | Batch inserts, in-memory buffers, Buffer tables, JSONEachRow and file inserts | [Insert rows](https://laravel-clickhouse.oralunal.com/models/inserting-rows) |
+| Eloquent models with relations, eager loads and timestamps | [Eloquent models](https://laravel-clickhouse.oralunal.com/models/eloquent) |
 | Laravel's query methods and ClickHouse SQL: `PREWHERE`, `SAMPLE`, `WITH`, `ARRAY JOIN`, ClickHouse joins, `INTERSECT`, `EXCEPT`, `SETTINGS` | [Query builder](https://laravel-clickhouse.oralunal.com/query-builder/basics) |
 | `count()`, aggregates, `exists()`, `first()`, `pluck()`, `chunk()`, pagination | [Read results](https://laravel-clickhouse.oralunal.com/query-builder/reading-results) |
 | Lightweight `DELETE`, mutations, `OPTIMIZE`, `TRUNCATE`, `IN PARTITION`, `ON CLUSTER` | [Updates and deletions](https://laravel-clickhouse.oralunal.com/query-builder/writing-data) |
-| Laravel's own query builder with ClickHouse SQL | [Laravel's query builder](https://laravel-clickhouse.oralunal.com/query-builder/laravel-query-builder) |
+| Laravel's own query builder with `FINAL`, `PREWHERE`, `ARRAY JOIN`, ClickHouse joins and `SETTINGS` | [Laravel's query builder](https://laravel-clickhouse.oralunal.com/query-builder/laravel-query-builder) |
 | `Schema::create()` and `Schema::table()` with ClickHouse types, engines, keys and indexes | [Laravel's schema builder](https://laravel-clickhouse.oralunal.com/schema/schema-builder) |
 | `migrate`, `migrate:rollback`, `migrate:status`, `migrate:fresh`, `schema:dump` | [Migration commands](https://laravel-clickhouse.oralunal.com/schema/migration-commands) |
 | `?` bindings, `cursor()`, pretending | [Raw SQL](https://laravel-clickhouse.oralunal.com/advanced/raw-sql) |
 | Sessions and temporary tables | [Sessions](https://laravel-clickhouse.oralunal.com/advanced/sessions) |
 | Queries at the same time, across connections | [Parallel queries](https://laravel-clickhouse.oralunal.com/advanced/parallel-queries) |
 | Node rotation, retries, `ON CLUSTER` DDL, replicated tables | [Clusters](https://laravel-clickhouse.oralunal.com/advanced/clusters) |
-| `DatabaseTruncation` and parallel test databases | [Tests](https://laravel-clickhouse.oralunal.com/advanced/testing) |
+| `DatabaseTruncation`, SQLite with ClickHouse, parallel test databases | [Tests](https://laravel-clickhouse.oralunal.com/advanced/testing) |
 
 ## Upgrading
 

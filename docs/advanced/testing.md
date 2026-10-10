@@ -23,6 +23,32 @@ class EventReportTest extends TestCase
 - The trait gets the tables from `Schema::getTables()`, so it does not touch views, materialized views and dictionaries.
 - The other traits continue to work for your other connections, when `$connectionsToTransact` does not have a ClickHouse connection.
 
+## SQLite and ClickHouse
+
+When the default connection is SQLite, MySQL or PostgreSQL and some migrations write to ClickHouse, use Laravel's `RefreshDatabase` and `DatabaseTruncation` in one class:
+
+```php
+use Illuminate\Foundation\Testing\DatabaseTruncation;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+class AnalyticsTest extends TestCase
+{
+    use DatabaseTruncation;
+    use RefreshDatabase;
+
+    protected $connectionsToTransact = ['sqlite'];
+
+    protected $connectionsToTruncate = ['clickhouse'];
+}
+```
+
+- `RefreshDatabase` runs `migrate:fresh` one time and rolls back the SQLite rows after each test. An in-memory SQLite database (`:memory:`) works.
+- `migrate:fresh` also empties the ClickHouse connections of the migrations. So the ClickHouse tables of an earlier run do not stop the migrations. See [Migration commands](/schema/migration-commands#clickhouse-as-a-secondary-connection).
+- `DatabaseTruncation` truncates the ClickHouse tables before each next test.
+- Keep a connection in one list only. Never put a ClickHouse connection in `$connectionsToTransact`.
+
+Laravel's `DatabaseMigrations` also works: it runs `migrate:fresh` before each test, which empties the ClickHouse connections too.
+
 ## Tables to exclude
 
 Before the trait truncates a table, it reads one row from it. These tables make a test fail:

@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Models
-    details: BaseModel with casts, accessors, mutators and events. Insert rows in batches, in a buffer or as JSONEachRow.
+    details: BaseModel with casts, accessors, mutators and events, or an Eloquent model with relations. Insert rows in batches, in a buffer or as JSONEachRow.
     link: /models/defining-models
   - title: Query builder
     details: Laravel's query methods, and ClickHouse SQL such as PREWHERE, SAMPLE, ARRAY JOIN, WITH, set operations and SETTINGS.

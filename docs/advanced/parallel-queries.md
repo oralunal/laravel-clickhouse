@@ -33,7 +33,7 @@ $results = Parallel::getRows([
 | A Laravel query builder on a ClickHouse connection | `select()` sends it. Its rows go through its `afterQuery()` callbacks. |
 | SQL: `['sql' => 'SELECT count() AS c FROM my_table WHERE field_one = ?', 'bindings' => ['click'], 'connection' => 'clickhouse']` | `select()` sends it. `bindings` and `connection` are optional. The default connection is `clickhouse`. |
 
-- An Eloquent builder throws an `InvalidArgumentException`. Give `$query->toBase()`. Its rows come back as arrays.
+- An Eloquent builder on a ClickHouse connection is sent as its `toBase()`. `getRows()` returns an Eloquent collection of its models. The package loads the eager loads, `with()`, after the batch, one query after the other. See [Eloquent models](/models/eloquent#parallel-queries).
 - The package compiles and checks each entry before it sends the batch. An incorrect entry stops the batch.
 - Before the batch, the connection of each Laravel query builder and each SQL entry calls its `beforeExecuting()` callbacks.
   `Connection::runBeforeExecutingCallbacks($sql, $bindings)` calls them.
