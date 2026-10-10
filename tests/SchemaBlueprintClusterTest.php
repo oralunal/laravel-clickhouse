@@ -77,7 +77,8 @@ class SchemaBlueprintClusterTest extends TestCase
             $this->assertSame(
                 [[
                     'engine_full' => "ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') ORDER BY id"
-                        . ' SETTINGS replicated_deduplication_window = 0, index_granularity = 8192',
+                        . ' SETTINGS replicated_deduplication_window = 0, replicated_deduplication_window_for_async_inserts = 0,'
+                        . ' index_granularity = 8192',
                 ]],
                 $rows
             );
@@ -137,7 +138,8 @@ class SchemaBlueprintClusterTest extends TestCase
             $this->assertSame(
                 [[
                     'engine_full' => "ReplicatedReplacingMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}', version)"
-                        . ' ORDER BY id SETTINGS replicated_deduplication_window = 0, index_granularity = 8192',
+                        . ' ORDER BY id SETTINGS replicated_deduplication_window = 0,'
+                        . ' replicated_deduplication_window_for_async_inserts = 0, index_granularity = 8192',
                 ]],
                 $rows
             );
@@ -146,14 +148,15 @@ class SchemaBlueprintClusterTest extends TestCase
 
     /**
      * A replicated table drops an insert identical to a recent one as a duplicate, while the MergeTree table of 3.0.0
-     * kept it. The schema builder's replicated tables keep it: Laravel's migrator logs the same row in its migrations
-     * table again after a rollback, which a deduplicating table would silently drop.
+     * kept it. The schema builder's replicated tables keep it, synchronous or asynchronous: Laravel's migrator logs the
+     * same row in its migrations table again after a rollback, which a deduplicating table would silently drop.
      *
-     * The inserts are synchronous (async_insert = 0), which replicated_deduplication_window governs on every version.
-     * ClickHouse 26.3, whose inserts are asynchronous by default, checks an asynchronous insert against
-     * replicated_deduplication_window_for_async_inserts instead, which the schema builder leaves at the server's
-     * default, and drops an identical one, also 5 seconds later (26.3.46 checked; see
-     * SchemaGrammar::getReplicatedTableSettings()).
+     * The first two inserts go with the server's default settings: asynchronous on ClickHouse 26.3 and 26.8
+     * (async_insert = 1), synchronous on 24.8. The next two are asynchronous with async_insert_deduplicate = 1 on every
+     * version. With replicated_deduplication_window = 0 alone, 26.3 dropped the second insert of each pair and 24.8
+     * the second of the asynchronous pair, while 26.8 kept every insert; with
+     * replicated_deduplication_window_for_async_inserts = 0 as well, each version keeps them all (24.8.14, 26.3.46 and
+     * 26.8.21 checked; see SchemaGrammar::getReplicatedTableSettings()).
      */
     public function testAReplicatedTableKeepsAnInsertIdenticalToAnEarlierOne(): void
     {
@@ -165,14 +168,17 @@ class SchemaBlueprintClusterTest extends TestCase
             $table->string('migration');
         });
 
-        $insert = "INSERT INTO `{$logged}` SETTINGS async_insert = 0 VALUES (0, 'create_things')";
+        $insert = "INSERT INTO `{$logged}` VALUES (0, 'create_things')";
+        $asynchronousInsert = "INSERT INTO `{$logged}` SETTINGS async_insert = 1, async_insert_deduplicate = 1,"
+            . " wait_for_async_insert = 1 VALUES (1, 'create_things')";
 
-        $cluster->statement($insert);
-        $cluster->statement($insert);
+        foreach ([$insert, $insert, $asynchronousInsert, $asynchronousInsert] as $statement) {
+            $cluster->statement($statement);
+        }
         DB::connection('clickhouse2')->statement("SYSTEM SYNC REPLICA `{$logged}`");
 
-        foreach ($this->onEveryNode("SELECT toString(count()) AS c FROM `{$logged}`") as $rows) {
-            $this->assertSame([['c' => '2']], $rows);
+        foreach ($this->onEveryNode("SELECT id, toString(count()) AS c FROM `{$logged}` GROUP BY id ORDER BY id") as $rows) {
+            $this->assertSame([['id' => 0, 'c' => '2'], ['id' => 1, 'c' => '2']], $rows);
         }
 
         $cluster->statement("ALTER TABLE `{$logged}` DELETE WHERE 1 SETTINGS mutations_sync = 2");
@@ -294,7 +300,7 @@ class SchemaBlueprintClusterTest extends TestCase
         $this->assertSame(
             [
                 "CREATE TABLE `{$created}` {$onCluster} (`id` Int32) ENGINE = ReplicatedMergeTree() ORDER BY (`id`)"
-                . ' SETTINGS replicated_deduplication_window=0',
+                . ' SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0',
                 "ALTER TABLE `{$existing}` {$onCluster} ADD COLUMN `extra` Int32",
                 "ALTER TABLE `{$existing}` {$onCluster} MODIFY COLUMN `name` String",
                 "RENAME TABLE `{$existing}` TO `{$renamed}` {$onCluster}",

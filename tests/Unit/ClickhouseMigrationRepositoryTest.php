@@ -313,7 +313,7 @@ class ClickhouseMigrationRepositoryTest extends TestCase
             'a cluster_name and cluster nodes' => [
                 ['cluster_name' => 'company_cluster', 'cluster' => [['host' => 'a'], ['host' => 'b']], 'engine' => 'ReplacingMergeTree()'],
                 "CREATE TABLE `migrations` ON CLUSTER 'company_cluster' {$columns} ENGINE = ReplicatedMergeTree() ORDER BY (`id`)"
-                . ' SETTINGS replicated_deduplication_window=0',
+                . ' SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0',
             ],
         ];
     }

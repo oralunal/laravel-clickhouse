@@ -99,15 +99,21 @@ class ClickhouseMigrationRepository extends DatabaseMigrationRepository
      * next migration command, could miss the migration and run it again.
      *
      * The token keeps a row that is identical to an earlier one, such as the row that a migration logs again after it
-     * was rolled back, in a table that drops such an inserted block: a MergeTree table with a
-     * non_replicated_deduplication_window, or a replicated table without replicated_deduplication_window = 0, which
-     * the schema builder sets on the replicated tables that it makes but which an engine option such as
-     * ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}') lacks (24.8, 26.3 and 26.8
-     * checked). A block with a token is compared by its token, which no other block has, so the row is kept. A table
-     * that does not deduplicate ignores the token. On ClickHouse 26.3, whose deduplicate_insert = 'enable' also
-     * deduplicates asynchronous inserts, a replicated table drops an identical asynchronous insert by
-     * replicated_deduplication_window_for_async_inserts, even with replicated_deduplication_window = 0; the
-     * synchronous insert of log() is not affected (26.3.46 checked).
+     * was rolled back, in a migrations table that drops such an inserted block. A table that the schema builder makes
+     * replicated does not drop it: it gets replicated_deduplication_window = 0 and
+     * replicated_deduplication_window_for_async_inserts = 0, and keeps every insert as a MergeTree table does (see
+     * SchemaGrammar::getReplicatedTableSettings()). The token stays for a migrations table that the schema builder did
+     * not make replicated itself, such as one that 3.0.0 or Migration::createMergeTree() created, or one whose engine
+     * option names a replicated engine:
+     * - a replicated table with the server's deduplication windows, such as one with the engine option
+     *   ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}') or one that
+     *   Migration::createMergeTree() made replicated, drops a synchronous insert identical to a recent one (24.8, 26.3
+     *   and 26.8 checked);
+     * - a MergeTree table, such as the MergeTree() table that 3.0.0 created, drops it when it has a
+     *   non_replicated_deduplication_window, which is 0 unless the server's merge_tree config or the table's settings
+     *   set one.
+     * A block with a token is compared by its token, which no other block has, so the row is kept. A table that does
+     * not deduplicate ignores the token.
      *
      * @param string $file
      * @param int $batch
@@ -141,11 +147,13 @@ class ClickhouseMigrationRepository extends DatabaseMigrationRepository
      * after it has rolled back, could still read a migration as run and skip it, although its down() had run (24.8
      * checked).
      *
-     * The wait takes about 20 ms on ClickHouse 24.8 and 26.3. ClickHouse 26.8, on a server with little RAM whose
-     * config does not set background_pool_size, lowers it from 16 to the RAM in GiB (3 with 3.8 GiB) and postpones a
-     * mutation while the pool has too few idle threads, so the wait takes up to about 2 seconds. A delete that runs
-     * past the connection's timeout_query, 2 seconds in the packaged configuration, makes the migration command fail
-     * after down() ran, while the server still deletes the row (26.8.21 checked).
+     * The wait usually takes less than 20 ms from a MergeTree migrations table on ClickHouse 24.8 and 26.3, and some
+     * tens of milliseconds from a replicated one on all three versions. ClickHouse 26.8, on a server with little RAM
+     * whose config does not set background_pool_size, lowers it from 16 to the RAM in GiB (3 with 3.8 GiB) and
+     * postpones a mutation while the pool has too few idle threads, so the delete from a MergeTree table takes a few
+     * hundred milliseconds, and now and then more than 2 seconds. A delete that runs past the connection's timeout_query, 2 seconds in the
+     * packaged configuration, makes the migration command fail after down() ran, while the server still deletes the
+     * row (26.8.21 checked).
      *
      * @param object{id?: int, migration: string, batch?: int} $migration
      * @return void
@@ -176,7 +184,8 @@ class ClickhouseMigrationRepository extends DatabaseMigrationRepository
      * alone (see keepsEveryRow()), and MergeTree() otherwise: an engine such as ReplacingMergeTree would merge the
      * rows, which all have the id 0, into one, and Memory would lose them when the server restarts. The schema
      * builder's other rules apply, so on a connection with a cluster_name the table is created ON CLUSTER, and with
-     * cluster nodes as well, MergeTree() becomes ReplicatedMergeTree() with replicated_deduplication_window = 0.
+     * cluster nodes as well, MergeTree() becomes ReplicatedMergeTree() with replicated_deduplication_window = 0 and
+     * replicated_deduplication_window_for_async_inserts = 0.
      *
      * @return void
      */

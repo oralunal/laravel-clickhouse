@@ -155,11 +155,13 @@ class SchemaBlueprint extends Blueprint
      *
      * A table that the schema builder makes replicated keeps the insert
      * behaviour of its MergeTree engine: the CREATE gets
-     * SETTINGS replicated_deduplication_window=0, so ClickHouse keeps an
-     * insert that is identical to an earlier one instead of dropping it as a
-     * duplicate (ClickHouse 26.3 drops it anyway). settings() with another
-     * value for that setting wins, and a null value leaves it to the server's
-     * default (see SchemaGrammar::getReplicatedTableSettings()).
+     * SETTINGS replicated_deduplication_window=0,
+     * replicated_deduplication_window_for_async_inserts=0, so ClickHouse
+     * keeps every insert that is identical to an earlier one, synchronous or
+     * asynchronous, instead of dropping it as a duplicate (24.8, 26.3 and
+     * 26.8 checked). settings() with another value for either setting wins,
+     * and a null value leaves that setting to the server's default (see
+     * SchemaGrammar::getReplicatedTableSettings()).
      *
      * @param bool $replicated
      * @return void
@@ -285,7 +287,11 @@ class SchemaBlueprint extends Blueprint
      * string a quoted literal. A later call for the same name wins. In
      * Schema::table() each call gives ALTER TABLE ... MODIFY SETTING <name>=<value>, ...
      *
-     * @param array<string, bool|int|float|string|BackedEnum|Stringable|Expression> $settings
+     * A null value leaves the setting out of a new table's SETTINGS, so the
+     * server's default applies, also for a setting that the schema builder
+     * would add itself (see SchemaGrammar::getReplicatedTableSettings()).
+     *
+     * @param array<string, bool|int|float|string|BackedEnum|Stringable|Expression|null> $settings
      * @return Fluent
      */
     public function settings(array $settings): Fluent

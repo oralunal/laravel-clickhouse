@@ -30,9 +30,9 @@ class MigrationScenariosTest extends TestCase
      * The timeout_query, in seconds, of the ClickHouse connections that the test makes, in place of the 2 of the
      * `clickhouse` connection. ClickHouse 26.8, on a server with little RAM whose config does not set
      * background_pool_size, lowers it from 16 to the RAM in GiB (3 with 3.8 GiB), so that a mutation waits for idle
-     * threads: the repository's delete, which waits for its mutation (mutations_sync = 1), then takes up to about 2
-     * seconds, and migrate:rollback failed with 'Operation timed out after 2001 milliseconds'. 24.8 and 26.3 delete in
-     * about 20 ms.
+     * threads: the repository's delete, which waits for its mutation (mutations_sync = 1), then takes a few hundred
+     * milliseconds, and now and then more than 2 seconds, and migrate:rollback failed with 'Operation timed out after
+     * 2001 milliseconds'. 24.8 and 26.3 usually delete in less than 20 ms.
      */
     private const TIMEOUT_QUERY = 10;
 

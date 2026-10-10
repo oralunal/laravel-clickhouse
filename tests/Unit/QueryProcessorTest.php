@@ -163,6 +163,9 @@ class QueryProcessorTest extends TestCase
             'quoted identifier inside an expression' => ['intHash32(`my col`)', ['intHash32(`my col`)']],
             'extra whitespace' => ["  a ,\n b  ", ['a', 'b']],
             'one column in parentheses, as 26.8 prints it' => ['(id)', ['id']],
+            'a primary key in parentheses, as 26.8 prints PRIMARY KEY (a) ORDER BY (a, b)' => ['(a)', ['a']],
+            'an index expression in parentheses, as 26.8 prints INDEX i (a + c)' => ['(a + c)', ['a + c']],
+            'a function in parentheses, as 26.8 prints INDEX i (intHash32(a))' => ['(intHash32(a))', ['intHash32(a)']],
             'quoted column in parentheses' => ['(`we\\`ird`)', ['we`ird']],
             'columns in parentheses' => ['(a, intHash32(b))', ['a', 'intHash32(b)']],
             'parentheses that do not enclose the whole expression' => ['(a) + (b)', ['(a) + (b)']],
@@ -172,16 +175,19 @@ class QueryProcessorTest extends TestCase
     }
 
     /**
+     * The expression of a primary key and that of a data-skipping index are split alike.
+     *
      * @param list<string> $columns
      */
     #[DataProvider('expressionLists')]
     public function testIndexColumnsSplitTheExpressionAtTopLevelCommas(string $expression, array $columns): void
     {
-        $index = (new QueryProcessor())->processIndexes([
+        $indexes = (new QueryProcessor())->processIndexes([
             ['name' => 'primary', 'expression' => $expression, 'type' => 'primary', 'is_primary' => 1],
-        ])[0];
+            ['name' => 'i', 'expression' => $expression, 'type' => 'minmax', 'is_primary' => 0],
+        ]);
 
-        $this->assertSame($columns, $index['columns']);
+        $this->assertSame([$columns, $columns], array_column($indexes, 'columns'));
     }
 
     /**

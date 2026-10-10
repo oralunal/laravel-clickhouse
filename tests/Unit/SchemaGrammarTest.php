@@ -825,16 +825,17 @@ class SchemaGrammarTest extends TestCase
     }
 
     /**
-     * A table that the schema builder makes replicated gets SETTINGS replicated_deduplication_window=0, so that it
-     * keeps an insert identical to an earlier one, as its MergeTree engine does; an engine named as replicated, and
-     * one with a SETTINGS clause of its own, get nothing.
+     * A table that the schema builder makes replicated gets SETTINGS replicated_deduplication_window=0,
+     * replicated_deduplication_window_for_async_inserts=0, so that it keeps an insert identical to an earlier one,
+     * synchronous or asynchronous, as its MergeTree engine does; an engine named as replicated, and one with a SETTINGS
+     * clause of its own, get nothing.
      *
      * @return array<string, array{string|null, array<string, mixed>, bool|null, string}>
      */
     public static function enginesOnACluster(): array
     {
         $cluster = ['cluster_name' => 'company_cluster', 'cluster' => [['host' => 'a'], ['host' => 'b']]];
-        $window = ' SETTINGS replicated_deduplication_window=0';
+        $window = ' SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0';
 
         return [
             'the default engine' => [null, $cluster, null, 'ReplicatedMergeTree() ORDER BY (`id`)' . $window],
@@ -890,7 +891,7 @@ class SchemaGrammarTest extends TestCase
         $this->assertSame(
             [
                 "CREATE TABLE `events` ON CLUSTER 'company_cluster' (`id` Int32) ENGINE = ReplicatedReplacingMergeTree"
-                . ' ORDER BY (`id`) SETTINGS replicated_deduplication_window=0',
+                . ' ORDER BY (`id`) SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0',
             ],
             $this->compileCreate(fn (SchemaBlueprint $table) => $table->integer('id'), ['engine' => 'ReplacingMergeTree'] + $config)
         );
@@ -911,17 +912,18 @@ class SchemaGrammarTest extends TestCase
         $this->assertSame(
             [
                 "CREATE TABLE `events` ON CLUSTER 'company_cluster' (`id` Int32) ENGINE = ReplicatedMergeTree()"
-                . ' ORDER BY (`id`) SETTINGS replicated_deduplication_window=0',
+                . ' ORDER BY (`id`) SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0',
             ],
             $blueprint->toSql()
         );
     }
 
     /**
-     * settings() starts from replicated_deduplication_window=0 on a table that the schema builder makes replicated: a
-     * value for that setting replaces it, a null value leaves it out, and other settings come after it.
+     * settings() starts from replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0 on
+     * a table that the schema builder makes replicated: a value for either setting replaces it, a null value leaves it
+     * out, and other settings come after them.
      */
-    public function test_settings_override_the_deduplication_window_of_a_replicated_table(): void
+    public function test_settings_override_the_deduplication_windows_of_a_replicated_table(): void
     {
         $config = ['cluster_name' => 'company_cluster', 'cluster' => [['host' => 'a']]];
         $create = fn (array $settings): array => $this->compileCreate(function (SchemaBlueprint $table) use ($settings) {
@@ -931,14 +933,31 @@ class SchemaGrammarTest extends TestCase
         $start = "CREATE TABLE `events` ON CLUSTER 'company_cluster' (`id` Int32) ENGINE = ReplicatedMergeTree() ORDER BY (`id`)";
 
         $this->assertSame(
-            ["{$start} SETTINGS replicated_deduplication_window=0, index_granularity=1024"],
+            [
+                "{$start} SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0,"
+                . ' index_granularity=1024',
+            ],
             $create(['index_granularity' => 1024])
         );
         $this->assertSame(
-            ["{$start} SETTINGS replicated_deduplication_window=100, index_granularity=1024"],
+            [
+                "{$start} SETTINGS replicated_deduplication_window=100, replicated_deduplication_window_for_async_inserts=0,"
+                . ' index_granularity=1024',
+            ],
             $create(['index_granularity' => 1024, 'replicated_deduplication_window' => 100])
         );
-        $this->assertSame([$start], $create(['replicated_deduplication_window' => null]));
+        $this->assertSame(
+            ["{$start} SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=100"],
+            $create(['replicated_deduplication_window_for_async_inserts' => 100])
+        );
+        $this->assertSame(
+            ["{$start} SETTINGS replicated_deduplication_window_for_async_inserts=0"],
+            $create(['replicated_deduplication_window' => null])
+        );
+        $this->assertSame(
+            [$start],
+            $create(['replicated_deduplication_window' => null, 'replicated_deduplication_window_for_async_inserts' => null])
+        );
         $this->assertSame(
             ['CREATE TABLE `events` (`id` Int32) ENGINE = MergeTree() ORDER BY (`id`) SETTINGS index_granularity=1024'],
             $this->compileCreate(function (SchemaBlueprint $table) {

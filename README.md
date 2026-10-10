@@ -67,9 +67,12 @@ of 24.8 where one exists:
   (`async_insert = 1` with `wait_for_async_insert = 1`), so each `INSERT`
   waits for the server to flush its buffer. The number of rows that
   `affectingStatement()` and `insertUsing()` report changes with it (see
-  [Raw SQL with bindings](#raw-sql-with-bindings)), and 26.3 drops an
-  asynchronous insert into a replicated table that is identical to an earlier
-  one (see [The schema builder on a cluster](#the-schema-builder-on-a-cluster)).
+  [Raw SQL with bindings](#raw-sql-with-bindings)). On 26.3, a replicated
+  table checks an asynchronous insert for duplicates against
+  `replicated_deduplication_window_for_async_inserts` instead of
+  `replicated_deduplication_window`. The schema builder sets both to `0` on a
+  table that it makes replicated, which then keeps every insert that is
+  identical to an earlier one (see [The schema builder on a cluster](#the-schema-builder-on-a-cluster)).
   `'settings' => ['async_insert' => 0]` inserts synchronously, as 24.8 does.
   The migration repository and the load of a schema dump always insert
   synchronously.
@@ -77,12 +80,12 @@ of 24.8 where one exists:
   set `background_pool_size`, 26.8 lowers it from 16 to the server's RAM in
   GiB, such as 3 on a server with 3.8 GiB and 2 in a container limited to
   2 GiB, and then postpones a mutation while the pool has too few idle
-  threads. 24.8 and 26.3 keep 16. A statement that waits for its mutation
-  then takes a few hundred milliseconds, and now and then more than 2
-  seconds, where 24.8 and 26.3 usually take less than 20 ms: a
-  lightweight `DELETE`, an `ALTER TABLE ... DELETE` or `UPDATE` with
+  threads. 24.8 and 26.3 keep 16. A statement that waits for its mutation on
+  a small `MergeTree` table then takes a few hundred milliseconds, and now and
+  then more than 2 seconds, where 24.8 and 26.3 usually take less than 20 ms:
+  a lightweight `DELETE`, an `ALTER TABLE ... DELETE` or `UPDATE` with
   `mutations_sync`, and the delete with which a rollback removes a migration
-  from the `migrations` table (see
+  from a `MergeTree` `migrations` table (see
   [Which connection holds the `migrations` table](#which-connection-holds-the-migrations-table)).
   With the packaged `timeout_query` of 2 seconds, `migrate:rollback`,
   `migrate:refresh` and `migrate:reset` can then fail with
@@ -90,7 +93,9 @@ of 24.8 where one exists:
   the migration's `down()` ran, while the server still deletes the row. Raise
   `timeout_query` for migration commands, or set
   `<background_pool_size>16</background_pool_size>` in the server config,
-  which brings back the timing of 24.8.
+  which brings back the timing of 24.8. On a replicated table, these
+  statements usually take some tens of milliseconds on all three versions,
+  also with the lowered pool.
 - **Dates with a sub-second part.** 26.8 parses a date with
   `date_time_input_format` and `cast_string_to_date_time_mode` set to
   `best_effort`, so a `DateTime` column cuts the sub-second part off, in
@@ -3368,7 +3373,8 @@ Schema::create('events', function (SchemaBlueprint $table) {
     $table->string('name');
 });
 // CREATE TABLE `events` ON CLUSTER 'company_cluster' (`id` Int32, `name` String)
-//   ENGINE = ReplicatedMergeTree() ORDER BY (`id`) SETTINGS replicated_deduplication_window=0
+//   ENGINE = ReplicatedMergeTree() ORDER BY (`id`)
+//   SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0
 
 Schema::table('events', fn (SchemaBlueprint $table) => $table->string('extra')->nullable());
 // ALTER TABLE `events` ON CLUSTER 'company_cluster' ADD COLUMN `extra` Nullable(String)
@@ -3397,30 +3403,38 @@ Schema::dropIfExistsSync('events_old');
   renamed, can be created again at once, unlike a table of
   `createMergeTree()`, whose path is fixed. An engine named `Replicated...` or
   `Shared...`, and an engine outside the family, such as `Memory`, are kept.
-- `SETTINGS replicated_deduplication_window=0` keeps a synchronous insert that
-  is identical to an earlier one, as a `MergeTree` table does, where a
-  replicated table would drop it as a duplicate, on 24.8, 26.3 and 26.8.
-  `settings()` with another value for it wins, and `null` leaves it to the
-  server. An engine that you name as replicated, and an `engine()` with a
-  `SETTINGS` clause of its own, get nothing.
-- An asynchronous insert, the default of 26.3 and 26.8, is checked against
-  another window on some versions. 24.8 keeps it, unless
-  `async_insert_deduplicate` is `1`. 26.3 checks it against
-  `replicated_deduplication_window_for_async_inserts`, by default the last
-  10000 asynchronous inserts of the past 7 days, and drops an insert identical
-  to an earlier one, also
-  seconds later or after other inserts, whatever `insert_deduplicate` and
-  `async_insert_deduplicate` say. 26.8 keeps it. To keep such inserts on every
-  version, add the table setting
-  `$table->settings(['replicated_deduplication_window_for_async_inserts' => 0])`,
-  or insert synchronously, with `'settings' => ['async_insert' => 0]` in the
-  connection config or `SETTINGS async_insert = 0` in the `INSERT`. On 26.3, an
-  insert with `deduplicate_insert = 'disable'` or with an
-  `insert_deduplication_token` of its own is kept too.
+- The replicated table gets
+  `SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0`,
+  so that it keeps an insert that is identical to an earlier one, synchronous
+  or asynchronous, as a `MergeTree` table does, where a replicated table
+  would drop it as a duplicate (24.8, 26.3 and 26.8 checked). It needs both,
+  because which window checks an asynchronous insert, the default insert of
+  26.3 and 26.8, depends on the version: 24.8 checks
+  `replicated_deduplication_window`, and with `async_insert_deduplicate = 1`
+  also `replicated_deduplication_window_for_async_inserts`; 26.3 checks
+  `replicated_deduplication_window_for_async_inserts` alone, whatever
+  `insert_deduplicate` and `async_insert_deduplicate` say; 26.8 checks
+  `replicated_deduplication_window` alone. A synchronous insert is checked
+  against `replicated_deduplication_window`.
+- `settings()` with another value for either setting wins, and `null` leaves
+  that setting to the server:
+  `$table->settings(['replicated_deduplication_window' => null])` gives
+  `SETTINGS replicated_deduplication_window_for_async_inserts=0`. With the
+  server's `replicated_deduplication_window_for_async_inserts`, by default the
+  last 10000 asynchronous inserts of the past 7 days, 26.3 drops an
+  asynchronous insert that is identical to an earlier one, also seconds later
+  or after other inserts.
+- An engine that you name as replicated, and an `engine()` with a `SETTINGS`
+  clause of its own, get neither setting. A `ReplicatedMergeTree` table with
+  the server's windows drops an insert that is identical to a recent one,
+  synchronous or asynchronous, on 24.8, 26.3 and 26.8; give it both settings
+  with `settings()` to keep such inserts.
 - Laravel's `migrations` table, which logs the same row again after a
-  rollback, keeps it on every version: the package's migration repository
-  inserts each row synchronously and with an `insert_deduplication_token` of
-  its own (see
+  rollback, keeps it on every version. The package's migration repository
+  also inserts each row synchronously and with an `insert_deduplication_token`
+  of its own, so that a `migrations` table that the schema builder did not
+  make replicated keeps it too, such as one whose `engine` option names a
+  replicated engine (see
   [Which connection holds the `migrations` table](#which-connection-holds-the-migrations-table)).
 - `$table->replicated(false)` keeps the engine as given, for a table that each
   host keeps for itself. `$table->replicated()` makes it replicated on any
@@ -4238,22 +4252,30 @@ connection:
   its arguments alone, because another engine would merge or lose the rows,
   whose `id` is always `0`. On a connection with a `cluster_name`, the table is
   created `ON CLUSTER`, and replicated when the connection lists its nodes
-  (see [The schema builder on a cluster](#the-schema-builder-on-a-cluster)).
+  (see [The schema builder on a cluster](#the-schema-builder-on-a-cluster)):
+  ``CREATE TABLE `migrations` ON CLUSTER 'company_cluster' (`id` Int32, `migration` String, `batch` Int32) ENGINE = ReplicatedMergeTree() ORDER BY (`id`) SETTINGS replicated_deduplication_window=0, replicated_deduplication_window_for_async_inserts=0``.
 - A migration is logged with
   `insert into "migrations" ("migration", "batch") settings insert_deduplication_token = ?, async_insert = 0 values (?, ?)`.
-  The insert is synchronous, so the row is there when the next command reads
-  the table, also on a server that inserts asynchronously by default. The
-  token, the migration, the batch and 32 random hex digits, keeps a row that is
-  identical to an earlier one, such as the row of a migration that runs again
-  after a rollback, in a table that deduplicates inserts.
+  The insert is synchronous, whatever the connection's `settings` say, so the
+  row is there when the next command reads the table, also on a server that
+  inserts asynchronously by default. The token, the migration, the batch and 32
+  random hex digits, keeps a row that is identical to an earlier one, such as
+  the row of a migration that runs again after a rollback, in a table that
+  deduplicates inserts: a replicated table without
+  `replicated_deduplication_window = 0`, such as one whose `engine` option
+  names a replicated engine, or a `MergeTree` table with a
+  `non_replicated_deduplication_window`. A table that the schema builder makes
+  replicated keeps such a row without the token.
 - A rollback deletes the row with
   `alter table "migrations" delete where "migration" = ? settings mutations_sync = 1`,
   which returns once the active node has deleted it, so that `migrate:refresh`
   runs every rolled-back migration again. 3.0.0 left the delete to the
   background, so a migration right after a rollback could still read as run,
-  and be skipped. On ClickHouse 26.8 with a lowered `background_pool_size`,
-  the delete takes a few hundred milliseconds, and now and then more than 2
-  seconds, so raise `timeout_query` above the packaged 2 seconds for
+  and be skipped. The delete usually takes less than 20 ms from a
+  `MergeTree` table, and some tens of milliseconds from a replicated one. On
+  ClickHouse 26.8 with a lowered `background_pool_size`, the delete from a
+  `MergeTree` table takes a few hundred milliseconds, and now and then more
+  than 2 seconds, so raise `timeout_query` above the packaged 2 seconds for
   migration commands there (see
   [Newer ClickHouse versions](#newer-clickhouse-versions)).
 - Before a schema dump is loaded, the table is dropped with
