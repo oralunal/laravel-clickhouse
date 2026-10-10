@@ -2,6 +2,7 @@
 
 namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
+use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use function Oralunal\LaravelClickHouse\ClickhouseBuilder\tp;
 
 class From
@@ -9,7 +10,7 @@ class From
     /**
      * Table name.
      *
-     * @var Identifier|Expression|null
+     * @var Identifier|Expression|ExpressionContract|null
      */
     private $table;
 
@@ -42,6 +43,13 @@ class From
     private $subQuery;
 
     /**
+     * Builder whose SQL was compiled into the FROM clause as a sub-query.
+     *
+     * @var BaseBuilder|null
+     */
+    private $queryBuilder;
+
+    /**
      * From constructor.
      *
      * @param BaseBuilder $query
@@ -54,7 +62,10 @@ class From
     /**
      * Set table name.
      *
-     * @param string|Expression $table
+     * A string is a table name, quoted part by part, so db.events becomes `db`.`events`. An Expression or a Laravel
+     * database expression, such as DB::raw('numbers(10)'), is raw SQL, written as it is.
+     *
+     * @param string|Expression|ExpressionContract $table
      *
      * @return From
      */
@@ -65,6 +76,7 @@ class From
         }
 
         $this->table = $table;
+        $this->queryBuilder = null;
 
         return $this;
     }
@@ -86,7 +98,7 @@ class From
     /**
      * Set final option.
      *
-     * Used in CollapsingMergeTree tables
+     * Used in CollapsingMergeTree tables. True writes FINAL after the table; false leaves it out.
      *
      * @param bool $isFinal
      *
@@ -164,6 +176,7 @@ class From
             }
 
             $this->table(new Expression("({$query->toSql()})"));
+            $this->queryBuilder = $query;
         }
 
         return $this;
@@ -182,7 +195,7 @@ class From
     /**
      * Get table name.
      *
-     * @return Expression|Identifier|null
+     * @return Expression|ExpressionContract|Identifier|null
      */
     public function getTable()
     {
@@ -202,7 +215,9 @@ class From
     /**
      * Get final option.
      *
-     * @return bool
+     * Null when final() was not called. Only true writes FINAL.
+     *
+     * @return bool|null
      */
     public function getFinal(): ?bool
     {
@@ -217,5 +232,18 @@ class From
     public function getSubQuery(): ?BaseBuilder
     {
         return $this->subQuery;
+    }
+
+    /**
+     * Get the builder whose SQL was compiled into the FROM clause as a sub-query.
+     *
+     * It is set by from($builder), query($builder) and the closure forms, and is null when the FROM clause
+     * names a table or a table function.
+     *
+     * @return BaseBuilder|null
+     */
+    public function getQueryBuilder(): ?BaseBuilder
+    {
+        return $this->queryBuilder;
     }
 }

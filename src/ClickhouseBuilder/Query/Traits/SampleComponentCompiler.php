@@ -16,6 +16,12 @@ trait SampleComponentCompiler
      */
     public function compileSampleComponent(Builder $builder, ?float $sample = null): string
     {
-        return "SAMPLE {$sample}";
+        $offset = $builder->getSampleOffset();
+
+        if (is_null($offset)) {
+            return "SAMPLE {$sample}";
+        }
+
+        return "SAMPLE {$sample} OFFSET {$offset}";
     }
 }

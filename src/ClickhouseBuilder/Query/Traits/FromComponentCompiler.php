@@ -9,7 +9,10 @@ use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\From;
 trait FromComponentCompiler
 {
     /**
-     * Compiles format statement.
+     * Compiles from statement.
+     *
+     * FINAL is written only when the final option is true, so final(false) and a false $isFinal given to from()
+     * or table() leave it out, as when the option was never set.
      *
      * @param BaseBuilder $builder
      * @param             $from
@@ -31,7 +34,7 @@ trait FromComponentCompiler
             $fromSection .= " AS {$this->wrap($alias)}";
         }
 
-        if (!is_null($final)) {
+        if ($final === true) {
             $fromSection .= ' FINAL';
         }
 

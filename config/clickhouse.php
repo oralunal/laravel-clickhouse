@@ -14,11 +14,14 @@
 |
 | Add as many connections as you need. For a cluster, replace the `host`
 | and `port` pair with a `cluster` array of nodes, and optionally set
-| `cluster_name` so migrations created with Migration::createMergeTree()
-| emit ON CLUSTER '<name>' (see README).
+| `cluster_name` so that Migration::createMergeTree() and Laravel's schema
+| builder emit ON CLUSTER '<name>', and the schema builder creates
+| replicated tables (see README).
 |
 | Anything you set here overrides the packaged defaults. Entries in your
-| config/database.php `connections` array outrank both.
+| config/database.php `connections` array outrank both. An option with a
+| value that it does not take throws an InvalidArgumentException when the
+| connection is created, before any node is pinged.
 |
 */
 
@@ -31,12 +34,48 @@ return [
         'database'        => env('CLICKHOUSE_DATABASE', 'default'),
         'username'        => env('CLICKHOUSE_USERNAME', 'default'),
         'password'        => env('CLICKHOUSE_PASSWORD', ''),
+        // Seconds, and a fraction is allowed: 0.5 is 500 ms. The query
+        // timeout is applied in whole seconds, rounded up (see README).
         'timeout_connect' => env('CLICKHOUSE_TIMEOUT_CONNECT', 2),
         'timeout_query'   => env('CLICKHOUSE_TIMEOUT_QUERY', 2),
         'https'           => (bool) env('CLICKHOUSE_HTTPS', false),
         'retries'         => env('CLICKHOUSE_RETRIES', 0),
+        // Which failed requests the retries send again: 'any' sends every one,
+        // 'unsent' only those that never reached the server. With 'any', a
+        // write that timed out on the client can run twice (see README).
+        'retry_on'        => env('CLICKHOUSE_RETRY_ON', 'any'),
         'settings'        => [],
+        // DB::connection('clickhouse')->table() returns the package's query
+        // builder when true, and Laravel's own query builder, with ClickHouse
+        // SQL, when false (see README).
         'fix_default_query_builder' => true,
+        // delete() without an argument sends a lightweight DELETE FROM when
+        // true, an ALTER TABLE ... DELETE mutation when false (see README).
+        'use_lightweight_delete' => (bool) env('CLICKHOUSE_USE_LIGHTWEIGHT_DELETE', false),
+        // The engine of the tables that Schema::create() creates without
+        // $table->engine(); null means MergeTree().
+        'engine' => env('CLICKHOUSE_ENGINE'),
+        // When true, Schema::create() gives each integer column its own width
+        // and unsigned() a UInt type: tinyInteger() is Int8, id() is UInt64.
+        // False keeps the types of 3.0.0 (see README).
+        'exact_integer_types' => (bool) env('CLICKHOUSE_EXACT_INTEGER_TYPES', false),
+        // The type of a data-skipping index that Schema::create() or
+        // Schema::table() adds without one, such as the index of morphs(),
+        // on a table of the MergeTree family: 'minmax' or 'bloom_filter', for
+        // example. Null sends nothing for such an index, as 3.0.0 did (see README).
+        'default_index_type' => env('CLICKHOUSE_DEFAULT_INDEX_TYPE'),
+        // 'microsecond' writes the sub-second part of the dates in conditions,
+        // bindings and inserts, which DateTime64 columns keep; 'second' drops
+        // it, as 3.0.0 did. Keep it a string for config:cache (see README).
+        'datetime_precision' => env('CLICKHOUSE_DATETIME_PRECISION', 'second'),
+        // The input format of the package's inserts: 'Values', as in 3.0.0,
+        // or 'JSONEachRow'. A model's $insertFormat wins (see README).
+        'insert_format' => env('CLICKHOUSE_INSERT_FORMAT', 'Values'),
+        // When true, delete(), update(), truncate() and optimize() send
+        // ON CLUSTER '<cluster_name>', so that every node runs them. It needs
+        // a cluster_name, and every such statement then waits for every host
+        // (see README).
+        'use_on_cluster' => (bool) env('CLICKHOUSE_USE_ON_CLUSTER', false),
     ],
 
     // Additional connections — uncomment or add your own.
@@ -52,7 +91,13 @@ return [
     //     'timeout_query'   => 2,
     //     'https'           => false,
     //     'retries'         => 0,
+    //     'retry_on'        => 'any',
     //     'fix_default_query_builder' => true,
+    //     'use_lightweight_delete' => (bool) env('CLICKHOUSE2_USE_LIGHTWEIGHT_DELETE', false),
+    //     'datetime_precision' => env('CLICKHOUSE2_DATETIME_PRECISION', 'second'),
+    //     'insert_format' => env('CLICKHOUSE2_INSERT_FORMAT', 'Values'),
+    //     // use_on_cluster needs a cluster_name.
+    //     'use_on_cluster' => (bool) env('CLICKHOUSE2_USE_ON_CLUSTER', false),
     // ],
 
 ];

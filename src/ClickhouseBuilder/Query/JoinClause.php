@@ -3,6 +3,7 @@
 namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
 use Closure;
+use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinStrict;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinType;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator;
@@ -35,7 +36,7 @@ class JoinClause
     /**
      * Table for join.
      *
-     * @var string|Expression|null
+     * @var Identifier|Expression|ExpressionContract|null
      */
     private $table;
 
@@ -61,6 +62,13 @@ class JoinClause
      * @var BaseBuilder|null
      */
     private $subQuery;
+
+    /**
+     * Builder whose SQL was compiled into the JOIN clause as a sub-query.
+     *
+     * @var BaseBuilder|null
+     */
+    private $queryBuilder;
 
     /**
      * Join alias.
@@ -89,12 +97,18 @@ class JoinClause
     /**
      * Set table for join.
      *
-     * @param string|Expression $table
+     * A builder is compiled as a sub-query and kept for getQueryBuilder(); a table name or an expression clears it.
+     * A string is a table name, with an optional alias after AS. An Expression or a Laravel database expression,
+     * such as DB::raw(), is raw SQL, written as it is.
+     *
+     * @param string|Expression|ExpressionContract|BaseBuilder $table
      *
      * @return JoinClause
      */
     public function table($table): self
     {
+        $queryBuilder = null;
+
         if (is_string($table)) {
             list($table, $alias) = $this->decomposeJoinExpressionToTableAndAlias($table);
 
@@ -104,10 +118,12 @@ class JoinClause
 
             $table = new Identifier($table);
         } elseif ($table instanceof BaseBuilder) {
+            $queryBuilder = $table;
             $table = new Expression("({$table->toSql()})");
         }
 
         $this->table = $table;
+        $this->queryBuilder = $queryBuilder;
 
         return $this;
     }
@@ -129,10 +145,13 @@ class JoinClause
     /**
      * Set "on" clause for join.
      *
-     * @param string|Expression $first
-     * @param string            $operator
-     * @param string|Expression $second
-     * @param string            $concatOperator
+     * A column given as a string is a name, quoted part by part; an Expression or a Laravel database expression,
+     * such as DB::raw(), is raw SQL. The operator and the concatenation operator are read in any letter case.
+     *
+     * @param string|Expression|ExpressionContract $first
+     * @param string                               $operator
+     * @param string|Expression|ExpressionContract $second
+     * @param string                               $concatOperator
      *
      * @return JoinClause
      */
@@ -212,6 +231,36 @@ class JoinClause
     }
 
     /**
+     * Set SEMI strictness.
+     *
+     * @return JoinClause
+     */
+    public function semi(): self
+    {
+        return $this->strict(JoinStrict::SEMI);
+    }
+
+    /**
+     * Set ANTI strictness.
+     *
+     * @return JoinClause
+     */
+    public function anti(): self
+    {
+        return $this->strict(JoinStrict::ANTI);
+    }
+
+    /**
+     * Set ASOF strictness.
+     *
+     * @return JoinClause
+     */
+    public function asof(): self
+    {
+        return $this->strict(JoinStrict::ASOF);
+    }
+
+    /**
      * Set INNER join type.
      *
      * @return JoinClause
@@ -229,6 +278,36 @@ class JoinClause
     public function left(): self
     {
         return $this->type(JoinType::LEFT);
+    }
+
+    /**
+     * Set RIGHT join type.
+     *
+     * @return JoinClause
+     */
+    public function right(): self
+    {
+        return $this->type(JoinType::RIGHT);
+    }
+
+    /**
+     * Set FULL join type.
+     *
+     * @return JoinClause
+     */
+    public function full(): self
+    {
+        return $this->type(JoinType::FULL);
+    }
+
+    /**
+     * Set CROSS join type, which takes no strictness and no join keys.
+     *
+     * @return JoinClause
+     */
+    public function cross(): self
+    {
+        return $this->type(JoinType::CROSS);
     }
 
     /**
@@ -264,6 +343,7 @@ class JoinClause
 
         if ($query instanceof BaseBuilder) {
             $this->table(new Expression("({$query->toSql()})"));
+            $this->queryBuilder = $query;
         }
 
         return $this;
@@ -360,9 +440,24 @@ class JoinClause
     }
 
     /**
+     * Get the builder whose SQL was compiled into the JOIN clause as a sub-query.
+     *
+     * It is set by table($builder) and query($builder), so by join($builder) and the join helpers given a builder,
+     * by query(Closure), and by the closure forms that call query() or subQuery() without an argument once join()
+     * compiles that sub-query. It is null when the join names a table or raw SQL, and after table() replaces a
+     * sub-query with one of those.
+     *
+     * @return BaseBuilder|null
+     */
+    public function getQueryBuilder(): ?BaseBuilder
+    {
+        return $this->queryBuilder;
+    }
+
+    /**
      * Get table to select from.
      *
-     * @return Expression|null|string
+     * @return Identifier|Expression|ExpressionContract|null
      */
     public function getTable()
     {

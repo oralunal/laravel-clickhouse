@@ -226,6 +226,36 @@ class BuilderTest extends TestCase
         $this->assertEquals('SELECT * FROM `table` AS `alias` FINAL', $builder->toSql());
     }
 
+    /**
+     * Only a final option of true writes FINAL. Before, final(false) and a false $isFinal wrote it as well.
+     */
+    public function test_final_is_written_only_when_true(): void
+    {
+        $this->assertEquals('SELECT * FROM `table` FINAL', $this->getBuilder()->from('table')->final()->toSql());
+        $this->assertEquals('SELECT * FROM `table` FINAL', $this->getBuilder()->from('table')->final(true)->toSql());
+        $this->assertEquals('SELECT * FROM `table` FINAL', $this->getBuilder()->from('table', null, true)->toSql());
+        $this->assertEquals('SELECT * FROM `table` FINAL', $this->getBuilder()->table('table', null, true)->toSql());
+        $this->assertEquals('SELECT * FROM `table` FINAL', $this->getBuilder()->from('table')->final(false)->final()->toSql());
+
+        $this->assertEquals('SELECT * FROM `table`', $this->getBuilder()->from('table')->final(false)->toSql());
+        $this->assertEquals('SELECT * FROM `table`', $this->getBuilder()->from('table')->final()->final(false)->toSql());
+        $this->assertEquals('SELECT * FROM `table`', $this->getBuilder()->from('table', null, false)->toSql());
+        $this->assertEquals('SELECT * FROM `table` AS `alias`', $this->getBuilder()->from('table', 'alias', false)->toSql());
+        $this->assertEquals('SELECT * FROM `table`', $this->getBuilder()->table('table', null, false)->toSql());
+        $this->assertEquals('SELECT * FROM `table` AS `alias`', $this->getBuilder()->table('table', 'alias', false)->toSql());
+        $this->assertEquals(
+            'SELECT * FROM `table` AS `t`',
+            $this->getBuilder()->from(function (From $from) {
+                $from->table('table')->as('t')->final(false);
+            })->toSql()
+        );
+
+        $this->assertEquals('SELECT * FROM `table`', $this->getBuilder()->from('table')->toSql());
+        $this->assertEquals('SELECT * FROM `table`', $this->getBuilder()->from('table', null, null)->toSql());
+        $this->assertEquals('SELECT * FROM `table`', $this->getBuilder()->table('table')->toSql());
+        $this->assertNull($this->getBuilder()->from('table')->getFrom()->getFinal());
+    }
+
     public function test_from_with_closure()
     {
         $builder = $this->getBuilder();
@@ -625,7 +655,7 @@ class BuilderTest extends TestCase
         $this->assertEquals('SELECT * FROM `table` WHERE 0 = 1', $builder->toSql());
 
         $builder = $this->getBuilder()->from('table')->whereNotIn('column', []);
-        $this->assertEquals('SELECT * FROM `table`', $builder->toSql());
+        $this->assertEquals('SELECT * FROM `table` WHERE 1 = 1', $builder->toSql());
     }
 
     public function test_where_between()
@@ -892,6 +922,42 @@ class BuilderTest extends TestCase
         $this->assertContains('SELECT * FROM `system`.`tables` WHERE `database` = \'default\' AND `name` = \'builder_test1\'', $sqls);
         $this->assertContains('SELECT * FROM `system`.`tables` WHERE `database` = \'default\' AND `name` = \'builder_test2\'', $sqls);
         $this->assertContains('SELECT * FROM `system`.`tables` WHERE `database` = \'default\' AND `name` = \'builder_test3\'', $sqls);
+    }
+
+    /**
+     * The client-based query builder that toAsyncQueries() needs was removed in 2.0.0; the method used to fail with
+     * the PHP error 'Call to undefined method ...::toQuery()'. The message names replacements that are not
+     * deprecated themselves, unlike getAsyncQueries() and toAsyncSqls().
+     */
+    public function testToAsyncQueriesThrowsABadMethodCallException()
+    {
+        $builder = $this->getBuilder()->from('table1');
+        $builder->asyncWithQuery(fn ($query) => $query->from('table2'));
+
+        $this->expectException(\BadMethodCallException::class);
+        $this->expectExceptionMessage(
+            'toAsyncQueries() needs the client-based query builder that 2.0.0 removed. Run the queries at the same '
+            .'time with Oralunal\\LaravelClickHouse\\Parallel::get([$query, $otherQuery]), or compile each one with toSql().'
+        );
+
+        $builder->toAsyncQueries();
+    }
+
+    public function testGetAsyncQueriesPutsTheLastAddedQueryFirst()
+    {
+        $builder = $this->getBuilder()->from('table1');
+        $second = $this->getBuilder()->from('table2');
+        $third = $this->getBuilder()->from('table3');
+        $nested = $builder->asyncWithQuery();
+
+        $builder->asyncWithQuery($second)->asyncWithQuery($third);
+        $nested->from('table4');
+
+        $this->assertSame([$builder, $third, $second, $nested], $builder->getAsyncQueries());
+        $this->assertSame(
+            ['SELECT * FROM `table1`', 'SELECT * FROM `table3`', 'SELECT * FROM `table2`', 'SELECT * FROM `table4`'],
+            array_column($builder->toAsyncSqls(), 'query')
+        );
     }
 
     public function testJoinWithOnClause()

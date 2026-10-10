@@ -30,9 +30,10 @@
         "oralunal/phpclickhouse-laravel": "*"
     },
     "require-dev": {
+        "larastan/larastan": "^3.13",
+        "laravel/boost": "^2.0",
         "orchestra/testbench": "^11.0",
-        "phpunit/phpunit": "^11.0",
-        "laravel/boost": "^2.0"
+        "phpunit/phpunit": "^11.0"
     },
     "autoload": {
         "psr-4": {

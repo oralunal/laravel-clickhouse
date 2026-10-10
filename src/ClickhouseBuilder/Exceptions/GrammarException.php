@@ -2,6 +2,7 @@
 
 namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions;
 
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinType;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause;
 
 class GrammarException extends Exception
@@ -9,8 +10,9 @@ class GrammarException extends Exception
     public static function wrongJoin(JoinClause $joinClause): self
     {
         $whatMissing = [];
+        $isCrossJoin = (string) $joinClause->getType() === JoinType::CROSS;
 
-        if (is_null($joinClause->getStrict())) {
+        if (is_null($joinClause->getStrict()) && !$isCrossJoin) {
             $whatMissing[] = 'strict';
         }
 
@@ -22,7 +24,7 @@ class GrammarException extends Exception
             $whatMissing[] = 'table or subquery';
         }
 
-        if (is_null($joinClause->getUsing()) && is_null($joinClause->getOnClauses())) {
+        if (is_null($joinClause->getUsing()) && is_null($joinClause->getOnClauses()) && !$isCrossJoin) {
             $whatMissing[] = 'using or on clauses';
         }
 
@@ -34,6 +36,11 @@ class GrammarException extends Exception
     public static function ambiguousJoinKeys(): self
     {
         return new static('You cannot use using and on clauses as join keys for the same join.');
+    }
+
+    public static function wrongCrossJoin(): self
+    {
+        return new static('A CROSS JOIN takes no strictness and no using or on clauses.');
     }
 
     public static function wrongFrom(): self

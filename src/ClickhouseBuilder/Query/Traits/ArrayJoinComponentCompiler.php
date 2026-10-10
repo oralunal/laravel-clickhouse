@@ -24,7 +24,15 @@ trait ArrayJoinComponentCompiler
         }
 
         $result[] = 'ARRAY JOIN';
-        $result[] = $this->wrap($join->getArrayIdentifier());
+        $result[] = implode(', ', array_map(function (array $array) {
+            $compiled = (string) $this->wrap($array['array']);
+
+            if (!is_null($array['alias'])) {
+                $compiled .= " AS {$this->wrap($array['alias'])}";
+            }
+
+            return $compiled;
+        }, $join->getArrays()));
 
         return implode(' ', $result);
     }

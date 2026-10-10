@@ -2,13 +2,17 @@
 
 namespace Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables;
 
+use InvalidArgumentException;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression as BuilderExpression;
 use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\AddsColumns;
 use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Column;
 use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Element;
 use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Engine;
 use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Exceptions\IncompleteClickHouseDDLException;
+use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Expression;
 use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Syntax;
 use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\TTL;
+use Oralunal\LaravelClickHouse\Grammar;
 
 class MergeTree implements Element
 {
@@ -36,15 +40,23 @@ class MergeTree implements Element
         return $this->compileHead() . ' ' . $this->compileColumns() . "\n" . $this->compileBottom();
     }
 
+    /**
+     * Compile CREATE TABLE [IF NOT EXISTS] <name> [ON CLUSTER '<cluster>'], with
+     * the table name written by Syntax::quoteTableName(), so that a database
+     * name may qualify it (analytics.events), and the cluster name as an
+     * escaped string literal.
+     *
+     * @return string
+     */
     protected function compileHead(): string
     {
         $ddl = ['CREATE TABLE'];
         if ($this->ifNotExistsClause) {
             $ddl[] = 'IF NOT EXISTS';
         }
-        $ddl[] = Syntax::escapeName($this->name);
+        $ddl[] = Syntax::quoteTableName($this->name);
         if ($this->onCluster) {
-            $ddl[] = "ON CLUSTER '$this->onCluster'";
+            $ddl[] = 'ON CLUSTER ' . Syntax::quoteString($this->onCluster);
         }
         return implode(' ', $ddl);
     }
@@ -70,14 +82,40 @@ class MergeTree implements Element
         if ($this->ttl) {
             $ddl[] = 'TTL ' . $this->ttl->compile();
         }
-        if ($this->settings) {
-            $settings = [];
-            foreach ($this->settings as $settingName => $settingValue) {
-                $settings[] = "$settingName = $settingValue";
-            }
+        $settings = $this->compileSettings();
+        if ($settings) {
             $ddl[] = 'SETTINGS ' . implode(', ', $settings);
         }
         return implode("\n", $ddl);
+    }
+
+    /**
+     * Compile each setting as `<name> = <value>`.
+     *
+     * The name and the value are checked and written by the query builder's
+     * settings writer (Grammar::compileSettingsComponent()), which gives
+     * `SETTINGS <name>=<value>` for one setting: a name must be a plain
+     * identifier, a bool is written as 1 or 0, an int as a number, a float
+     * with every digit, a string as an escaped string literal and an
+     * Expression as given. A null value is left out.
+     *
+     * @return list<string>
+     * @throws InvalidArgumentException When a setting name is not a plain identifier or a value has an unsupported type
+     */
+    protected function compileSettings(): array
+    {
+        $grammar = new Grammar();
+        $settings = [];
+        foreach ($this->settings as $settingName => $settingValue) {
+            if ($settingValue instanceof Expression) {
+                $settingValue = new BuilderExpression($settingValue->value);
+            }
+            $compiled = $grammar->compileSettingsComponent(null, [$settingName => $settingValue]);
+            if ($compiled !== '') {
+                $settings[] = "$settingName = " . substr($compiled, strlen("SETTINGS $settingName="));
+            }
+        }
+        return $settings;
     }
 
     protected function validate(): void
@@ -179,6 +217,12 @@ class MergeTree implements Element
         return $this;
     }
 
+    /**
+     * Set the table settings: SETTINGS <name> = <value>, ... (see compileSettings()).
+     *
+     * @param array<string, bool|int|float|string|Expression|null> $settings
+     * @return $this
+     */
     public function settings(array $settings): static
     {
         $this->settings = $settings;
