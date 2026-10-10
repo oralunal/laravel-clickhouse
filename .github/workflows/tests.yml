@@ -8,6 +8,11 @@ on:
 
 jobs:
   phpunit:
+    # The whole suite on two standalone servers, which GitHub's service
+    # containers give: they cannot mount the cluster config, so the tests
+    # gated by CLICKHOUSE_CLUSTER_AVAILABLE are skipped here and run in the
+    # cluster job.
+    name: ClickHouse ${{ matrix.clickhouse }} · two standalone servers (cluster tests skipped) · PHP ${{ matrix.php }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -82,6 +87,7 @@ jobs:
     # The whole suite on the two-node test cluster of docker-compose.test.yaml
     # (company_cluster, its macros and ZooKeeper), as it runs locally, so the
     # tests gated by CLICKHOUSE_CLUSTER_AVAILABLE run too.
+    name: ClickHouse ${{ matrix.clickhouse }} · two-node cluster with ZooKeeper (all tests) · PHP ${{ matrix.php }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
