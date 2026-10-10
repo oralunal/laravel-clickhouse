@@ -9,7 +9,7 @@ use Oralunal\LaravelClickHouse\Console\InstallSkillsCommand;
 
 class InstallSkillsCommandTest extends TestCase
 {
-    private const SKILLS = ['lc-upgrade-2x-to-3x', 'plc-upgrade-1x-to-2x'];
+    private const SKILLS = ['lc-upgrade-1x-to-4x', 'lc-upgrade-2x-to-4x', 'lc-upgrade-3x-to-4x'];
 
     private string $project;
 
@@ -43,11 +43,13 @@ class InstallSkillsCommandTest extends TestCase
         $this->files->ensureDirectoryExists($this->project . '/.cursor');
 
         $this->artisan('clickhouse:install-skills')
-            ->expectsOutputToContain('.claude/skills/lc-upgrade-2x-to-3x')
-            ->expectsOutputToContain('.claude/skills/plc-upgrade-1x-to-2x')
-            ->expectsOutputToContain('.cursor/skills/lc-upgrade-2x-to-3x')
-            ->expectsOutputToContain('.cursor/skills/plc-upgrade-1x-to-2x')
-            ->expectsOutputToContain('/lc-upgrade-2x-to-3x to upgrade from 2.x to 3.x')
+            ->expectsOutputToContain('.claude/skills/lc-upgrade-1x-to-4x')
+            ->expectsOutputToContain('.claude/skills/lc-upgrade-2x-to-4x')
+            ->expectsOutputToContain('.claude/skills/lc-upgrade-3x-to-4x')
+            ->expectsOutputToContain('.cursor/skills/lc-upgrade-1x-to-4x')
+            ->expectsOutputToContain('.cursor/skills/lc-upgrade-2x-to-4x')
+            ->expectsOutputToContain('.cursor/skills/lc-upgrade-3x-to-4x')
+            ->expectsOutputToContain('/lc-upgrade-3x-to-4x to upgrade from 3.x to 4.x')
             ->assertSuccessful();
 
         $this->assertInstalled('.claude/skills');
@@ -67,7 +69,7 @@ class InstallSkillsCommandTest extends TestCase
 
     public function testReinstallReplacesTheSkillDirectory(): void
     {
-        $stale = $this->project . '/.claude/skills/lc-upgrade-2x-to-3x/stale.md';
+        $stale = $this->project . '/.claude/skills/lc-upgrade-3x-to-4x/stale.md';
         $this->files->ensureDirectoryExists(dirname($stale));
         $this->files->put($stale, 'old');
 
@@ -75,6 +77,62 @@ class InstallSkillsCommandTest extends TestCase
 
         $this->assertFileDoesNotExist($stale);
         $this->assertInstalled('.claude/skills');
+    }
+
+    public function testRemovesTheSkillsThatEarlierReleasesInstalled(): void
+    {
+        foreach (InstallSkillsCommand::RETIRED_SKILLS as $retired) {
+            $this->files->ensureDirectoryExists($this->project . "/.claude/skills/{$retired}");
+            $this->files->put($this->project . "/.claude/skills/{$retired}/SKILL.md", "---\nname: {$retired}\ndescription: Old.\n---\n\n# Old\n");
+        }
+
+        $this->artisan('clickhouse:install-skills', ['--agent' => ['claude_code']])
+            ->expectsOutputToContain('.claude/skills/plc-upgrade-1x-to-2x')
+            ->expectsOutputToContain('.claude/skills/lc-upgrade-2x-to-3x')
+            ->assertSuccessful();
+
+        foreach (InstallSkillsCommand::RETIRED_SKILLS as $retired) {
+            $this->assertDirectoryDoesNotExist($this->project . "/.claude/skills/{$retired}");
+        }
+        $this->assertInstalled('.claude/skills');
+    }
+
+    public function testKeepsADirectoryOfARetiredNameThatIsNotThePackagesSkill(): void
+    {
+        $own = $this->project . '/.claude/skills/lc-upgrade-2x-to-3x';
+        $this->files->ensureDirectoryExists($own);
+        $this->files->put($own . '/SKILL.md', "---\nname: my-own-skill\ndescription: Mine.\n---\n");
+        $this->files->ensureDirectoryExists($this->project . '/.cursor/skills/plc-upgrade-1x-to-2x');
+        $this->files->put($this->project . '/.cursor/skills/plc-upgrade-1x-to-2x/notes.md', 'mine');
+
+        $this->artisan('clickhouse:install-skills', ['--agent' => ['claude_code', 'cursor']])->assertSuccessful();
+
+        $this->assertFileExists($own . '/SKILL.md');
+        $this->assertFileExists($this->project . '/.cursor/skills/plc-upgrade-1x-to-2x/notes.md');
+    }
+
+    public function testTheRetiredSkillsAreNoLongerShipped(): void
+    {
+        foreach (InstallSkillsCommand::RETIRED_SKILLS as $retired) {
+            $this->assertDirectoryDoesNotExist(dirname(__DIR__, 2) . "/resources/skills/{$retired}");
+        }
+    }
+
+    /**
+     * The upgrades from 1.x and 2.x hand the 4.0 changes to the upgrade from 3.x, which the package ships next to
+     * them and in vendor/.
+     */
+    public function testTheUpgradesFromOneAndTwoPointAtTheUpgradeFromThree(): void
+    {
+        $skills = dirname(__DIR__, 2) . '/resources/skills';
+        $this->assertFileExists($skills . '/lc-upgrade-3x-to-4x/SKILL.md');
+
+        foreach (['lc-upgrade-1x-to-4x', 'lc-upgrade-2x-to-4x'] as $skill) {
+            $contents = $this->files->get("{$skills}/{$skill}/SKILL.md");
+
+            $this->assertStringContainsString('vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-3x-to-4x/SKILL.md', $contents, $skill);
+            $this->assertStringContainsString('composer require oralunal/laravel-clickhouse:^4.0', $contents, $skill);
+        }
     }
 
     public function testFailsWithoutAnyAgentWhenNotInteractive(): void

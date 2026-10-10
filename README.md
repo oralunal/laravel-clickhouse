@@ -16,7 +16,7 @@ this package's namespace; see [Credits](#credits).
 - `Oralunal\LaravelClickHouse\Migration` base class for ClickHouse DDL migrations (single-node and cluster)
 - Laravel's schema builder: `Schema::create()` with ClickHouse column types, engines, sorting keys, partitions, TTLs, settings and data-skipping indexes, and `Schema::table()` with `ALTER TABLE` statements and `change()`
 - `php artisan schema:dump [--prune]` support for squashing migrations into a schema file
-- `php artisan clickhouse:install-skills` installs coding-agent skills: `/lc-upgrade-2x-to-3x` for the 2.x → 3.x upgrade and `/plc-upgrade-1x-to-2x` for 1.x → 2.x
+- `php artisan clickhouse:install-skills` installs coding-agent skills that upgrade an application to 4.x: `/lc-upgrade-3x-to-4x`, `/lc-upgrade-2x-to-4x` and `/lc-upgrade-1x-to-4x`
 - Query builder integration with `settings()`, `chunk()`, `exists()`, `count()` and the aggregates, `first()`, `value()`, `pluck()`, `insertFiles()`, and ClickHouse-specific grammar
 - ClickHouse SQL in the query builder: `PREWHERE`, `WITH [RECURSIVE]`, `SAMPLE ... OFFSET`, `ARRAY JOIN` over several arrays, `SEMI`/`ANTI`/`ASOF`/`CROSS` joins, `INTERSECT`/`EXCEPT`, `IS NULL` and `empty()` checks; dates, booleans and enums as query values
 - Laravel's where methods in the query builder: `whereColumn()`, `whereExists()`, `whereAll()`/`whereAny()`/`whereNone()`, `whereDate()` and the other date conditions, `whereLike()`, `when()`, `latest()` and `inRandomOrder()`
@@ -139,18 +139,18 @@ of 24.8 where one exists:
 
 ## Installation
 
-Upgrading from 2.x? Until 2.0.2 the package was published as
-`oralunal/phpclickhouse-laravel`, with the `PhpClickHouseLaravel` namespace.
-Switch the package and install the coding-agent skills:
+Upgrading from 3.x? Update the package and install the coding-agent skills:
 
 ```sh
-composer remove oralunal/phpclickhouse-laravel --no-update
-composer require oralunal/laravel-clickhouse:^3.0 --with-all-dependencies
+composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
 php artisan clickhouse:install-skills
 ```
 
-Then run `/lc-upgrade-2x-to-3x` in your coding agent. On 1.x, run
-`/plc-upgrade-1x-to-2x` before it. To upgrade by hand, see [UPGRADE.md](UPGRADE.md).
+Then run `/lc-upgrade-3x-to-4x` in your coding agent. Until 2.0.2 the package
+was published as `oralunal/phpclickhouse-laravel`, with the
+`PhpClickHouseLaravel` namespace: from 2.x, run `/lc-upgrade-2x-to-4x`, and
+from 1.x, `/lc-upgrade-1x-to-4x`, after switching the package as
+[UPGRADE.md](UPGRADE.md) shows. To upgrade by hand, see [UPGRADE.md](UPGRADE.md).
 
 **1.** Install via composer:
 
