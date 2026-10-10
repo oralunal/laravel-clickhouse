@@ -3,6 +3,7 @@
 namespace Tests\Unit\ClickhouseBuilder;
 
 use PHPUnit\Framework\TestCase;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\From;
 
@@ -33,6 +34,21 @@ class FromTest extends TestCase
         $this->assertEquals('merge(database, \'test-.*\')', $from->getTable());
     }
 
+    /**
+     * The regular expression is an escaped string literal: ClickHouse reads '^events_\\d+' back as ^events_\d+,
+     * and a single quote no longer ends the literal.
+     */
+    public function testMergeEscapesTheRegularExpression(): void
+    {
+        $from = new From($this->getBuilder());
+
+        $from->merge('database', '^events_\d+');
+        $this->assertSame("merge(database, '^events_\\\\d+')", (string) $from->getTable());
+
+        $from->merge('database', "it's");
+        $this->assertSame("merge(database, 'it\\'s')", (string) $from->getTable());
+    }
+
     public function testRemote()
     {
         $from = new From($this->getBuilder());
@@ -42,7 +58,19 @@ class FromTest extends TestCase
 
         $from->remote('test', 'database', 'table', 'default', 'password');
 
-        $this->assertEquals('remote(\'test\', database, table, default, password)', $from->getTable());
+        $this->assertEquals('remote(\'test\', database, table, \'default\', \'password\')', $from->getTable());
+    }
+
+    /**
+     * ClickHouse takes the user and the password of remote() only as string literals (BAD_ARGUMENTS otherwise), so
+     * they are quoted, and every string argument is escaped.
+     */
+    public function testRemoteWritesTheAddressesUserAndPasswordAsEscapedStringLiterals(): void
+    {
+        $from = new From($this->getBuilder());
+        $from->remote('host:9000', 'analytics', 'events', 'reader', 'it\'s\\');
+
+        $this->assertSame("remote('host:9000', analytics, events, 'reader', 'it\\'s\\\\')", (string) $from->getTable());
     }
 
     public function testQuery()
@@ -67,5 +95,59 @@ class FromTest extends TestCase
         $from = $from->query($builder);
         $this->assertInstanceOf(From::class, $from);
         $this->assertEquals('(SELECT `another_column` FROM `another_table`)', $from->getTable()->getValue());
+    }
+
+    public function testGetQueryBuilderOfABuilder(): void
+    {
+        $subQuery = $this->getBuilder()->select('column')->from('table');
+        $builder = $this->getBuilder()->from($subQuery);
+
+        $this->assertSame($subQuery, $builder->getFrom()->getQueryBuilder());
+        $this->assertNull($builder->getFrom()->getSubQuery());
+        $this->assertEquals('SELECT * FROM (SELECT `column` FROM `table`)', $builder->toSql());
+
+        $from = new From($this->getBuilder());
+        $from->query($subQuery);
+
+        $this->assertSame($subQuery, $from->getQueryBuilder());
+    }
+
+    public function testGetQueryBuilderOfAClosure(): void
+    {
+        $builder = $this->getBuilder()->from(function (From $from) {
+            $from->query()->select('column')->from('table');
+        });
+
+        $this->assertInstanceOf(TestBuilder::class, $builder->getFrom()->getQueryBuilder());
+        $this->assertSame($builder->getFrom()->getSubQuery(), $builder->getFrom()->getQueryBuilder());
+        $this->assertEquals('SELECT * FROM (SELECT `column` FROM `table`)', $builder->toSql());
+
+        $subQuery = $this->getBuilder()->select('column')->from('table');
+        $builder = $this->getBuilder()->from(function (From $from) use ($subQuery) {
+            $from->query($subQuery)->as('alias');
+        });
+
+        $this->assertSame($subQuery, $builder->getFrom()->getQueryBuilder());
+        $this->assertEquals('SELECT * FROM (SELECT `column` FROM `table`) AS `alias`', $builder->toSql());
+
+        $from = new From($this->getBuilder());
+        $from->query(function (BaseBuilder $query) {
+            $query->select('column')->from('table');
+        });
+
+        $this->assertInstanceOf(TestBuilder::class, $from->getQueryBuilder());
+        $this->assertEquals('SELECT `column` FROM `table`', $from->getQueryBuilder()->toSql());
+    }
+
+    public function testGetQueryBuilderOfATableIsNull(): void
+    {
+        $this->assertNull($this->getBuilder()->from('table')->getFrom()->getQueryBuilder());
+        $this->assertNull($this->getBuilder()->from(new Expression('numbers(3)'))->getFrom()->getQueryBuilder());
+
+        $from = new From($this->getBuilder());
+        $from->query($this->getBuilder()->select('column')->from('table'));
+        $from->table('table');
+
+        $this->assertNull($from->getQueryBuilder());
     }
 }

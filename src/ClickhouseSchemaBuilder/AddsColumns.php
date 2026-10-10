@@ -29,19 +29,48 @@ trait AddsColumns
         return $this->column($name, $type, $params);
     }
 
+    /**
+     * Add an Enum column.
+     *
+     * An array with at least one string key maps each name to its number:
+     * ['a' => 1, 'b' => 2] gives Enum('a' = 1, 'b' = 2). Every key is then a
+     * name, an integer key too, because PHP turns a numeric string key into
+     * an integer: ['active' => 1, '200' => 2] gives Enum('active' = 1,
+     * '200' = 2). Every value must then be an integer or a string of one.
+     *
+     * An array whose keys are all integers is a list of names, written from
+     * its values in order whatever its keys, as Laravel's enum() reads its
+     * allowed values: [200, 404] and array_unique([200, 404, 200]) give
+     * Enum('200', '404'), and ['200' => 1, '404' => 2] gives Enum('1', '2').
+     * To number names that are all numbers, write the type yourself:
+     * column('status', "Enum8('200' = 1, '404' = 2)").
+     *
+     * The names are written as escaped string literals.
+     *
+     * @param string $name
+     * @param array<int|string, int|string> $values
+     * @return Column
+     * @throws InvalidClickHouseDDLException When there is no value, or a number is not an integer
+     */
     public function enum(string $name, array $values): Column
     {
         if (empty($values)) {
             throw new InvalidClickHouseDDLException("Enum $name must contain at least one value");
         }
         $values0 = [];
-        if (is_string(array_key_first($values))) {
+        if (array_any($values, fn (mixed $index, int|string $value): bool => is_string($value))) {
             foreach ($values as $value => $index) {
-                $values0[] = "'$value' = $index";
+                if (!is_int($index) && !(is_string($index) && preg_match('/\A-?\d+\z/', $index) === 1)) {
+                    throw new InvalidClickHouseDDLException(
+                        "Enum $name must give the value '$value' an integer."
+                        . ' An array with a string key maps each name to its number, an integer key being a name too.'
+                    );
+                }
+                $values0[] = Syntax::quoteString((string) $value) . " = $index";
             }
         } else {
             foreach ($values as $value) {
-                $values0[] = "'$value'";
+                $values0[] = Syntax::quoteString((string) $value);
             }
         }
         return $this->column($name, 'Enum(' . implode(', ', $values0) . ')');

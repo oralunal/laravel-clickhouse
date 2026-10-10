@@ -5,6 +5,7 @@ namespace Tests\Unit\ClickhouseBuilder;
 use PHPUnit\Framework\TestCase;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\GrammarException;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Column;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\DateTimePrecision;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
@@ -47,7 +48,10 @@ class GrammarTest extends TestCase
         $value = $grammar->wrap(10);
         $this->assertEquals(10, $value);
 
-        $this->assertNull($grammar->wrap(new \stdClass()));
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Cannot render a value of type stdClass in a ClickHouse query.');
+
+        $grammar->wrap(new \stdClass());
     }
 
     public function testCompileInsert()
@@ -64,6 +68,80 @@ class GrammarTest extends TestCase
         ]);
 
         $this->assertEquals("INSERT INTO `table` (`column`) FORMAT Values ('value'), ('value 2'), ('value 3'), (null)", $sql);
+    }
+
+    public function testCompileInsertWritesExactFloatsNamedNonFiniteFloatsAndDates()
+    {
+        $builder = $this->getBuilder()->table('table');
+        $grammar = new Grammar();
+        $date = new \DateTimeImmutable('2024-01-02 03:04:05.25', new \DateTimeZone('Asia/Tokyo'));
+
+        $sql = $grammar->compileInsert($builder, [
+            ['f' => 1 / 3, 'g' => [0.1, NAN], 'd' => $date],
+            ['f' => -INF, 'g' => [], 'd' => null],
+        ]);
+
+        $this->assertEquals(
+            "INSERT INTO `table` (`f`, `g`, `d`) FORMAT Values (0.3333333333333333, [0.1, nan], '2024-01-02 03:04:05'), (-inf, [], null)",
+            $sql
+        );
+
+        $grammar->setDateTimePrecision(DateTimePrecision::MICROSECOND);
+
+        $this->assertEquals(
+            "INSERT INTO `table` (`d`) FORMAT Values ('2024-01-02 03:04:05.250000')",
+            $grammar->compileInsert($builder, [['d' => $date]])
+        );
+    }
+
+    public function testFormatDateTimeFollowsThePrecision()
+    {
+        $grammar = new Grammar();
+        $fraction = new \DateTimeImmutable('2024-01-02 03:04:05.123456', new \DateTimeZone('UTC'));
+        $whole = new \DateTimeImmutable('2024-01-02 03:04:05', new \DateTimeZone('UTC'));
+        $istanbul = new \DateTimeImmutable('2024-01-02 03:04:05.5', new \DateTimeZone('Europe/Istanbul'));
+
+        $this->assertSame('second', $grammar->getDateTimePrecision());
+        $this->assertSame('2024-01-02 03:04:05', $grammar->formatDateTime($fraction));
+        $this->assertSame('2024-01-02 03:04:05', $grammar->formatDateTime($whole));
+        $this->assertSame("'2024-01-02 03:04:05'", $grammar->wrap($fraction));
+        $this->assertSame("'2024-01-02 03:04:05'", $grammar->wrap($istanbul));
+
+        $grammar->setDateTimePrecision(new DateTimePrecision(DateTimePrecision::MICROSECOND));
+
+        $this->assertSame('microsecond', $grammar->getDateTimePrecision());
+        $this->assertSame('2024-01-02 03:04:05.123456', $grammar->formatDateTime($fraction));
+        $this->assertSame('2024-01-02 03:04:05', $grammar->formatDateTime($whole), 'a whole second never gets .000000');
+        $this->assertSame("'2024-01-02 03:04:05.123456'", $grammar->wrap($fraction));
+        $this->assertSame("'2024-01-02 03:04:05.500000'", $grammar->wrap($istanbul), 'the value keeps its own time zone');
+        $this->assertEquals(
+            "SELECT * FROM `t` WHERE `d` = '2024-01-02 03:04:05.123456' AND `d` IN ('2024-01-02 03:04:05.123456', '2024-01-02 03:04:05')",
+            $grammar->compileSelect($this->getBuilder()->from('t')->where('d', $fraction)->whereIn('d', [$fraction, $whole]))
+        );
+
+        $grammar->setDateTimePrecision(DateTimePrecision::SECOND);
+
+        $this->assertSame('2024-01-02 03:04:05', $grammar->formatDateTime($fraction));
+    }
+
+    public function testSetDateTimePrecisionRejectsOtherPrecisions()
+    {
+        $grammar = new Grammar();
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage("Invalid datetime precision [millisecond]: use 'second' or 'microsecond'.");
+
+        $grammar->setDateTimePrecision('millisecond');
+    }
+
+    public function testValuesInConditionsKeepEveryDigitOfAFloat()
+    {
+        $grammar = new Grammar();
+
+        $this->assertEquals(
+            'SELECT * FROM `t` WHERE `v` = 0.3333333333333333 AND `w` IN (0.1, 2.0) AND `x` BETWEEN 1.0E-7 AND 1.0E+25',
+            $grammar->compileSelect($this->getBuilder()->from('t')->where('v', 1 / 3)->whereIn('w', [0.1, 2.0])->whereBetween('x', [1e-7, 1e25]))
+        );
     }
 
     public function testCompileInsertWithoutFrom()

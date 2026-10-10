@@ -2,6 +2,8 @@
 
 namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query;
 
+use Closure;
+use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use function Oralunal\LaravelClickHouse\ClickhouseBuilder\tp;
 
 class Column
@@ -9,7 +11,7 @@ class Column
     /**
      * Column name.
      *
-     * @var Identifier|Expression|null
+     * @var Identifier|Expression|ExpressionContract|Column|null
      */
     private $columnName;
 
@@ -61,7 +63,10 @@ class Column
     /**
      * Set column name.
      *
-     * @param string|Expression $columnName
+     * A string is a column name, quoted part by part. An Expression or a Laravel database expression, such as
+     * DB::raw(), is raw SQL, written as it is.
+     *
+     * @param string|Closure|Expression|ExpressionContract $columnName
      *
      * @return Column
      */
@@ -129,7 +134,7 @@ class Column
     /**
      * Get column name.
      *
-     * @return Identifier|Expression|null
+     * @return Identifier|Expression|ExpressionContract|Column|null
      */
     public function getColumnName()
     {

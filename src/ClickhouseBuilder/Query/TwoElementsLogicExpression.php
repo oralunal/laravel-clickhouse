@@ -73,13 +73,17 @@ class TwoElementsLogicExpression
     /**
      * Operator between two elements.
      *
+     * The operator is read in any letter case, as Laravel code writes it: 'like' and 'not in' are LIKE and NOT IN.
+     *
      * @param string $operator
+     *
+     * @throws \UnexpectedValueException When the Operator enum has no such operator, in any letter case
      *
      * @return $this
      */
     public function operator(string $operator)
     {
-        $this->operator = new Operator($operator);
+        $this->operator = $this->toOperator($operator);
 
         return $this;
     }
@@ -101,15 +105,38 @@ class TwoElementsLogicExpression
     /**
      * Set concatenate operator.
      *
+     * The operator is read in any letter case, as Laravel code writes its booleans: 'and' and 'or' are AND and OR.
+     *
      * @param string $operator
+     *
+     * @throws \UnexpectedValueException When the Operator enum has no such operator, in any letter case
      *
      * @return $this
      */
     public function concatOperator(string $operator)
     {
-        $this->concatenationOperator = new Operator($operator);
+        $this->concatenationOperator = $this->toOperator($operator);
 
         return $this;
+    }
+
+    /**
+     * Make the Operator of an operator given in any letter case.
+     *
+     * The operator is upper-cased when the Operator enum has the upper-case form, so a symbol such as = or -> is
+     * kept as it is, and the exception for an unknown operator names it as it was given.
+     *
+     * @param string $operator
+     *
+     * @throws \UnexpectedValueException When the Operator enum has no such operator, in any letter case
+     *
+     * @return Operator
+     */
+    protected function toOperator(string $operator): Operator
+    {
+        $upperCaseOperator = strtoupper($operator);
+
+        return new Operator(Operator::isValid($upperCaseOperator) ? $upperCaseOperator : $operator);
     }
 
     /**

@@ -4,6 +4,7 @@ namespace Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Traits;
 
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\GrammarException;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder as Builder;
+use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\JoinType;
 use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause;
 
 trait JoinComponentCompiler
@@ -43,6 +44,11 @@ trait JoinComponentCompiler
                 $result[] = 'AS';
                 $result[] = $this->wrap($join->getAlias());
             }
+
+            if ($this->isCrossJoin($join)) {
+                continue;
+            }
+
             if (!is_null($join->getUsing())) {
                 $result[] = 'USING';
                 $result[] = implode(', ', array_map(function ($column) {
@@ -66,6 +72,22 @@ trait JoinComponentCompiler
      */
     private function verifyJoin(JoinClause $joinClause): void
     {
+        if ($this->isCrossJoin($joinClause)) {
+            if (is_null($joinClause->getTable())) {
+                throw GrammarException::wrongJoin($joinClause);
+            }
+
+            if (
+                !is_null($joinClause->getStrict()) ||
+                !is_null($joinClause->getUsing()) ||
+                !is_null($joinClause->getOnClauses())
+            ) {
+                throw GrammarException::wrongCrossJoin();
+            }
+
+            return;
+        }
+
         if (
             is_null($joinClause->getTable()) ||
             (is_null($joinClause->getUsing()) && is_null($joinClause->getOnClauses()))
@@ -74,5 +96,17 @@ trait JoinComponentCompiler
         } elseif (!is_null($joinClause->getUsing()) && !is_null($joinClause->getOnClauses())) {
             throw GrammarException::ambiguousJoinKeys();
         }
+    }
+
+    /**
+     * Determines whether the join is a CROSS JOIN, which takes no strictness and no join keys.
+     *
+     * @param JoinClause $joinClause
+     *
+     * @return bool
+     */
+    private function isCrossJoin(JoinClause $joinClause): bool
+    {
+        return (string) $joinClause->getType() === JoinType::CROSS;
     }
 }

@@ -161,8 +161,18 @@ class SchemaDumpTest extends TestCase
         $this->assertEquals([['id' => 1]], $target->select('SELECT id FROM a_events_view')->rows());
     }
 
+    /**
+     * Needs two servers: with both node connections on one server, as when the suite runs against a single
+     * ClickHouse container, the second node's CREATE finds the tables of the first and fails.
+     */
     public function testLoadWritesToEveryClusterNode(): void
     {
+        if (env('CLICKHOUSE_HOST', '127.0.0.1') . ':' . env('CLICKHOUSE_PORT', '18123')
+            === env('CLICKHOUSE2_HOST', '127.0.0.1') . ':' . env('CLICKHOUSE2_PORT', '18124')
+        ) {
+            $this->markTestSkipped('Both node connections point at one ClickHouse server; set CLICKHOUSE2_PORT to a second one');
+        }
+
         $path = $this->workDir . '/schema.sql';
         Artisan::call('schema:dump', ['--database' => self::SOURCE, '--path' => $path]);
 

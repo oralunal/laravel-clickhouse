@@ -15,9 +15,10 @@ composer install
 composer test
 ```
 
-See [docs/howto_run_local_test.md](docs/howto_run_local_test.md) for
-prerequisites, cluster-test notes, and using `vendor/bin/testbench` during
-development. There is no `php artisan` in this repo — it is a package, so use
+See [Contribute](https://laravel-clickhouse.oralunal.com/reference/contributing)
+(`docs/reference/contributing.md`) for prerequisites, cluster-test notes, the
+documentation site, and using `vendor/bin/testbench` during development.
+There is no `php artisan` in this repo — it is a package, so use
 `vendor/bin/testbench <artisan-command>` instead.
 
 ## Branches
@@ -52,11 +53,25 @@ vendor/bin/phpunit
 `phpunit.xml` sets `failOnRisky` and `failOnWarning`, so risky tests and
 warnings are failures — not noise to ignore.
 
-`ClusterTest` needs the `company_cluster` definition and `{replica}` /
-`{shard}` macros mounted from `tests/docker/clickhouse0*/config.xml`. These run
-locally by default (`CLICKHOUSE_CLUSTER_AVAILABLE=1`) but are gated off in CI,
-where service containers cannot mount the configs. **If you change cluster
-behavior, verify it locally** — CI will not catch it.
+The tests that need the test cluster, such as `ClusterTest`, need the
+`company_cluster` definition and `{replica}` / `{shard}` macros mounted from
+`tests/docker/clickhouse0*/config.xml`, and ZooKeeper. They run when
+`CLICKHOUSE_CLUSTER_AVAILABLE=1`, as `phpunit.xml` sets it, so locally they
+run by default. CI runs the suite in two jobs, each on ClickHouse 24.8, 26.3
+and 26.8: the `phpunit` job uses two standalone service containers, which
+cannot mount the configs, so it flips the value to `0` and these tests are
+skipped; the `cluster` job starts `docker-compose.test.yaml` with
+`CLICKHOUSE_VERSION` set to the release and runs them.
+
+`docker-compose.test.yaml` runs ClickHouse 24.8 unless `CLICKHOUSE_VERSION`
+names another release. To switch a local cluster to another release, remove
+it first: `up -d` alone keeps the data volumes, and 24.8 cannot load the
+tables that 26.3 or 26.8 wrote there.
+
+```bash
+docker compose -f docker-compose.test.yaml down -v
+CLICKHOUSE_VERSION=26.8 docker compose -f docker-compose.test.yaml up -d
+```
 
 Unit tests under `tests/Unit/` cover grammar and builder SQL generation and run
 without Docker.
