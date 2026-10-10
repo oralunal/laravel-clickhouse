@@ -716,7 +716,8 @@ abstract class BaseBuilder
      * @param string|null         $strict All, any, semi, anti or asof
      * @param string|null         $type   Inner, left, right, full, cross or asof
      * @param array|null          $using  Columns to use for join
-     * @param bool                $global Global distribution for right table
+     * @param bool                $global Global distribution for right table: true adds GLOBAL; false keeps what
+     *                                    a closure set with JoinClause::distributed()
      * @param string|null         $alias  Alias of joined table or sub-query
      *
      * @return static
@@ -773,7 +774,9 @@ abstract class BaseBuilder
             $join->as($alias);
         }
 
-        $join->distributed($global);
+        if ($global) {
+            $join->distributed(true);
+        }
 
         if (!is_null($join->getSubQuery())) {
             $join->query($join->getSubQuery());

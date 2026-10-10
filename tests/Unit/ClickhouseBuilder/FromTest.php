@@ -34,6 +34,21 @@ class FromTest extends TestCase
         $this->assertEquals('merge(database, \'test-.*\')', $from->getTable());
     }
 
+    /**
+     * The regular expression is an escaped string literal: ClickHouse reads '^events_\\d+' back as ^events_\d+,
+     * and a single quote no longer ends the literal.
+     */
+    public function testMergeEscapesTheRegularExpression(): void
+    {
+        $from = new From($this->getBuilder());
+
+        $from->merge('database', '^events_\d+');
+        $this->assertSame("merge(database, '^events_\\\\d+')", (string) $from->getTable());
+
+        $from->merge('database', "it's");
+        $this->assertSame("merge(database, 'it\\'s')", (string) $from->getTable());
+    }
+
     public function testRemote()
     {
         $from = new From($this->getBuilder());
@@ -43,7 +58,19 @@ class FromTest extends TestCase
 
         $from->remote('test', 'database', 'table', 'default', 'password');
 
-        $this->assertEquals('remote(\'test\', database, table, default, password)', $from->getTable());
+        $this->assertEquals('remote(\'test\', database, table, \'default\', \'password\')', $from->getTable());
+    }
+
+    /**
+     * ClickHouse takes the user and the password of remote() only as string literals (BAD_ARGUMENTS otherwise), so
+     * they are quoted, and every string argument is escaped.
+     */
+    public function testRemoteWritesTheAddressesUserAndPasswordAsEscapedStringLiterals(): void
+    {
+        $from = new From($this->getBuilder());
+        $from->remote('host:9000', 'analytics', 'events', 'reader', 'it\'s\\');
+
+        $this->assertSame("remote('host:9000', analytics, events, 'reader', 'it\\'s\\\\')", (string) $from->getTable());
     }
 
     public function testQuery()

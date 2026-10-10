@@ -114,6 +114,10 @@ class From
     /**
      * Use remote function to get data from remote server without table with Distributed engine.
      *
+     * The addresses, the user and the password are written as escaped string literals, which ClickHouse requires for
+     * the user and the password: remote('host:9000', db, events, 'reader', 'it\'s'). The database and the table are
+     * written as given.
+     *
      * @param string      $expression
      * @param string      $database
      * @param string      $table
@@ -124,14 +128,14 @@ class From
      */
     public function remote(string $expression, string $database, string $table, ?string $user = null, ?string $password = null): self
     {
-        $remote = "remote('{$expression}', {$database}, {$table}";
+        $remote = 'remote(' . $this->quoteString($expression) . ", {$database}, {$table}";
 
         if (!is_null($user)) {
-            $remote .= ", {$user}";
+            $remote .= ', ' . $this->quoteString($user);
         }
 
         if (!is_null($password)) {
-            $remote .= ", {$password}";
+            $remote .= ', ' . $this->quoteString($password);
         }
 
         $remote .= ')';
@@ -143,6 +147,9 @@ class From
      * Creates temp table with Merge engine
      * Structure takes from first table in regular expression.
      *
+     * The regular expression is written as an escaped string literal, which ClickHouse reads back as given:
+     * merge(db, '^events_\\d+'). The database is written as given.
+     *
      * @param string $database
      * @param string $regexp
      *
@@ -150,7 +157,19 @@ class From
      */
     public function merge(string $database, string $regexp): self
     {
-        return $this->table(new Expression("merge({$database}, '{$regexp}')"));
+        return $this->table(new Expression("merge({$database}, " . $this->quoteString($regexp) . ')'));
+    }
+
+    /**
+     * Write a value as a ClickHouse string literal, with its backslashes and single quotes escaped.
+     *
+     * @param string $value
+     *
+     * @return string
+     */
+    private function quoteString(string $value): string
+    {
+        return "'" . str_replace(['\\', "'"], ['\\\\', "\\'"], $value) . "'";
     }
 
     /**

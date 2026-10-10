@@ -440,6 +440,26 @@ class BuilderTest extends TestCase
         $this->assertEquals('SELECT * FROM `table` ANY LEFT JOIN (SELECT `column1`, `column2` FROM `table2`) USING `column1`, `column2`', $builder->toSql());
     }
 
+    /**
+     * distributed(true) in a join closure adds GLOBAL, as the $global argument of join() does. The argument's default,
+     * false, keeps what the closure set, where it used to turn GLOBAL off again.
+     */
+    public function test_a_join_closure_can_make_the_join_global()
+    {
+        $builder = $this->getBuilder()->from('table')->join(function (JoinClause $join) {
+            $join->table('table2')->any()->left()->using('column')->distributed(true);
+        });
+        $this->assertSame('SELECT * FROM `table` GLOBAL ANY LEFT JOIN `table2` USING `column`', $builder->toSql());
+
+        $builder = $this->getBuilder()->from('table')->join(function (JoinClause $join) {
+            $join->table('table2')->any()->left()->using('column');
+        });
+        $this->assertSame('SELECT * FROM `table` ANY LEFT JOIN `table2` USING `column`', $builder->toSql());
+
+        $builder = $this->getBuilder()->from('table')->anyLeftJoin('table2', ['column'], true);
+        $this->assertSame('SELECT * FROM `table` GLOBAL ANY LEFT JOIN `table2` USING `column`', $builder->toSql());
+    }
+
     public function test_preWheres()
     {
         $builder = $this->getBuilder();
