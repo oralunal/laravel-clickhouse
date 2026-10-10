@@ -201,7 +201,8 @@ final class ApiReference
     }
 
     /**
-     * Get the text of the guide pages: every Markdown file of docs/ except this reference and the build output.
+     * Get the text of the guide pages of the latest version: every Markdown file of docs/ except this reference, the
+     * build output and the directories of the earlier versions, such as docs/3.x.
      *
      * @return string
      */
@@ -218,6 +219,7 @@ final class ApiReference
                 $file->getExtension() === 'md'
                 && !str_contains($path, '/node_modules/')
                 && !str_contains($path, '/.vitepress/')
+                && preg_match('#/docs/\d+\.x/#', $path) !== 1
                 && realpath($path) !== realpath(self::PAGE)
             ) {
                 $paths[] = $path;

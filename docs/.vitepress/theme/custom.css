@@ -1,0 +1,5 @@
+/* The versions are locales of VitePress. The version menu of the navigation bar replaces the language menu. */
+.VPNavBarTranslations,
+.VPNavScreenTranslations {
+  display: none !important;
+}
