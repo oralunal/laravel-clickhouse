@@ -22,6 +22,7 @@ If the ClickHouse connection does not have the name `clickhouse`, set it on the 
 ### The migrations table on ClickHouse
 
 The package binds `Oralunal\LaravelClickHouse\ClickhouseMigrationRepository`, a subclass of Laravel's `DatabaseMigrationRepository`.
+`ClickhouseMigrationRepository::fromLaravelRepository($repository)` makes it from Laravel's repository, with the same connection resolver, table and connection.
 A repository that your application or another package binds stays. On other connections, the repository works as Laravel's.
 
 | Operation | SQL |
@@ -81,4 +82,6 @@ When `migrate` runs on a ClickHouse database without migrations, it loads the du
 | `cluster_name` | Each `CREATE` gets `ON CLUSTER '<cluster_name>'` and goes one time. Rows of a replicated table go one time. Rows of other tables go to all nodes. |
 
 Each `INSERT INTO <table> VALUES` of the dump is sent with `SETTINGS async_insert = 0`. The dump file does not change.
+
+`Connection::getSchemaState()` returns the `Oralunal\LaravelClickHouse\SchemaState` that writes and loads the dump. Its `dump()` and `load()` methods do the work of the commands.
 With a `cluster_name`, each statement waits for all hosts, so increase `timeout_query` for the load.

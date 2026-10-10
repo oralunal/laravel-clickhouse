@@ -60,3 +60,17 @@ The `settings` option sends ClickHouse settings with each query of the connectio
 ```
 
 To set a setting for one query, use [`settings()`](/query-builder/basics#settings) of the query builder.
+
+## Read the options
+
+| Method | Returns |
+| --- | --- |
+| `getDateTimePrecision()` | `second` or `microsecond` |
+| `getInsertFormat()` | `Values` or `JSONEachRow` |
+| `getClusterName()`, `getDefaultCluster()` | See [Clusters](/advanced/clusters#change-the-active-node). |
+| `getServerVersion()` | The version of the server of the active node, for example `24.8.14.39` |
+| `getDriverTitle()` | `ClickHouse`, the name that `php artisan db:show` shows |
+| `newBuilderGrammar()` | A grammar of the package's query builder that writes dates at `datetime_precision` |
+
+Call them on the connection: `DB::connection('clickhouse')->getServerVersion()`.
+`Connection::createWithClient($config)` makes a connection and its nodes from a config array. The `clickhouse` driver uses it. It checks the options before it pings a node.

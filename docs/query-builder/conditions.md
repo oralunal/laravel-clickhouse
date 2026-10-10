@@ -26,6 +26,49 @@ MyTable::select()
 - With a `null` third argument, a second argument that is not an operator is the value, as in Laravel: `where('processed', 0, null)` gives `` `processed` = 0 ``.
 - `<>` is written as `!=`: `where('status', '<>', 'paused')` gives `` `status` != 'paused' ``.
 
+### Groups
+
+A closure is one group in parentheses. It gets a new builder:
+
+```php
+MyTable::where('a', 1)->where(fn ($query) => $query->where('b', 2)->orWhere('c', 3));
+// SELECT * FROM `my_table` WHERE `a` = 1 AND (`b` = 2 OR `c` = 3)
+
+MyTable::where('a', 1)->orWhere(fn ($query) => $query->where('b', 2)->where('c', 3));
+// SELECT * FROM `my_table` WHERE `a` = 1 OR (`b` = 2 AND `c` = 3)
+```
+
+## WHERE, PREWHERE and HAVING
+
+Each condition method has a form for each clause. The `or` form adds the condition with `OR`:
+
+| `WHERE` | `PREWHERE` | `HAVING` |
+| --- | --- | --- |
+| `where()`, `orWhere()` | `preWhere()`, `orPreWhere()` | `having()`, `orHaving()` |
+| `whereRaw()`, `orWhereRaw()` | `preWhereRaw()`, `orPreWhereRaw()` | `havingRaw()`, `orHavingRaw()` |
+| `whereIn()`, `orWhereIn()`, `whereNotIn()`, `orWhereNotIn()` | `preWhereIn()`, `orPreWhereIn()`, `preWhereNotIn()`, `orPreWhereNotIn()` | `havingIn()`, `orHavingIn()`, `havingNotIn()`, `orHavingNotIn()` |
+| `whereGlobalIn()`, `orWhereGlobalIn()`, `whereGlobalNotIn()`, `orWhereGlobalNotIn()` | | |
+| `whereBetween()`, `orWhereBetween()`, `whereNotBetween()`, `orWhereNotBetween()` | `preWhereBetween()`, `orPreWhereBetween()`, `preWhereNotBetween()`, `orPreWhereNotBetween()` | `havingBetween()`, `orHavingBetween()`, `havingNotBetween()`, `orHavingNotBetween()` |
+| `whereBetweenColumns()`, `orWhereBetweenColumns()`, `whereNotBetweenColumns()`, `orWhereNotBetweenColumns()` | `preWhereBetweenColumns()`, `orPreWhereBetweenColumns()`, `preWhereNotBetweenColumns()`, `orPreWhereNotBetweenColumns()` | `havingBetweenColumns()`, `orHavingBetweenColumns()`, `havingNotBetweenColumns()`, `orHavingNotBetweenColumns()` |
+| `whereNull()`, `orWhereNull()`, `whereNotNull()`, `orWhereNotNull()` | `preWhereNull()`, `orPreWhereNull()`, `preWhereNotNull()`, `orPreWhereNotNull()` | `havingNull()`, `orHavingNull()`, `havingNotNull()`, `orHavingNotNull()` |
+| `whereEmpty()`, `orWhereEmpty()`, `whereNotEmpty()`, `orWhereNotEmpty()` | `preWhereEmpty()`, `orPreWhereEmpty()`, `preWhereNotEmpty()`, `orPreWhereNotEmpty()` | `havingEmpty()`, `orHavingEmpty()`, `havingNotEmpty()`, `orHavingNotEmpty()` |
+| `whereColumn()`, `orWhereColumn()` | `preWhereColumn()`, `orPreWhereColumn()` | |
+| `whereAny()`, `orWhereAny()`, `whereAll()`, `orWhereAll()`, `whereNone()`, `orWhereNone()` | `preWhereAny()`, `orPreWhereAny()`, `preWhereAll()`, `orPreWhereAll()`, `preWhereNone()`, `orPreWhereNone()` | |
+| `whereDate()`, `orWhereDate()`, `whereTime()`, `orWhereTime()`, `whereDay()`, `orWhereDay()`, `whereMonth()`, `orWhereMonth()`, `whereYear()`, `orWhereYear()` | `preWhereDate()`, `orPreWhereDate()`, `preWhereTime()`, `orPreWhereTime()`, `preWhereDay()`, `orPreWhereDay()`, `preWhereMonth()`, `orPreWhereMonth()`, `preWhereYear()`, `orPreWhereYear()` | |
+| `whereLike()`, `orWhereLike()`, `whereNotLike()`, `orWhereNotLike()` | | |
+| `whereExists()`, `orWhereExists()`, `whereNotExists()`, `orWhereNotExists()` | | |
+| `whereDict()`, `orWhereDict()` | | |
+
+The raw methods add SQL as it is. Do not put user input into them:
+
+```php
+MyTable::select('user_id', raw('count() AS c'))
+    ->groupBy('user_id')
+    ->having('c', '>', 1)
+    ->orHavingRaw('c = 1000');
+// SELECT `user_id`, count() AS c FROM `my_table` GROUP BY `user_id` HAVING `c` > 1 OR c = 1000
+```
+
 ## Values
 
 The package writes PHP values as ClickHouse literals:
@@ -101,6 +144,27 @@ An empty list matches no row with `IN` and all rows with `NOT IN`, as in Laravel
 
 A string after `IN` is a value: `whereIn('id', 'ids')` gives `` `id` IN 'ids' ``. To read a table, give `raw('ids')` or a sub-query.
 
+A closure or a builder is a sub-query:
+
+```php
+MyTable::whereIn('user_id', fn ($query) => $query->select('id')->from('users')->where('banned', 1));
+// SELECT * FROM `my_table` WHERE `user_id` IN (SELECT `id` FROM `users` WHERE `banned` = 1)
+```
+
+### GLOBAL IN
+
+On a `Distributed` table, `GLOBAL IN` runs the sub-query one time and sends its result to all shards:
+
+```php
+MyTable::whereGlobalIn('user_id', fn ($query) => $query->select('id')->from('users'));
+// SELECT * FROM `my_table` WHERE `user_id` GLOBAL IN (SELECT `id` FROM `users`)
+
+MyTable::where('a', 1)->orWhereGlobalNotIn('user_id', [7]);
+// SELECT * FROM `my_table` WHERE `a` = 1 OR `user_id` GLOBAL NOT IN (7)
+```
+
+`whereGlobalIn()`, `whereGlobalNotIn()` and their `or` forms take the same values as `whereIn()`.
+
 `BETWEEN` takes the first two values of the list: `where('id', 'BETWEEN', [1, 10])` gives `` `id` BETWEEN 1 AND 10 ``.
 `whereBetween()`, `whereNotBetween()` and their forms read the list the same way. A list with fewer than two values throws an `InvalidArgumentException`.
 
@@ -140,6 +204,7 @@ MyTable::select()
 
 A string is a column name. `raw()` is SQL: `whereColumn('field_two', '<', raw('user_id + 1'))` gives `` `field_two` < user_id + 1 ``.
 `whereBetweenColumns('field_two', ['user_id', raw('user_id + 10')])` gives `` `field_two` BETWEEN `user_id` AND user_id + 10 ``.
+`whereNotBetweenColumns()` writes the same condition in `NOT ( ... )`.
 
 ## Conditions on many columns
 

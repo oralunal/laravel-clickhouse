@@ -227,6 +227,9 @@ class MyTable extends BaseModel
 }
 ```
 
+A model query sets this table with `setSourcesTable()`. On another query, `setSourcesTable('my_table')` sets the table of `delete()`, `update()`, `truncate()` and `insert()`.
+The package writes it as given, without quotes.
+
 ## Pretend
 
 While the connection [pretends](/advanced/raw-sql#pretend-mode), as in `migrate --pretend`, the package logs `delete()`, `update()` and `truncate()` and does not send them.

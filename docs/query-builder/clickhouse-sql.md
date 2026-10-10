@@ -145,10 +145,26 @@ $query->select('id')->join(fn (JoinClause $join) => $join
 // SELECT `id` FROM `my_table` ALL INNER JOIN `users` AS `u` ON `my_table`.`user_id` = `u`.`id`
 ```
 
+`join($table, $strict = null, $type = null, $using = null, $global = false, $alias = null)` takes all parts of a join.
+`leftJoin()`, `innerJoin()`, `rightJoin()` and `fullJoin()` take `($table, $strict = null, $using = null, $global = false, $alias = null)`. The default strictness is `ALL`:
+
+```php
+$query->innerJoin('users', 'any', ['user_id']);
+// SELECT * FROM `my_table` ANY INNER JOIN `users` USING `user_id`
+
+$query->leftJoin('users', 'all', ['user_id'], true, 'u');
+// SELECT * FROM `my_table` GLOBAL ALL LEFT JOIN `users` AS `u` USING `user_id`
+```
+
+- `$global = true` adds `GLOBAL`. On a `Distributed` table, ClickHouse then reads the right table one time and sends it to all shards.
+- `$table` can be a builder. The package writes it as a sub-query: `anyLeftJoin($usersQuery, ['user_id'], false, 'u')` gives ``ANY LEFT JOIN (SELECT ...) AS `u` USING `user_id` ``.
+
 These methods take `($table, $using = null, $global = false, $alias = null)`:
 
 | Method | SQL | Returns |
 | --- | --- | --- |
+| `anyLeftJoin()`, `allLeftJoin()` | `ANY LEFT JOIN`, `ALL LEFT JOIN` | Left rows, with one match or all matches |
+| `anyInnerJoin()`, `allInnerJoin()` | `ANY INNER JOIN`, `ALL INNER JOIN` | Rows that have a match, one or all |
 | `semiLeftJoin()` | `SEMI LEFT JOIN` | Left rows that have a match |
 | `semiRightJoin()` | `SEMI RIGHT JOIN` | Right rows that have a match |
 | `antiLeftJoin()` | `ANTI LEFT JOIN` | Left rows without a match |
@@ -157,7 +173,41 @@ These methods take `($table, $using = null, $global = false, $alias = null)`:
 | `asofLeftJoin()` | `ASOF LEFT JOIN` | The same, and left rows without a match |
 | `anyRightJoin()`, `allRightJoin()` | `ANY RIGHT JOIN`, `ALL RIGHT JOIN` | |
 
-`rightJoin()` and `fullJoin()` take a strictness, as `leftJoin()` does. The default is `ALL`.
+### Join closures
+
+A closure in `join()` or a join method gets an `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause`:
+
+```php
+$query->join(fn (JoinClause $join) => $join
+    ->table('users')->as('u')->all()->inner()
+    ->on('my_table.user_id', '=', 'u.id')
+    ->on('my_table.tenant', '=', 'u.tenant'));
+// SELECT * FROM `my_table` ALL INNER JOIN `users` AS `u`
+//   ON `my_table`.`user_id` = `u`.`id` AND `my_table`.`tenant` = `u`.`tenant`
+
+$query->join(fn (JoinClause $join) => $join
+    ->any()->left()
+    ->query(fn ($query) => $query->select('user_id', 'name')->from('users'))->as('u')
+    ->using('user_id'));
+// SELECT * FROM `my_table` ANY LEFT JOIN (SELECT `user_id`, `name` FROM `users`) AS `u` USING `user_id`
+```
+
+| `JoinClause` method | Sets |
+| --- | --- |
+| `table($table)` | The right table. A string is a name. `raw()` is SQL. |
+| `as($alias)` | The alias of the right table |
+| `query($query)` | A sub-query from a builder or a closure as the right table |
+| `subQuery($alias = null)` | A sub-query as the right table. It returns a new builder for the sub-query. |
+| `using(...$columns)`, `addUsing(...$columns)` | The `USING` columns. `using()` replaces them, and `addUsing()` adds to them. |
+| `on($first, $operator, $second, $concatOperator = 'AND')` | An `ON` condition. Each call adds one. |
+| `strict($strict)` | The strictness: `all`, `any`, `semi`, `anti` or `asof` |
+| `all()`, `any()`, `semi()`, `anti()`, `asof()` | The same strictness |
+| `type($type)` | The type: `inner`, `left`, `right`, `full` or `cross` |
+| `inner()`, `left()`, `right()`, `full()`, `cross()` | The same type |
+| `distributed(true)` | `GLOBAL` |
+
+A join with both `USING` and `ON` throws a `GrammarException`.
+The getters `getTable()`, `getAlias()`, `getStrict()`, `getType()`, `getUsing()`, `getOnClauses()`, `isDistributed()`, `getSubQuery()` and `getQueryBuilder()` return the parts of a join.
 
 An ASOF join matches one condition by the closest value: the last `USING` column, or the inequality in `ON`:
 

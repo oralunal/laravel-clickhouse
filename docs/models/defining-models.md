@@ -15,6 +15,18 @@ class MyTable extends BaseModel
 }
 ```
 
+## Tables of a model
+
+A model can use other tables for inserts and for mutations:
+
+| Property | Getter | Used by |
+| --- | --- | --- |
+| `$table` | `getTable()` | Queries |
+| `$tableForInserts` | `getTableForInserts()` | Inserts. See [Buffer engine tables](/models/inserting-rows#buffer-engine-tables). |
+| `$tableSources` | `getTableSources()` | `delete()`, `update()`, `truncate()` and `optimize()` |
+
+Each getter returns `$table` when its property is not set.
+
 ## Start a query
 
 `select()`, `where()` and `query()` start a query on the table of the model:
@@ -129,6 +141,30 @@ $visit->getAttributes(); // ['url' => 'https://example.com/a', 'ip' => '10.0.0.1
 $visit->toArray();       // ['url' => 'https://example.com/a', 'payload' => ['a' => 1], 'host' => 'example.com']
 ```
 
+### Attribute methods
+
+A model has the attribute methods of Eloquent. They work as the [Eloquent documentation](https://laravel.com/docs/eloquent-mutators) tells:
+
+| Area | Methods |
+| --- | --- |
+| Read | `getAttribute()`, `getAttributeValue()`, `getAttributes()`, `hasAttribute()`, `only()` |
+| Write | `setAttribute()`, `fill()`, `setRawAttributes()`, `fillJsonAttribute()` |
+| Original values | `getOriginal()`, `getRawOriginal()`, `syncOriginal()`, `syncOriginalAttribute()`, `syncOriginalAttributes()`, `originalIsEquivalent()`, `discardChanges()` |
+| Changes | `isDirty()`, `isClean()`, `getDirty()`, `wasChanged()`, `getChanges()`, `syncChanges()` |
+| Casts | `getCasts()`, `hasCast()`, `mergeCasts()`, `getDates()`, `fromDateTime()`, `fromJson()`, `fromFloat()`, `fromEncryptedString()` |
+| Date format | `getDateFormat()`, `setDateFormat()` |
+| Appended accessors | `append()`, `setAppends()`, `mergeAppends()`, `withoutAppends()`, `getAppends()`, `hasAppended()` |
+| Accessors and mutators | `hasGetMutator()`, `hasSetMutator()`, `hasAttributeMutator()`, `hasAttributeGetMutator()`, `hasAttributeSetMutator()`, `hasAnyGetMutator()`, `getMutatedAttributes()`, `cacheMutatedAttributes()` |
+| Visibility | `makeHidden()`, `makeVisible()` |
+
+```php
+$visit->fillJsonAttribute('payload->b', 2); // payload: '{"a":1,"b":2}'
+$visit->only('url', 'host');                // ['url' => 'https://example.com/a', 'host' => 'example.com']
+$visit->discardChanges();                   // Sets the attributes back to getOriginal().
+```
+
+The `encrypted` casts use the encrypter of the application. `BaseModel::encryptUsing($encrypter)` sets another encrypter, and `currentEncrypter()` returns the encrypter in use.
+
 ## Date format
 
 The date casts store a date in `$dateFormat`. Without `$dateFormat`, they store `Y-m-d H:i:s`.
@@ -188,3 +224,15 @@ A model fires some [Eloquent model events](https://laravel.com/docs/eloquent#eve
 
 A `creating` listener that returns `false` stops `create()`. `save()` does not fire `creating`.
 Observers and the `$dispatchesEvents` map are not supported.
+
+Listen to an event with its Eloquent name:
+
+```php
+use Illuminate\Support\Facades\Event;
+
+Event::listen('eloquent.creating: ' . MyTable::class, fn (MyTable $model) => $model->some_param > 0);
+```
+
+- `MyTable::withoutEvents(fn () => MyTable::create([...]))` runs the callback without events. It returns the value of the callback.
+- The models use the event dispatcher of the application. `setEventDispatcher()`, `getEventDispatcher()` and `unsetEventDispatcher()` change and read it.
+  All ClickHouse models share one dispatcher, so these methods and `withoutEvents()` apply to all models.

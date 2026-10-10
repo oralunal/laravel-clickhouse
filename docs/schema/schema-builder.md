@@ -60,7 +60,7 @@ All names are in backticks. A column name is one identifier: `n.a` is `` `n.a` `
 | `binary()` | `String`, or `FixedString(<length>)` with `fixed: true` |
 | `uuid()`, `foreignUuid()` | `UUID` |
 | `ipAddress()`, `macAddress()` | `String` |
-| `geometry()`, `geography()` | `Point`, `Ring`, `LineString`, `MultiLineString`, `Polygon` or `MultiPolygon`, by the subtype |
+| `geometry()`, `geography()` | `Point`, `Ring`, `LineString`, `MultiLineString`, `Polygon` or `MultiPolygon`, by the subtype. The package ignores the SRID. |
 | `vector()` | `Array(Float32)` |
 | `rawColumn($column, 'Tuple(a UInt8, b String)')` | The type as given |
 | `array('tags', 'String')` | `Array(String)` |

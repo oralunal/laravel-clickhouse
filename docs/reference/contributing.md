@@ -72,3 +72,10 @@ npm run build   # Build to docs/.vitepress/dist
 ```
 
 Write the documentation in [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/): short sentences, active voice, one instruction in each sentence.
+
+### Public API
+
+`tests/Unit/Documentation/DocumentationTest.php` makes sure that the documentation covers the public API:
+
+- [API reference](/reference/api) agrees with the code. After you add, remove or change a public class, constant, method or function, run `composer docs:api` and commit `docs/reference/api.md`.
+- A guide page names each public method, for example `` `whereDict()` ``. The internal classes, the methods with an `@internal` tag, and the methods that implement a Laravel or PHP contract are exceptions.

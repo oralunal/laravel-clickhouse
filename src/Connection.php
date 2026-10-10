@@ -591,6 +591,8 @@ class Connection extends BaseConnection
      * Parallel::get() and getRows() call it for a Laravel query builder and for SQL, so that a query of a batch is
      * sent as select() sends it.
      *
+     * @internal
+     *
      * @param string $query
      * @param array<int|string, mixed> $bindings
      * @return array{0: string, 1: array<int|string, mixed>}
