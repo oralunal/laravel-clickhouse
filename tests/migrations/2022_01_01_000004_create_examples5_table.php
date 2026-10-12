@@ -1,34 +1,28 @@
 <?php
 
-use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Expression;
-use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree;
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
 
-return new class extends \Oralunal\LaravelClickHouse\Migration {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
-    public function up()
+return new class extends Migration
+{
+    protected $connection = 'clickhouse';
+
+    public function up(): void
     {
-        static::createMergeTree('examples5', fn(MergeTree $table) => $table
-            ->columns([
-                $table->datetime('created_at', 3)->default(new Expression('now64()')),
-                $table->int64('f_int'),
-                $table->string('f_string'),
-                $table->bool('f_bool'),
-            ])
-            ->orderBy('f_int')
-        );
+        DB::connection($this->connection)->statementOnEveryNode(<<<'SQL'
+            CREATE TABLE IF NOT EXISTS examples5 (
+                created_at DateTime64(3) DEFAULT now64(),
+                f_int Int64,
+                f_string String,
+                f_bool Bool
+            )
+            ENGINE = MergeTree()
+            ORDER BY (f_int)
+        SQL);
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
-    public function down()
+    public function down(): void
     {
-        static::write('DROP TABLE examples5');
+        DB::connection($this->connection)->statementOnEveryNode('DROP TABLE IF EXISTS examples5');
     }
 };

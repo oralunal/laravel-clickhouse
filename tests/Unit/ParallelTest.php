@@ -19,7 +19,6 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Facade;
 use InvalidArgumentException;
 use LogicException;
-use Oralunal\LaravelClickHouse\Builder;
 use Oralunal\LaravelClickHouse\Connection;
 use Oralunal\LaravelClickHouse\CurlerRollingWithRetries;
 use Oralunal\LaravelClickHouse\Exceptions\ParallelQueryException;
@@ -32,8 +31,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * Parallel::get() and getRows(), and Connection::selectParallelly(), without a server: every client is a
  * CannedAsyncClient, whose requests get canned responses when the batch curler runs them. The DB facade resolves
- * the connections of the test by name, for the package builder's query log and for SQL entries that name their
- * connection.
+ * the connections of the test by name, for SQL entries that name their connection.
  */
 class ParallelTest extends TestCase
 {
@@ -127,27 +125,17 @@ class ParallelTest extends TestCase
 
     // What is sent
 
-    public function test_a_package_builder_is_sent_as_get_sends_it(): void
+    public function test_the_clickhouse_clauses_of_a_query_builder_are_sent(): void
     {
         $client = self::client();
-        $this->connection($client);
+        $connection = $this->connection($client);
 
         Parallel::get([
-            'settings' => (new Builder($client))->from('t')->where('a', 1)->settings('max_threads', 2),
-            'plain' => (new Builder($client))->from('t'),
-            'csv' => (new Builder($client))->from('t')->format('CSV'),
+            'settings' => self::laravelQuery($connection)->from('t')->final()->where('a', 1)->settings('max_threads', 2),
         ]);
 
-        $this->assertSame(
-            [
-                'SELECT * FROM `t` WHERE `a` = 1 FORMAT JSON SETTINGS max_threads=2',
-                'SELECT * FROM `t` FORMAT JSON',
-                'SELECT * FROM `t` FORMAT CSV',
-            ],
-            $client->sentSql()
-        );
+        $this->assertSame(['select * from "t" final where "a" = 1 settings max_threads=2 FORMAT JSON'], $client->sentSql());
         $this->assertStringContainsString('readonly=2', $client->requests[0]->getUrl());
-        $this->assertStringNotContainsString('default_format', $client->requests[2]->getUrl());
     }
 
     /**
@@ -157,15 +145,15 @@ class ParallelTest extends TestCase
     public function test_a_value_that_names_a_format_is_read_as_json(): void
     {
         $client = new CannedAsyncClient(fn (): CurlerResponse => CannedAsyncClient::json([['note' => 'export as format csv']]));
-        $this->connection($client);
+        $connection = $this->connection($client);
 
         $statements = Parallel::get([
-            'builder' => (new Builder($client))->from('t')->where('note', 'export as format csv'),
+            'builder' => self::laravelQuery($connection)->from('t')->where('note', 'export as format csv'),
             'sql' => ['sql' => "SELECT note FROM t WHERE note = 'format csv'"],
         ]);
 
         $this->assertSame(
-            ["SELECT * FROM `t` WHERE `note` = 'export as format csv'", "SELECT note FROM t WHERE note = 'format csv'"],
+            ["select * from \"t\" where \"note\" = 'export as format csv'", "SELECT note FROM t WHERE note = 'format csv'"],
             $client->sentSql()
         );
         foreach ($client->requests as $request) {
@@ -232,22 +220,18 @@ class ParallelTest extends TestCase
     {
         $first = self::client();
         $second = self::client();
-        $this->connection($first);
+        $connection = $this->connection($first);
         $other = $this->connection($second, ['name' => 'other']);
 
         $rows = Parallel::getRows([
-            'first' => (new Builder($first))->from('a'),
-            'second' => (new Builder($second, 'other'))->from('b'),
+            'first' => self::laravelQuery($connection)->from('a'),
             'sql' => ['sql' => 'SELECT 3', 'connection' => 'other'],
-            'laravel' => self::laravelQuery($other)->from('c'),
+            'other' => self::laravelQuery($other)->from('c'),
         ]);
 
-        $this->assertSame(['SELECT * FROM `a` FORMAT JSON'], $first->sentSql());
-        $this->assertSame(
-            ['SELECT * FROM `b` FORMAT JSON', 'SELECT 3 FORMAT JSON', 'select * from "c" FORMAT JSON'],
-            $second->sentSql()
-        );
-        $this->assertSame(['first', 'second', 'sql', 'laravel'], array_keys($rows));
+        $this->assertSame(['select * from "a" FORMAT JSON'], $first->sentSql());
+        $this->assertSame(['SELECT 3 FORMAT JSON', 'select * from "c" FORMAT JSON'], $second->sentSql());
+        $this->assertSame(['first', 'sql', 'other'], array_keys($rows));
     }
 
     public function test_keys_and_order_are_kept(): void
@@ -265,27 +249,6 @@ class ParallelTest extends TestCase
         $this->assertSame([['v' => 'SELECT 2 FORMAT JSON']], $statements['b']->rows());
         $this->assertSame([['v' => 'SELECT 0 FORMAT JSON']], $statements[0]->rows());
         $this->assertSame([['v' => 'SELECT 1 FORMAT JSON']], $statements['a']->rows());
-    }
-
-    /**
-     * The deprecation notes of asyncWithQuery() and getAsyncQueries() name Parallel::get() and getRows().
-     */
-    public function test_the_queries_of_the_deprecated_async_with_query_run_in_a_batch(): void
-    {
-        $client = self::client();
-        $this->connection($client);
-        $query = (new Builder($client))->from('t')->where('id', 1);
-        $query->asyncWithQuery(fn (Builder $other): Builder => $other->from('t')->where('id', 2));
-
-        $rows = Parallel::getRows($query->getAsyncQueries());
-
-        $this->assertSame(
-            [
-                [['v' => 'SELECT * FROM `t` WHERE `id` = 1 FORMAT JSON']],
-                [['v' => 'SELECT * FROM `t` WHERE `id` = 2 FORMAT JSON']],
-            ],
-            $rows
-        );
     }
 
     public function test_an_empty_list_sends_nothing(): void
@@ -315,20 +278,20 @@ class ParallelTest extends TestCase
     public function test_get_rows_throws_after_every_query_with_the_results_and_the_errors(): void
     {
         $client = self::client();
-        $this->connection($client);
+        $connection = $this->connection($client);
 
         try {
             Parallel::getRows([
                 'first' => ['sql' => 'SELECT 1'],
                 'bad' => ['sql' => 'SELECT * FROM bad'],
-                'last' => (new Builder($client))->from('t'),
+                'last' => self::laravelQuery($connection)->from('t'),
             ]);
             $this->fail('getRows() did not throw.');
         } catch (ParallelQueryException $exception) {
             $this->assertInstanceOf(ClientQueryException::class, $exception);
             $this->assertInstanceOf(QueryException::class, $exception);
             $this->assertSame(
-                ['first' => [['v' => 'SELECT 1 FORMAT JSON']], 'last' => [['v' => 'SELECT * FROM `t` FORMAT JSON']]],
+                ['first' => [['v' => 'SELECT 1 FORMAT JSON']], 'last' => [['v' => 'select * from "t" FORMAT JSON']]],
                 $exception->getResults()
             );
             $this->assertSame(['bad'], array_keys($exception->getErrors()));
@@ -377,24 +340,21 @@ class ParallelTest extends TestCase
         });
 
         Parallel::get([
-            'builder' => (new Builder($client))->from('t'),
-            'failed builder' => (new Builder($client))->from('bad'),
             'sql' => ['sql' => 'SELECT ?', 'bindings' => [1]],
             'failed sql' => ['sql' => 'SELECT * FROM bad'],
             'laravel' => self::laravelQuery($connection)->from('t')->where('a', 2),
+            'failed laravel' => self::laravelQuery($connection)->from('bad'),
         ]);
 
         $this->assertSame(
             [
-                ['SELECT * FROM `t`', [], 12.0],
-                ['SELECT * FROM `bad`', [], 12.0],
                 ['SELECT ?', [1], 12.0],
                 ['select * from "t" where "a" = ?', [2], 12.0],
             ],
             array_map(fn (array $entry): array => [$entry['query'], $entry['bindings'], $entry['time']], $connection->getQueryLog())
         );
         $this->assertSame(
-            [['SELECT ?', [1]], ['SELECT * FROM bad', []], ['select * from "t" where "a" = ?', [2]]],
+            [['SELECT ?', [1]], ['SELECT * FROM bad', []], ['select * from "t" where "a" = ?', [2]], ['select * from "bad"', []]],
             $callbacks
         );
     }
@@ -409,17 +369,16 @@ class ParallelTest extends TestCase
         });
 
         $rows = null;
-        $log = $connection->pretend(function (Connection $connection) use (&$rows, $client): void {
+        $log = $connection->pretend(function (Connection $connection) use (&$rows): void {
             $rows = Parallel::getRows([
                 'sql' => ['sql' => 'SELECT ?', 'bindings' => [1]],
                 'laravel' => self::laravelQuery($connection)->from('t'),
-                'builder' => (new Builder($client))->from('t'),
             ]);
         });
 
-        $this->assertSame(['sql' => [], 'laravel' => [], 'builder' => [['v' => 'SELECT * FROM `t` FORMAT JSON']]], $rows);
-        $this->assertSame(['SELECT * FROM `t` FORMAT JSON'], $client->sentSql(), 'Only the package builder is sent, as get() does.');
-        $this->assertSame(['SELECT 1', 'select * from "t"', 'SELECT * FROM `t`'], array_column($log, 'query'));
+        $this->assertSame(['sql' => [], 'laravel' => []], $rows);
+        $this->assertSame([], $client->sentSql());
+        $this->assertSame(['SELECT 1', 'select * from "t"'], array_column($log, 'query'));
         $this->assertSame(2, $callbacks);
     }
 
@@ -529,10 +488,10 @@ class ParallelTest extends TestCase
     {
         return [
             'a setting name that cannot be written' => [
-                fn (Connection $connection, Client $client): array => [
+                fn (Connection $connection): array => [
                     ['sql' => 'SELECT 1'],
-                    (new Builder($client))->from('t'),
-                    (new Builder($client))->from('t')->settings('bad name', 1),
+                    self::laravelQuery($connection)->from('t'),
+                    self::laravelQuery($connection)->from('t')->settings('bad name', 1),
                 ],
                 InvalidArgumentException::class,
                 'bad name',
@@ -550,14 +509,14 @@ class ParallelTest extends TestCase
             'an entry of another type' => [
                 fn (): array => [['sql' => 'SELECT 1'], 'number' => 42],
                 InvalidArgumentException::class,
-                'Parallel query [number] must be a query builder of this package, a Laravel or Eloquent query builder'
-                . ' or an array with an sql string, int given.',
+                'Parallel query [number] must be a query builder, an Eloquent query builder or an array with an sql'
+                . ' string, int given.',
             ],
             'an array without sql' => [
                 fn (): array => ['query' => ['query' => 'SELECT 1']],
                 InvalidArgumentException::class,
-                'Parallel query [query] must be a query builder of this package, a Laravel or Eloquent query builder'
-                . ' or an array with an sql string, array given.',
+                'Parallel query [query] must be a query builder, an Eloquent query builder or an array with an sql'
+                . ' string, array given.',
             ],
             'empty SQL' => [
                 fn (): array => ['blank' => ['sql' => ' ']],
@@ -743,7 +702,7 @@ class ParallelTest extends TestCase
         $client = new CannedAsyncClient(fn (): CurlerResponse => CannedAsyncClient::response(200, "1\n2\n", ['X-ClickHouse-Format' => 'TabSeparated']));
         $this->connection($client);
 
-        $statement = Parallel::get(['tsv' => (new Builder($client))->from('t')->format('TSV')])['tsv'];
+        $statement = Parallel::get(['tsv' => ['sql' => 'SELECT 1']])['tsv'];
 
         $this->assertSame('TabSeparated', $statement->getRequest()->getRequestExtendedInfo('format'));
         $this->assertSame("1\n2\n", $statement->rawData());

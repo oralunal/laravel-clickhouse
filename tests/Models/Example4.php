@@ -2,14 +2,15 @@
 
 namespace Tests\Models;
 
-use Oralunal\LaravelClickHouse\BaseModel;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 
-/**
- * @property string $f_string
- * @property int $f_int
- */
-class Example4 extends BaseModel
+class Example4 extends Model
 {
     protected $connection = 'clickhouse-cluster';
+
     protected $table = 'examples4';
+
+    protected $guarded = [];
+
+    public $timestamps = false;
 }

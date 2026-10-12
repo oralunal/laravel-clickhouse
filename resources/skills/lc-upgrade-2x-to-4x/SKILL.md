@@ -13,18 +13,22 @@ You are upgrading this Laravel application from `oralunal/phpclickhouse-laravel`
    - `oralunal/phpclickhouse-laravel` → `oralunal/laravel-clickhouse`;
    - `PhpClickHouseLaravel\` → `Oralunal\LaravelClickHouse\`.
 
-   | 2.x | 4.x |
-   | --- | --- |
-   | `PhpClickHouseLaravel\BaseModel` | `Oralunal\LaravelClickHouse\BaseModel` |
-   | `PhpClickHouseLaravel\Migration` | `Oralunal\LaravelClickHouse\Migration` |
-   | `PhpClickHouseLaravel\ClickhouseBuilder\…` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\…` |
-   | `PhpClickHouseLaravel\ClickhouseSchemaBuilder\…` | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\…` |
-   | `PhpClickHouseLaravel\Enum\Enum` | `Oralunal\LaravelClickHouse\Enum\Enum` |
-   | `use function PhpClickHouseLaravel\ClickhouseBuilder\raw;` | `use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;` |
+   The rename gives the 3.x names. Most of these classes no longer exist in
+   4.0, so step 6 rewrites the code that uses them:
 
-2. **The 4.0 changes (step 6).** 4.0 keeps the name and namespace, and brings
-   breaking changes and behavior changes. They are handled by the steps of the
-   `lc-upgrade-3x-to-4x` skill, which you follow from its step 3.
+   | 2.x | 3.x (after the rename) | 4.x (after step 6) |
+   | --- | --- | --- |
+   | `PhpClickHouseLaravel\BaseModel` | `Oralunal\LaravelClickHouse\BaseModel` | `Oralunal\LaravelClickHouse\Eloquent\Model` |
+   | `PhpClickHouseLaravel\Migration` | `Oralunal\LaravelClickHouse\Migration` | Laravel's `Migration`, with `DB` and `Schema` |
+   | `PhpClickHouseLaravel\ClickhouseBuilder\…` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\…` | `Oralunal\LaravelClickHouse\QueryBuilder` |
+   | `PhpClickHouseLaravel\ClickhouseSchemaBuilder\…` | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\…` | Laravel's schema builder |
+   | `PhpClickHouseLaravel\Enum\Enum` | `Oralunal\LaravelClickHouse\Enum\Enum` | `Oralunal\LaravelClickHouse\Enums\…` (native enums) |
+   | `use function PhpClickHouseLaravel\ClickhouseBuilder\raw;` | `use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;` | `DB::raw()` |
+
+2. **The 4.0 changes (step 6).** 4.0 keeps the name and namespace. It removes
+   the package's model, query builder, migration class and helpers, without a
+   deprecation phase, and changes some behavior. The steps of the
+   `lc-upgrade-3x-to-4x` skill handle this; you follow them from its step 3.
 
 Work through the steps in order. Do not skip the checks, and do not stop at the
 first file you fix: the goal is zero remaining references. Once the package is
@@ -94,7 +98,8 @@ If the error names a package of the project itself, update its
 The `artisan` scripts that Composer runs afterwards may fail with a
 class-not-found error for a `PhpClickHouseLaravel\…` class, because the
 application code still uses the old namespace. That is expected until step 3;
-continue.
+continue. Until step 6 is done, they may also fail for a class that 4.0
+removes, such as `Oralunal\LaravelClickHouse\BaseModel`.
 
 ## Step 3: Rename the namespace
 
@@ -136,16 +141,18 @@ renames it to `Oralunal\LaravelClickHouse\ClickhouseServiceProvider`; keep it.
 
 2. Values serialized with the 2.x class names cannot be unserialized by 4.x:
    cache entries, queued jobs and sessions that hold objects of the package's
-   classes, such as `RawColumn` or the builder enums. Do not change code for
-   this and do not clear caches or queues yourself. Look for places that put
-   such objects into the cache, a queue or the session. Tell the user what you
-   found, and that a deploy of this upgrade should let the queues drain first
-   and clear the application cache afterwards if any such values exist.
+   classes, such as `RawColumn` or the builder enums, which 4.0 removes. Do
+   not change code for this and do not clear caches or queues yourself. Look
+   for places that put such objects into the cache, a queue or the session.
+   Tell the user what you found, and that a deploy of this upgrade should let
+   the queues drain first and clear the application cache afterwards if any
+   such values exist.
 
 ## Step 5: Check the rename
 
 1. `composer dump-autoload` and `php artisan package:discover`. Both must
-   finish without errors.
+   finish without errors, or fail only with a class-not-found error for a
+   class that 4.0 removes, which step 6 fixes.
 2. `php -l` on every PHP file you changed.
 3. Run every search from step 1 again.
    - `oralunal/phpclickhouse-laravel` must not be required anywhere.

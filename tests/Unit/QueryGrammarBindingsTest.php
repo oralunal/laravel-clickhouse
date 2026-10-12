@@ -11,16 +11,16 @@ use Illuminate\Database\Query\Expression;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\DateTimePrecision;
 use Oralunal\LaravelClickHouse\Connection;
-use Oralunal\LaravelClickHouse\Grammar;
+use Oralunal\LaravelClickHouse\Enums\DateTimePrecision;
+use Oralunal\LaravelClickHouse\LiteralGrammar;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 use Oralunal\LaravelClickHouse\QueryGrammar;
 use Oralunal\LaravelClickHouse\QueryProcessor;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
-use Tests\Unit\ClickhouseBuilder\IntBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\StringBackedEnumFixture;
+use Tests\Fixtures\IntBackedEnumFixture;
+use Tests\Fixtures\StringBackedEnumFixture;
 
 /**
  * Laravel's "?" placeholders on a ClickHouse connection: the grammar writes "?", and the connection writes the
@@ -30,19 +30,19 @@ use Tests\Unit\ClickhouseBuilder\StringBackedEnumFixture;
 class QueryGrammarBindingsTest extends TestCase
 {
     /**
-     * A query builder of the package on a stub ClickHouse connection, whose builder grammar writes dates at the
+     * A query builder of the package on a stub ClickHouse connection, whose literal grammar writes dates at the
      * given precision and whose prepareBindings() hands the bindings on as they are.
      *
-     * @param string $precision
+     * @param DateTimePrecision $precision
      * @return QueryBuilder
      */
-    private function query(string $precision = DateTimePrecision::SECOND): QueryBuilder
+    private function query(DateTimePrecision $precision = DateTimePrecision::Second): QueryBuilder
     {
         $connection = $this->createStub(Connection::class);
         $connection->method('getConfig')->willReturn(null);
         $connection->method('getTablePrefix')->willReturn('');
-        $connection->method('newBuilderGrammar')->willReturnCallback(
-            fn (): Grammar => (new Grammar())->setDateTimePrecision($precision)
+        $connection->method('newLiteralGrammar')->willReturnCallback(
+            fn (): LiteralGrammar => (new LiteralGrammar())->setDateTimePrecision($precision)
         );
         $connection->method('prepareBindings')->willReturnArgument(0);
         $grammar = new QueryGrammar($connection);
@@ -216,7 +216,7 @@ class QueryGrammarBindingsTest extends TestCase
         $this->assertSame("'2024-01-02 03:04:05'", $this->query()->getGrammar()->compileLiteral($date));
         $this->assertSame(
             "'2024-01-02 03:04:05.123456'",
-            $this->query(DateTimePrecision::MICROSECOND)->getGrammar()->compileLiteral($date)
+            $this->query(DateTimePrecision::Microsecond)->getGrammar()->compileLiteral($date)
         );
     }
 
@@ -259,7 +259,7 @@ class QueryGrammarBindingsTest extends TestCase
             'spaces' => ['  ', "'2024-01-02 03:04:05'"],
             'Second' => ['Second', "'2024-01-02 03:04:05'"],
             'MICROSECOND with surrounding spaces' => [' MICROSECOND ', "'2024-01-02 03:04:05.500000'"],
-            'an enum instance' => [new DateTimePrecision(DateTimePrecision::MICROSECOND),"'2024-01-02 03:04:05.500000'"],
+            'a case' => [DateTimePrecision::Microsecond, "'2024-01-02 03:04:05.500000'"],
         ];
     }
 
@@ -298,12 +298,12 @@ class QueryGrammarBindingsTest extends TestCase
     }
 
     /**
-     * The builder grammar of the connection is created once per query grammar.
+     * The literal grammar of the connection is created once per query grammar.
      */
     public function test_the_literal_grammar_is_created_once(): void
     {
         $connection = $this->createMock(Connection::class);
-        $connection->expects($this->once())->method('newBuilderGrammar')->willReturn(new Grammar());
+        $connection->expects($this->once())->method('newLiteralGrammar')->willReturn(new LiteralGrammar());
         $grammar = new QueryGrammar($connection);
 
         $this->assertSame("'a'", $grammar->compileLiteral('a'));

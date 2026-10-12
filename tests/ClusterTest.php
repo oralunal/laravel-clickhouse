@@ -16,7 +16,7 @@ class ClusterTest extends TestCase
             $this->markTestSkipped('company_cluster config requires docker-compose services');
         }
 
-        Example4::truncate();
+        Example4::query()->truncate();
     }
 
     public function testRegularCluster()
@@ -24,33 +24,33 @@ class ClusterTest extends TestCase
         $node1Port = (int) env('CLICKHOUSE_PORT', 18123);
         $node2Port = (int) env('CLICKHOUSE2_PORT', 18124);
 
-        Example4::truncate();
+        Example4::query()->truncate();
         sleep(2); // clickhouse nodes sync lag
-        $this->assertEquals($node1Port, (int) (new Example4())->getThisClient()->getConnectPort());
-        Example4::insertAssoc([['f_int' => 1, 'f_string' => 'a']]);
-        $this->assertNotEmpty(Example4::where('f_int', 1)->getRows());
+        $this->assertEquals($node1Port, (int) (new Example4())->getConnection()->getClient()->getConnectPort());
+        Example4::insert([['f_int' => 1, 'f_string' => 'a']]);
+        $this->assertNotEmpty(Example4::where('f_int', 1)->get());
 
-        (new Example4())->resolveConnection()->getCluster()->slideNode();
-        $this->assertEquals($node2Port, (int) (new Example4())->getThisClient()->getConnectPort());
+        (new Example4())->getConnection()->getCluster()->slideNode();
+        $this->assertEquals($node2Port, (int) (new Example4())->getConnection()->getClient()->getConnectPort());
         sleep(2); // clickhouse nodes sync lag
-        $this->assertNotEmpty(Example4::where('f_int', 1)->getRows());
+        $this->assertNotEmpty(Example4::where('f_int', 1)->get());
 
-        (new Example4())->resolveConnection()->getCluster()->slideNode();
-        $this->assertEquals($node1Port, (int) (new Example4())->getThisClient()->getConnectPort());
+        (new Example4())->getConnection()->getCluster()->slideNode();
+        $this->assertEquals($node1Port, (int) (new Example4())->getConnection()->getClient()->getConnectPort());
     }
 
     public function testProblemCluster()
     {
         $node2Port = (int) env('CLICKHOUSE2_PORT', 18124);
 
-        $this->assertEquals($node2Port, (int) (new Example4Problem())->getThisClient()->getConnectPort());
-        Example4Problem::insertAssoc([['f_int' => 1, 'f_string' => 'a']]);
-        $this->assertNotEmpty(Example4Problem::where('f_int', 1)->getRows());
+        $this->assertEquals($node2Port, (int) (new Example4Problem())->getConnection()->getClient()->getConnectPort());
+        Example4Problem::insert([['f_int' => 1, 'f_string' => 'a']]);
+        $this->assertNotEmpty(Example4Problem::where('f_int', 1)->get());
 
-        (new Example4Problem())->resolveConnection()->getCluster()->slideNode();
-        $this->assertEquals($node2Port, (int) (new Example4Problem())->getThisClient()->getConnectPort());
-        (new Example4Problem())->resolveConnection()->getCluster()->slideNode();
-        $this->assertEquals($node2Port, (int) (new Example4Problem())->getThisClient()->getConnectPort());
+        (new Example4Problem())->getConnection()->getCluster()->slideNode();
+        $this->assertEquals($node2Port, (int) (new Example4Problem())->getConnection()->getClient()->getConnectPort());
+        (new Example4Problem())->getConnection()->getCluster()->slideNode();
+        $this->assertEquals($node2Port, (int) (new Example4Problem())->getConnection()->getClient()->getConnectPort());
     }
 
 }

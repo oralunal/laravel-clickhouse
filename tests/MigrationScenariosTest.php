@@ -97,17 +97,20 @@ class MigrationScenariosTest extends TestCase
         $events = <<<'PHP'
             <?php
 
-            return new class extends \Oralunal\LaravelClickHouse\Migration {
+            use Illuminate\Database\Migrations\Migration;
+            use Illuminate\Support\Facades\DB;
+
+            return new class extends Migration {
                 protected $connection = 'phpch_scenario';
 
                 public function up(): void
                 {
-                    static::write('CREATE TABLE events (id UInt64) ENGINE = MergeTree ORDER BY id');
+                    DB::connection($this->connection)->statementOnEveryNode('CREATE TABLE events (id UInt64) ENGINE = MergeTree ORDER BY id');
                 }
 
                 public function down(): void
                 {
-                    static::write('DROP TABLE IF EXISTS events');
+                    DB::connection($this->connection)->statementOnEveryNode('DROP TABLE IF EXISTS events');
                 }
             };
             PHP;
@@ -275,30 +278,24 @@ class MigrationScenariosTest extends TestCase
     }
 
     /**
-     * @return array<string, array{bool, bool}>
+     * @return array<string, array{bool}>
      */
     public static function clickhouseMigrationConnections(): array
     {
         return [
-            'default connection, fix_default_query_builder on' => [true, true],
-            'default connection, fix_default_query_builder off' => [true, false],
-            'named connection, fix_default_query_builder on' => [false, true],
-            'named connection, fix_default_query_builder off' => [false, false],
+            'default connection' => [true],
+            'named connection' => [false],
         ];
     }
 
     /**
      * Every migration command keeps the migrations table of a ClickHouse connection in step with its tables.
-     *
-     * With fix_default_query_builder on, migrate:rollback, with or without --pretend, --step or --batch, failed with
-     * 'Call to undefined method ClickHouseDB\Statement::all()': Laravel's repository read the table with the package
-     * Builder. migrate:refresh could skip a migration that its rollback had just removed from the table, because
-     * ClickHouse deleted the row in the background.
+     * migrate:refresh could skip a migration that its rollback had just removed from the table, because ClickHouse
+     * deleted the row in the background.
      */
     #[DataProvider('clickhouseMigrationConnections')]
-    public function testEveryMigrationCommandKeepsTheMigrationsTableInStep(bool $isDefault, bool $fixDefaultQueryBuilder): void
+    public function testEveryMigrationCommandKeepsTheMigrationsTableInStep(bool $isDefault): void
     {
-        $this->app['config']->set('database.connections.' . self::ANALYTICS . '.fix_default_query_builder', $fixDefaultQueryBuilder);
         DB::purge(self::ANALYTICS);
         $arguments = ['--path' => $this->workDir . '/clickhouse-only', '--realpath' => true];
         if ($isDefault) {
@@ -392,12 +389,11 @@ class MigrationScenariosTest extends TestCase
 
     /**
      * The migrations table that the repository creates has the columns of 3.0.0 and keeps every row, whatever the
-     * connection's exact_integer_types and engine options say: with ReplacingMergeTree, the rows, which all have the
-     * id 0, would be merged into one.
+     * connection's engine option says: with ReplacingMergeTree, the rows, which all have the id 0, would be merged
+     * into one.
      */
     public function testTheMigrationsTableKeepsTheColumnsOfVersionThreeAndEveryRow(): void
     {
-        $this->app['config']->set('database.connections.' . self::ANALYTICS . '.exact_integer_types', true);
         $this->app['config']->set('database.connections.' . self::ANALYTICS . '.engine', 'ReplacingMergeTree()');
         $this->writeSessionsMigration();
 
@@ -527,17 +523,20 @@ class MigrationScenariosTest extends TestCase
         $this->files->put($this->workDir . '/clickhouse-only/' . self::SESSIONS_MIGRATION . '.php', <<<'PHP'
             <?php
 
-            return new class extends \Oralunal\LaravelClickHouse\Migration {
+            use Illuminate\Database\Migrations\Migration;
+            use Illuminate\Support\Facades\DB;
+
+            return new class extends Migration {
                 protected $connection = 'phpch_scenario';
 
                 public function up(): void
                 {
-                    static::write('CREATE TABLE sessions (id UInt64) ENGINE = MergeTree ORDER BY id');
+                    DB::connection($this->connection)->statementOnEveryNode('CREATE TABLE sessions (id UInt64) ENGINE = MergeTree ORDER BY id');
                 }
 
                 public function down(): void
                 {
-                    static::write('DROP TABLE IF EXISTS sessions');
+                    DB::connection($this->connection)->statementOnEveryNode('DROP TABLE IF EXISTS sessions');
                 }
             };
             PHP);

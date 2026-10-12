@@ -2,17 +2,15 @@
 
 namespace Tests\Models;
 
-use Oralunal\LaravelClickHouse\BaseModel;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 
-/**
- * A model of the json_examples table that sends its inserts as JSONEachRow, whatever the connection's
- * insert_format is.
- */
-class ExampleJson extends BaseModel
+class ExampleJson extends Model
 {
     protected $table = 'json_examples';
 
-    protected $insertFormat = 'JSONEachRow';
+    protected $guarded = [];
+
+    public $timestamps = false;
 
     protected $casts = ['f_flag' => 'boolean'];
 }

@@ -28,7 +28,6 @@
            'https' => false,
            'retries' => 0,
            'retry_on' => 'any',
-           'fix_default_query_builder' => true,
            'use_lightweight_delete' => false,
        ],
    ];
@@ -39,9 +38,9 @@
    ```php
    namespace App\Models\Clickhouse;
 
-   use Oralunal\LaravelClickHouse\BaseModel;
+   use Oralunal\LaravelClickHouse\Eloquent\Model;
 
-   class MyTable2 extends BaseModel
+   class MyTable2 extends Model
    {
        protected $connection = 'clickhouse2';
 
@@ -52,20 +51,35 @@
 4. Set the connection of a migration:
 
    ```php
-   return new class extends \Oralunal\LaravelClickHouse\Migration
+   use Illuminate\Database\Migrations\Migration;
+   use Illuminate\Support\Facades\Schema;
+   use Oralunal\LaravelClickHouse\SchemaBlueprint;
+
+   return new class extends Migration
    {
        protected $connection = 'clickhouse2';
 
-       public function up()
+       public function up(): void
        {
-           static::write('CREATE TABLE my_table2 ...');
+           Schema::connection($this->connection)->create('my_table2', function (SchemaBlueprint $table) {
+               $table->unsignedInteger('id');
+               $table->string('field_one');
+               $table->orderBy('id');
+           });
        }
 
-       public function down()
+       public function down(): void
        {
-           static::write('DROP TABLE my_table2');
+           Schema::connection($this->connection)->dropIfExists('my_table2');
        }
    };
+   ```
+
+5. Query the connection:
+
+   ```php
+   DB::connection('clickhouse2')->table('my_table2')->where('id', 1)->get();
+   MyTable2::where('id', 1)->get();
    ```
 
 The priority, from highest: the `connections` of `config/database.php`, then `config/clickhouse.php`, then the packaged defaults.

@@ -26,9 +26,9 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use RuntimeException;
-use Tests\Unit\ClickhouseBuilder\IntBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\StringBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\UnitEnumFixture;
+use Tests\Fixtures\IntBackedEnumFixture;
+use Tests\Fixtures\StringBackedEnumFixture;
+use Tests\Fixtures\UnitEnumFixture;
 
 class SchemaGrammarTest extends TestCase
 {
@@ -159,7 +159,7 @@ class SchemaGrammarTest extends TestCase
     public static function typeMappings(): array
     {
         return [
-            ['typeTinyInteger',  'Int16'],
+            ['typeTinyInteger',  'Int8'],
             ['typeInteger',      'Int32'],
             ['typeBigInteger',   'Int64'],
             ['typeString',       'String'],
@@ -277,46 +277,43 @@ class SchemaGrammarTest extends TestCase
     }
 
     /**
-     * @return array<string, array{string, bool, string, string}>
+     * Each integer type of Laravel's Blueprint has the ClickHouse type of its size and sign.
+     *
+     * @return array<string, array{string, bool, string}>
      */
     public static function integerTypes(): array
     {
         return [
-            'tinyInteger' => ['tinyInteger', false, 'Int16', 'Int8'],
-            'unsigned tinyInteger' => ['tinyInteger', true, 'Int16', 'UInt8'],
-            'smallInteger' => ['smallInteger', false, 'Int16', 'Int16'],
-            'unsigned smallInteger' => ['smallInteger', true, 'Int32', 'UInt16'],
-            'mediumInteger' => ['mediumInteger', false, 'Int32', 'Int32'],
-            'unsigned mediumInteger' => ['mediumInteger', true, 'Int32', 'UInt32'],
-            'integer' => ['integer', false, 'Int32', 'Int32'],
-            'unsigned integer' => ['integer', true, 'Int32', 'UInt32'],
-            'bigInteger' => ['bigInteger', false, 'Int64', 'Int64'],
-            'unsigned bigInteger' => ['bigInteger', true, 'Int64', 'UInt64'],
+            'tinyInteger' => ['tinyInteger', false, 'Int8'],
+            'unsigned tinyInteger' => ['tinyInteger', true, 'UInt8'],
+            'smallInteger' => ['smallInteger', false, 'Int16'],
+            'unsigned smallInteger' => ['smallInteger', true, 'UInt16'],
+            'mediumInteger' => ['mediumInteger', false, 'Int32'],
+            'unsigned mediumInteger' => ['mediumInteger', true, 'UInt32'],
+            'integer' => ['integer', false, 'Int32'],
+            'unsigned integer' => ['integer', true, 'UInt32'],
+            'bigInteger' => ['bigInteger', false, 'Int64'],
+            'unsigned bigInteger' => ['bigInteger', true, 'UInt64'],
         ];
     }
 
     #[DataProvider('integerTypes')]
-    public function test_integer_types(string $method, bool $unsigned, string $legacyType, string $exactType): void
+    public function test_integer_types(string $method, bool $unsigned, string $type): void
     {
-        $define = fn (Blueprint $t) => $t->{$method}('c', false, $unsigned);
-
-        $this->assertSame("`c` {$legacyType}", $this->compileColumn($define));
-        $this->assertSame("`c` {$legacyType}", $this->compileColumn($define, ['exact_integer_types' => false]));
-        $this->assertSame("`c` {$exactType}", $this->compileColumn($define, ['exact_integer_types' => true]));
-        $this->assertSame("`c` {$exactType}", $this->compileColumn($define, ['exact_integer_types' => '1']));
+        $this->assertSame("`c` {$type}", $this->compileColumn(fn (Blueprint $t) => $t->{$method}('c', false, $unsigned)));
     }
 
     /**
-     * @return array<string, array{\Closure(Blueprint): mixed, string, string}>
+     * @return array<string, array{\Closure(Blueprint): mixed, string}>
      */
     public static function integerShortcuts(): array
     {
         return [
-            'id' => [fn (Blueprint $t) => $t->id('c'), 'Int64', 'UInt64'],
-            'increments' => [fn (Blueprint $t) => $t->increments('c'), 'Int32', 'UInt32'],
-            'foreignId' => [fn (Blueprint $t) => $t->foreignId('c'), 'Int64', 'UInt64'],
-            'unsignedTinyInteger' => [fn (Blueprint $t) => $t->unsignedTinyInteger('c'), 'Int16', 'UInt8'],
-            'integer()->unsigned()' => [fn (Blueprint $t) => $t->integer('c')->unsigned(), 'Int32', 'UInt32'],
+            'id' => [fn (Blueprint $t) => $t->id('c'), 'UInt64'],
+            'increments' => [fn (Blueprint $t) => $t->increments('c'), 'UInt32'],
+            'foreignId' => [fn (Blueprint $t) => $t->foreignId('c'), 'UInt64'],
+            'unsignedTinyInteger' => [fn (Blueprint $t) => $t->unsignedTinyInteger('c'), 'UInt8'],
+            'integer()->unsigned()' => [fn (Blueprint $t) => $t->integer('c')->unsigned(), 'UInt32'],
         ];
     }
 
@@ -324,10 +321,9 @@ class SchemaGrammarTest extends TestCase
      * @param \Closure(Blueprint): mixed $define
      */
     #[DataProvider('integerShortcuts')]
-    public function test_integer_shortcuts(\Closure $define, string $legacyType, string $exactType): void
+    public function test_integer_shortcuts(\Closure $define, string $type): void
     {
-        $this->assertSame("`c` {$legacyType}", $this->compileColumn($define));
-        $this->assertSame("`c` {$exactType}", $this->compileColumn($define, ['exact_integer_types' => true]));
+        $this->assertSame("`c` {$type}", $this->compileColumn($define));
     }
 
     /**

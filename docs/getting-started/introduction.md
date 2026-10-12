@@ -3,6 +3,9 @@
 laravel-clickhouse connects Laravel to ClickHouse. It sends queries over HTTP with
 [smi2/phpClickHouse](https://github.com/smi2/phpClickHouse). It does not use PDO.
 
+The connection works with Laravel's own APIs: the `DB` facade, Laravel's query builder, Eloquent models,
+`Schema` and migrations. The package adds the ClickHouse parts to them.
+
 ## Requirements
 
 | Item | Version |
@@ -18,13 +21,11 @@ Newer versions return some results differently. See [ClickHouse versions](/refer
 
 | Area | Features |
 | --- | --- |
-| [Models](/models/defining-models) | `BaseModel` with `create()`, `save()`, casts, accessors, mutators and events |
-| [Inserts](/models/inserting-rows) | Batch inserts, in-memory buffers, the Buffer engine, JSONEachRow and file inserts |
-| [Eloquent models](/models/eloquent) | An Eloquent model with relations, eager loads, timestamps and ClickHouse mutations |
-| [Query builder](/query-builder/basics) | Laravel's query methods, `PREWHERE`, `SAMPLE`, `WITH`, `ARRAY JOIN`, ClickHouse joins, `INTERSECT`, `EXCEPT` and `SETTINGS` |
-| [Read results](/query-builder/reading-results) | `count()`, aggregates, `exists()`, `first()`, `value()`, `pluck()`, `chunk()`, pagination and `cursor()` |
+| [Models](/models/defining-models) | Eloquent models with casts, events, relations, timestamps and ClickHouse mutations |
+| [Inserts](/models/inserting-rows) | Batch inserts, in-memory buffers, Buffer engine tables, JSONEachRow and file inserts |
+| [Query builder](/query-builder/basics) | Laravel's query builder with `FINAL`, `PREWHERE`, `SAMPLE`, `WITH`, `ARRAY JOIN`, ClickHouse joins, `INTERSECT`, `EXCEPT` and `SETTINGS` |
+| [Read results](/query-builder/reading-results) | `count()`, aggregates, `exists()`, `first()`, `value()`, `pluck()`, `chunk()`, pagination, `cursor()` and results in any format |
 | [Mutations](/query-builder/writing-data) | Lightweight `DELETE`, `ALTER TABLE ... DELETE` and `UPDATE`, `OPTIMIZE` and `TRUNCATE`, with `IN PARTITION` and `ON CLUSTER` |
-| [Laravel's query builder](/query-builder/laravel-query-builder) | An option to use Laravel's own query builder, with `FINAL`, `PREWHERE`, `ARRAY JOIN`, ClickHouse joins, `SETTINGS` and the other ClickHouse clauses |
 | [Schema](/schema/schema-builder) | `Schema::create()` and `Schema::table()` with ClickHouse types, engines, keys, TTLs, settings and indexes |
 | [Migrations](/schema/migration-commands) | `migrate`, `migrate:rollback`, `migrate:status`, `migrate:fresh` and `schema:dump` on ClickHouse |
 | [Raw SQL](/advanced/raw-sql) | `?` bindings that the package writes as escaped ClickHouse literals |
@@ -37,10 +38,11 @@ Newer versions return some results differently. See [ClickHouse versions](/refer
 ## Credits
 
 The package is a fork of [glushkovds/phpclickhouse-laravel](https://github.com/glushkovds/phpclickhouse-laravel).
-It bundles code from these MIT-licensed projects. Each bundled directory keeps its license file.
+Versions 1.x to 3.x bundled code from these MIT-licensed projects. Version 4 uses Laravel's own query builder and
+schema builder instead, and bundles none of them:
 
-| Bundled as | Origin |
+| Project | Used in |
 | --- | --- |
-| `Oralunal\LaravelClickHouse\ClickhouseBuilder` | [the-tinderbox/ClickhouseBuilder](https://github.com/the-tinderbox/ClickhouseBuilder), through the [glushkovds](https://github.com/glushkovds/ClickhouseBuilder) and [oralunal](https://github.com/oralunal/ClickhouseBuilder) forks (v1.0.0) |
-| `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder` | [glushkovds/php-clickhouse-schema-builder](https://github.com/glushkovds/php-clickhouse-schema-builder) v1.1.1 by Denis Glushkov |
-| `Oralunal\LaravelClickHouse\Enum\Enum` | [myclabs/php-enum](https://github.com/myclabs/php-enum) 1.8.5 by My C-Labs |
+| [the-tinderbox/ClickhouseBuilder](https://github.com/the-tinderbox/ClickhouseBuilder), through the [glushkovds](https://github.com/glushkovds/ClickhouseBuilder) and [oralunal](https://github.com/oralunal/ClickhouseBuilder) forks | The query builder of 1.x to 3.x |
+| [glushkovds/php-clickhouse-schema-builder](https://github.com/glushkovds/php-clickhouse-schema-builder) by Denis Glushkov | `createMergeTree()` of 1.x to 3.x |
+| [myclabs/php-enum](https://github.com/myclabs/php-enum) by My C-Labs | The enums of 1.x to 3.x |

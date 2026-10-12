@@ -5,12 +5,13 @@ namespace Tests;
 use ClickHouseDB\Exception\DatabaseException;
 use ClickHouseDB\Transport\CurlerRolling;
 use DateTimeImmutable;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
 use LogicException;
-use Oralunal\LaravelClickHouse\Builder;
 use Oralunal\LaravelClickHouse\Exceptions\ParallelQueryException;
 use Oralunal\LaravelClickHouse\Parallel;
-use Oralunal\LaravelClickHouse\RawColumn;
+use Oralunal\LaravelClickHouse\QueryBuilder as Builder;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\Models\Example;
@@ -32,11 +33,6 @@ class ParallelTest extends TestCase
         $base = $config->get('database.connections.clickhouse');
         $config->set('database.connections.clickhouse-parallel-copy', $base);
         $config->set('database.connections.clickhouse-parallel-microsecond', ['datetime_precision' => 'microsecond'] + $base);
-        $config->set('database.connections.clickhouse-parallel-laravel', ['fix_default_query_builder' => false] + $base);
-        $config->set(
-            'database.connections.clickhouse-parallel-laravel-microsecond',
-            ['fix_default_query_builder' => false, 'datetime_precision' => 'microsecond'] + $base
-        );
         $config->set('database.connections.clickhouse-parallel-retries', ['retries' => 2] + $base);
     }
 
@@ -64,17 +60,11 @@ class ParallelTest extends TestCase
         parent::tearDown();
     }
 
-    /**
-     * Run a query on its own, as it runs outside a batch.
-     *
-     * @param mixed $query
-     * @return mixed
-     */
     private static function runAlone(mixed $query): mixed
     {
         return match (true) {
-            $query instanceof Builder => $query->getRows(),
-            $query instanceof \Illuminate\Database\Query\Builder => $query->get()->all(),
+            $query instanceof EloquentBuilder => $query->get(),
+            $query instanceof Builder => $query->get()->all(),
             default => DB::connection($query['connection'] ?? 'clickhouse')->select($query['sql'], $query['bindings'] ?? []),
         };
     }
@@ -86,7 +76,7 @@ class ParallelTest extends TestCase
     {
         $prefix = 'parallel_overlap_' . bin2hex(random_bytes(6));
         $sleep = fn (int $number): Builder => DB::connection('clickhouse')->table('system.one')
-            ->select(new RawColumn('sleep(0.5)', 's'))
+            ->select(DB::raw('sleep(0.5) as s'))
             ->settings('log_comment', "{$prefix}_{$number}");
 
         $rows = Parallel::getRows([$sleep(1), $sleep(2), $sleep(3)]);
@@ -104,13 +94,12 @@ class ParallelTest extends TestCase
     }
 
     /**
-     * The test table on a connection: the package builder, or Laravel's query builder on the connections whose name
-     * contains "laravel".
+     * The test table on a connection.
      *
      * @param string $connection
-     * @return Builder|\Illuminate\Database\Query\Builder
+     * @return Builder
      */
-    private static function events(string $connection = 'clickhouse'): Builder|\Illuminate\Database\Query\Builder
+    private static function events(string $connection = 'clickhouse'): Builder
     {
         return DB::connection($connection)->table(self::TABLE);
     }
@@ -124,33 +113,22 @@ class ParallelTest extends TestCase
     {
         $date = new DateTimeImmutable('2024-01-02 03:04:05.123456');
         $float = 0.1 + 0.2;
-        $laravel = 'clickhouse-parallel-laravel';
 
         return [
-            'package builder' => [fn () => self::events()->where('kind', 'a')->orderBy('id')->select(['id', 'v'])],
-            'package builder, float' => [fn () => self::events()->where('v', $float)->select('id')],
-            'package builder, date in seconds' => [fn () => self::events()->where('d', '>=', $date)->orderBy('id')->select('id')],
-            'package builder, date in microseconds' => [
+            'query builder' => [fn () => self::events()->where('kind', 'a')->where('v', '>', 0.2)->orderBy('id')->select(['id', 'v'])],
+            'query builder, float' => [fn () => self::events()->where('v', $float)->select('id')],
+            'query builder, date in seconds' => [fn () => self::events()->where('d', '>=', $date)->orderBy('id')->select('id')],
+            'query builder, date in microseconds' => [
                 fn () => self::events('clickhouse-parallel-microsecond')->where('d', $date)->select('id'),
             ],
-            'package builder, value that names a format' => [
+            'query builder, value that names a format' => [
                 fn () => self::events()->where('kind', 'export as format csv')->select('id'),
             ],
-            'package builder, settings' => [
-                fn () => self::events()->select(['kind', new RawColumn('count()', 'c')])->groupBy('kind')->orderBy('kind')
+            'query builder, settings' => [
+                fn () => self::events()->select(['kind', DB::raw('count() as c')])->groupBy('kind')->orderBy('kind')
                     ->settings('max_threads', 1),
             ],
             'model' => [fn () => Example::select('f_int')->where('f_int', '<', 0)],
-            'Laravel builder' => [
-                fn () => self::events($laravel)->where('kind', 'a')->where('v', '>', 0.2)->orderBy('id')->select(['id', 'v']),
-            ],
-            'Laravel builder, float' => [fn () => self::events($laravel)->where('v', $float)->select('id')],
-            'Laravel builder, date in seconds' => [
-                fn () => self::events($laravel)->where('d', '>=', $date)->orderBy('id')->select('id'),
-            ],
-            'Laravel builder, date in microseconds' => [
-                fn () => self::events('clickhouse-parallel-laravel-microsecond')->where('d', $date)->select('id'),
-            ],
             'SQL, ? bindings' => [
                 fn () => ['sql' => 'SELECT id FROM ' . self::TABLE . ' WHERE v = ? AND d >= ? ORDER BY id', 'bindings' => [$float, $date]],
             ],
@@ -167,8 +145,8 @@ class ParallelTest extends TestCase
             'SQL, ORDER BY an alias named format' => [
                 fn () => ['sql' => 'SELECT id, kind AS format FROM ' . self::TABLE . ' ORDER BY id DESC, format DESC'],
             ],
-            'Laravel builder, raw conditions on an alias named format' => [
-                fn () => self::events($laravel)->select(['id', 'kind as format'])->whereRaw("format IN ('a', 'b')")
+            'query builder, raw conditions on an alias named format' => [
+                fn () => self::events()->select(['id', 'kind as format'])->whereRaw("format IN ('a', 'b')")
                     ->orderByRaw('format DESC'),
             ],
         ];
@@ -181,8 +159,14 @@ class ParallelTest extends TestCase
     public function test_a_query_returns_in_a_batch_what_it_returns_alone(callable $query): void
     {
         $rows = Parallel::getRows(['query' => $query(), 'other' => ['sql' => 'SELECT 1 AS one']]);
+        $alone = self::runAlone($query());
 
-        $this->assertSame(self::runAlone($query()), $rows['query']);
+        if ($alone instanceof EloquentCollection) {
+            $this->assertInstanceOf(EloquentCollection::class, $rows['query']);
+            $this->assertSame($alone->toArray(), $rows['query']->toArray());
+        } else {
+            $this->assertSame($alone, $rows['query']);
+        }
         $this->assertSame([['one' => 1]], $rows['other']);
     }
 
@@ -191,10 +175,10 @@ class ParallelTest extends TestCase
         $rows = Parallel::getRows([
             'first' => self::events()->select('id')->where('id', 1),
             'second' => self::events('clickhouse-parallel-copy')->select('id')->where('id', 2),
-            'laravel' => self::events('clickhouse-parallel-laravel')->select('id')->where('id', 3),
+            'micro' => self::events('clickhouse-parallel-microsecond')->select('id')->where('id', 3),
         ]);
 
-        $this->assertSame(['first' => [['id' => 1]], 'second' => [['id' => 2]], 'laravel' => [['id' => 3]]], $rows);
+        $this->assertSame(['first' => [['id' => 1]], 'second' => [['id' => 2]], 'micro' => [['id' => 3]]], $rows);
     }
 
     /**
@@ -208,16 +192,13 @@ class ParallelTest extends TestCase
         }
 
         $rows = Parallel::getRows([
-            'node1' => Example::select()->getQueryForCount(),
-            'node2' => Example2::select()->getQueryForCount(),
+            'node1' => Example::query()->toBase()->selectRaw('toString(count()) as count'),
+            'node2' => Example2::query()->toBase()->selectRaw('toString(count()) as count'),
         ]);
 
         $this->assertSame(
-            ['node1' => [['count' => Example::select()->count()]], 'node2' => [['count' => Example2::select()->count()]]],
-            array_map(
-                fn (array $counts): array => array_map(fn (array $row): array => array_replace($row, ['count' => (int) $row['count']]), $counts),
-                $rows
-            )
+            ['node1' => [['count' => (string) Example::query()->count()]], 'node2' => [['count' => (string) Example2::query()->count()]]],
+            $rows
         );
     }
 
@@ -276,11 +257,11 @@ class ParallelTest extends TestCase
             )
             ->settings('max_threads', 2);
 
-        $this->assertSame(['set' => $query()->getRows()], Parallel::getRows(['set' => $query()]));
-        $this->assertSame([['id' => 1]], $query()->getRows());
+        $this->assertSame(['set' => $query()->get()->all()], Parallel::getRows(['set' => $query()]));
+        $this->assertSame([['id' => 1]], $query()->get()->all());
     }
 
-    public function test_a_package_builder_query_is_logged_as_get_logs_it(): void
+    public function test_a_query_builder_query_is_logged_as_get_logs_it(): void
     {
         $connection = DB::connection('clickhouse');
         $connection->enableQueryLog();
@@ -289,36 +270,34 @@ class ParallelTest extends TestCase
 
         $log = $connection->getQueryLog();
         $this->assertCount(1, $log);
-        $this->assertSame('SELECT `dummy` FROM `system`.`one` FORMAT JSON SETTINGS max_threads=1', $log[0]['query']);
+        $this->assertSame('select "dummy" from "system"."one" settings max_threads=1', $log[0]['query']);
         $this->assertGreaterThan(0, $log[0]['time']);
     }
 
     /**
-     * The count is a UInt64, which ClickHouse 24.8 quotes in JSON and 25.8 and later do not, so it is compared as an
-     * int.
+     * The count is selected as a string, since ClickHouse 24.8 quotes a UInt64 in JSON and 25.8 and later do not.
      */
-    public function test_a_count_and_an_existence_check_run_next_to_a_page(): void
+    public function test_a_count_runs_next_to_a_page(): void
     {
-        $query = fn (): Builder => DB::connection('clickhouse')->table(self::TABLE)->where('kind', 'a')->orderBy('id');
+        $query = fn (): Builder => DB::connection('clickhouse')->table(self::TABLE)->where('kind', 'a');
 
         $rows = Parallel::getRows([
-            'total' => $query()->getQueryForCount(),
-            'exists' => $query()->getQueryForExists(),
-            'page' => $query()->select('id')->getQueryForPage(1, 2),
+            'total' => $query()->selectRaw('toString(count()) as total'),
+            'page' => $query()->select('id')->orderBy('id')->forPage(2, 1),
         ]);
-        $rows['total'][0]['count'] = (int) $rows['total'][0]['count'];
 
-        $this->assertSame(['total' => [['count' => 2]], 'exists' => [['1' => 1]], 'page' => [['id' => 2]]], $rows);
+        $this->assertSame(['total' => [['total' => '2']], 'page' => [['id' => 2]]], $rows);
     }
 
     public function test_get_returns_the_statements(): void
     {
         $statements = Parallel::get([
-            'csv' => DB::connection('clickhouse')->table(self::TABLE)->select('id')->orderBy('id')->format('CSV'),
+            'ids' => DB::connection('clickhouse')->table(self::TABLE)->select('id')->orderBy('id'),
             'rows' => ['sql' => 'SELECT 1 AS one'],
         ]);
 
-        $this->assertSame("1\n2\n3\n4\n", $statements['csv']->rawData());
+        $this->assertSame([['id' => 1], ['id' => 2], ['id' => 3], ['id' => 4]], $statements['ids']->rows());
+        $this->assertSame(4, $statements['ids']->count());
         $this->assertSame([['one' => 1]], $statements['rows']->rows());
     }
 

@@ -58,7 +58,7 @@ jobs:
       - name: Install dependencies
         run: composer update --prefer-dist --no-interaction --no-progress
 
-      # GrammarLiteralTest checks that floats are written with a dot under a locale with a decimal comma, and skips
+      # LiteralGrammarTest checks that floats are written with a dot under a locale with a decimal comma, and skips
       # when none is installed; the runner image has none.
       - name: Generate a locale with a decimal comma
         run: sudo locale-gen de_DE.UTF-8
@@ -114,7 +114,7 @@ jobs:
       - name: Install dependencies
         run: composer update --prefer-dist --no-interaction --no-progress
 
-      # GrammarLiteralTest checks that floats are written with a dot under a locale with a decimal comma, and skips
+      # LiteralGrammarTest checks that floats are written with a dot under a locale with a decimal comma, and skips
       # when none is installed; the runner image has none.
       - name: Generate a locale with a decimal comma
         run: sudo locale-gen de_DE.UTF-8

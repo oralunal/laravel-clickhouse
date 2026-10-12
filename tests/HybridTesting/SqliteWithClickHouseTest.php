@@ -93,7 +93,6 @@ class SqliteWithClickHouseTest extends TestCase
             'database' => self::DATABASE,
             'username' => env('CLICKHOUSE_USERNAME', 'default'),
             'password' => env('CLICKHOUSE_PASSWORD', ''),
-            'fix_default_query_builder' => true,
         ]);
     }
 

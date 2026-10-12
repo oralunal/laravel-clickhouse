@@ -24,15 +24,11 @@ use Oralunal\LaravelClickHouse\Exceptions\QueryException;
  * Run SELECT queries at the same time, over one curl multi handle, and get the statement or the rows of each.
  *
  * A batch takes about as long as its slowest query, and its queries may run on different connections and nodes.
- * Each query is sent as its own run would send it:
- * - a query of the package builder (a model query, or DB::connection()->table() with fix_default_query_builder on)
- *   as get() sends it: the SQL of getQueryToSend(), on the builder's client, logged with the time of its request,
- *   also when it fails;
- * - a Laravel query builder on a ClickHouse connection, the query of an Eloquent builder (its toBase()), and SQL
- *   given as an array, as Connection::select() sends them: the bindings are prepared and the FORMAT clause is
- *   checked (see Connection::prepareSelectForClient()),
- *   the connection's beforeExecuting() callbacks run before the batch is sent, a query is logged with the time of
- *   its request only when it succeeds, and while the connection pretends nothing is sent and the rows are empty.
+ * A query builder on a ClickHouse connection, the query of an Eloquent builder (its toBase()), and SQL given as an
+ * array are sent as Connection::select() sends them: the bindings are prepared and the FORMAT clause is checked (see
+ * Connection::prepareSelectForClient()), the connection's beforeExecuting() callbacks run before the batch is sent, a
+ * query is logged with the time of its request only when it succeeds, and while the connection pretends nothing is
+ * sent and the rows are empty.
  *
  * Every query is compiled and checked before anything is sent, so a query that fails to compile sends nothing. The
  * requests are built by ClientRequests::selectRequest(), which reads a result in the right format also when a value
@@ -42,14 +38,14 @@ use Oralunal\LaravelClickHouse\Exceptions\QueryException;
  * CurlerRollingWithRetries). A client with a ClickHouse session is refused: ClickHouse runs one query of a session
  * at a time, and smi2 would send a request with a session id again and again.
  *
- * @phpstan-type Entry Builder|LaravelBuilder|EloquentBuilder<\Illuminate\Database\Eloquent\Model>|array{
+ * @phpstan-type Entry LaravelBuilder|EloquentBuilder<\Illuminate\Database\Eloquent\Model>|array{
  *     sql: string,
  *     bindings?: array<int|string, mixed>,
  *     connection?: string|Connection
  * }
  * @phpstan-type PreparedQuery array{
- *     type: 'builder'|'laravel'|'sql',
- *     query: Builder|LaravelBuilder|null,
+ *     type: 'laravel'|'sql',
+ *     query: LaravelBuilder|null,
  *     eloquent?: EloquentBuilder<\Illuminate\Database\Eloquent\Model>,
  *     client: Client|null,
  *     connection: Connection|null,
@@ -58,8 +54,8 @@ use Oralunal\LaravelClickHouse\Exceptions\QueryException;
  *     request: CurlerRequest|null
  * }
  * @phpstan-type SentQuery array{
- *     type: 'builder'|'laravel'|'sql',
- *     query: Builder|LaravelBuilder|null,
+ *     type: 'laravel'|'sql',
+ *     query: LaravelBuilder|null,
  *     eloquent?: EloquentBuilder<\Illuminate\Database\Eloquent\Model>,
  *     client: Client|null,
  *     connection: Connection|null,
@@ -80,12 +76,12 @@ class Parallel
     /**
      * Run queries at the same time and return the statement of each, keyed and ordered as given.
      *
-     * A failed query does not throw here, as with Builder::get(): its statement throws when its rows are read. The
-     * statements give totals(), extremes(), countAll(), or the rawData() of a format() of the package builder.
+     * A failed query does not throw here: its statement throws when its rows are read. The statements give totals(),
+     * extremes() and countAll().
      *
-     * @param array<int|string, Entry> $queries A query of the package builder, a Laravel query builder or an Eloquent
-     *             builder on a ClickHouse connection, or an array with the SQL of a SELECT, its bindings and its
-     *             connection (a name or a Connection, Connection::DEFAULT_NAME when left out)
+     * @param array<int|string, Entry> $queries A query builder or an Eloquent builder on a ClickHouse connection, or an
+     *             array with the SQL of a SELECT, its bindings and its connection (a name or a Connection,
+     *             Connection::DEFAULT_NAME when left out)
      * @param int $concurrency How many requests are in flight at once, at least 2
      * @return array<int|string, Statement>
      * @throws InvalidArgumentException When an entry is invalid or the concurrency is below 2, before anything is
@@ -106,8 +102,8 @@ class Parallel
     /**
      * Run queries at the same time and return the rows of each, keyed and ordered as given.
      *
-     * The rows are those of getRows() on the package builder and of select() on a connection; the rows of a Laravel
-     * query builder go through its processor and its afterQuery() callbacks, as get() would return them, as an array.
+     * The rows of SQL are those of select() on a connection; the rows of a query builder go through its processor and
+     * its afterQuery() callbacks, as get() would return them, as an array.
      * An Eloquent builder gives an Eloquent collection of its models, as its get() does: the models are hydrated from
      * the rows, and their eager loads, with(), are loaded after the batch, one query after the other.
      * When a query fails, every other query still runs to its end, and a ParallelQueryException is thrown with the
@@ -180,9 +176,7 @@ class Parallel
         static::verifyNoSession($prepared);
 
         foreach ($prepared as $query) {
-            if ($query['type'] !== 'builder') {
-                $query['connection']->runBeforeExecutingCallbacks($query['sql'], $query['bindings']);
-            }
+            $query['connection']->runBeforeExecutingCallbacks($query['sql'], $query['bindings']);
         }
 
         $sent = static::send($prepared, $concurrency);
@@ -211,9 +205,7 @@ class Parallel
                 $query = $query->toBase();
             }
 
-            if ($query instanceof Builder) {
-                $prepared[$key] = static::prepareBuilder($query);
-            } elseif ($query instanceof LaravelBuilder) {
+            if ($query instanceof LaravelBuilder) {
                 $connection = $query->getConnection();
                 if (!$connection instanceof Connection) {
                     throw static::notAClickHouseConnection($key, $connection);
@@ -238,8 +230,8 @@ class Parallel
                 $prepared[$key] = static::prepareSelect($key, null, $connection, $query['sql'], $bindings);
             } else {
                 throw new InvalidArgumentException(sprintf(
-                    'Parallel query [%s] must be a query builder of this package, a Laravel or Eloquent query builder'
-                    . ' or an array with an sql string, %s given.',
+                    'Parallel query [%s] must be a query builder, an Eloquent query builder or an array with an sql'
+                    . ' string, %s given.',
                     $key,
                     get_debug_type($query)
                 ));
@@ -247,30 +239,6 @@ class Parallel
         }
 
         return $prepared;
-    }
-
-    /**
-     * Prepare a query of the package builder as get() sends it: the SQL of getQueryToSend(), with its format, on
-     * the builder's client, without bindings.
-     *
-     * @param Builder $builder
-     * @return PreparedQuery
-     */
-    protected static function prepareBuilder(Builder $builder): array
-    {
-        $query = $builder->getQueryToSend();
-        $sql = $query->toSql();
-        $client = $builder->getQueryClient();
-
-        return [
-            'type' => 'builder',
-            'query' => $builder,
-            'client' => $client,
-            'connection' => null,
-            'sql' => $sql,
-            'bindings' => [],
-            'request' => ClientRequests::selectRequest($client, $sql, [], $query->getFormat()?->getValue()),
-        ];
     }
 
     /**
@@ -512,9 +480,8 @@ class Parallel
     }
 
     /**
-     * Log each query, in the order given, as its own run logs it: a query of the package builder on the connection
-     * of its name, as get() logs it, also when it failed; any other query on its connection, as select() logs it,
-     * with its SQL and bindings as given, only when it succeeded.
+     * Log each query, in the order given, on its connection, as select() logs it: with its SQL and bindings as given,
+     * only when it succeeded.
      *
      * @param array<int|string, SentQuery> $sent
      * @return void
@@ -522,9 +489,7 @@ class Parallel
     protected static function log(array $sent): void
     {
         foreach ($sent as $query) {
-            if ($query['type'] === 'builder') {
-                $query['query']->resolveConnection()->logQuery($query['sql'], [], $query['time']);
-            } elseif (!$query['statement']->isError()) {
+            if (!$query['statement']->isError()) {
                 $query['connection']->logQuery($query['sql'], $query['bindings'], $query['time']);
             }
         }
@@ -534,11 +499,11 @@ class Parallel
      * Get the result of a query from its rows: the rows of a Laravel query builder go through its processor and its
      * afterQuery() callbacks, as its get() does, and come back as an array when the callbacks return a collection.
      *
-     * @param Builder|LaravelBuilder|null $query
+     * @param LaravelBuilder|null $query
      * @param array<int, mixed> $rows
      * @return mixed
      */
-    protected static function resultOf(Builder|LaravelBuilder|null $query, array $rows): mixed
+    protected static function resultOf(?LaravelBuilder $query, array $rows): mixed
     {
         if (!$query instanceof LaravelBuilder) {
             return $rows;
@@ -557,11 +522,11 @@ class Parallel
      * are empty, so it gives an empty collection.
      *
      * @param EloquentBuilder<\Illuminate\Database\Eloquent\Model> $eloquent
-     * @param Builder|LaravelBuilder|null $query The query of the Eloquent builder, its toBase()
+     * @param LaravelBuilder|null $query The query of the Eloquent builder, its toBase()
      * @param array<int, mixed> $rows
      * @return mixed
      */
-    protected static function modelsOf(EloquentBuilder $eloquent, Builder|LaravelBuilder|null $query, array $rows): mixed
+    protected static function modelsOf(EloquentBuilder $eloquent, ?LaravelBuilder $query, array $rows): mixed
     {
         if ($query instanceof LaravelBuilder) {
             $rows = $query->getProcessor()->processSelect($query, $rows);

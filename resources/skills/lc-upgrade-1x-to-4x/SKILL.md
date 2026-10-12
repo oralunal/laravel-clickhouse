@@ -1,6 +1,6 @@
 ---
 name: lc-upgrade-1x-to-4x
-description: Upgrades a Laravel application from oralunal/phpclickhouse-laravel 1.x to oralunal/laravel-clickhouse 4.x in one go. Switches the Composer packages, renames the 1.x namespaces (Tinderbox\ClickhouseBuilder, PhpClickHouseSchemaBuilder, PhpClickHouseLaravel) to Oralunal\LaravelClickHouse, imports the helper functions that are no longer global, replaces removed APIs, then fixes and reviews what 4.0 changes, and verifies the result. Use when the user runs /lc-upgrade-1x-to-4x or asks to upgrade phpclickhouse-laravel 1.x to laravel-clickhouse 4.
+description: Upgrades a Laravel application from oralunal/phpclickhouse-laravel 1.x to oralunal/laravel-clickhouse 4.x in one go. Switches the Composer packages, renames the 1.x namespaces (Tinderbox\ClickhouseBuilder, PhpClickHouseSchemaBuilder, PhpClickHouseLaravel) to Oralunal\LaravelClickHouse, replaces removed APIs, then rewrites the code that 4.0 removes (BaseModel, the package's query builder, Migration, the helpers) and reviews what 4.0 changes, and verifies the result. Use when the user runs /lc-upgrade-1x-to-4x or asks to upgrade phpclickhouse-laravel 1.x to laravel-clickhouse 4.
 ---
 
 # phpclickhouse-laravel 1.x → laravel-clickhouse 4.x upgrade
@@ -9,26 +9,29 @@ You are upgrading this Laravel application from `oralunal/phpclickhouse-laravel`
 1.x to `oralunal/laravel-clickhouse` 4.x, without stopping at 2.x or 3.x. It is
 done in two parts:
 
-1. **The move to the new classes (this skill, steps 1 to 8).** 2.0 bundled the
+1. **The move to the new names (this skill, steps 1 to 8).** 2.0 bundled the
    libraries that 1.x depended on, and 3.0 renamed the package and its
-   namespace. Together:
+   namespace. These steps give the 3.x names. 4.0 removes most of these
+   classes, and step 9 rewrites the code that uses them:
 
-   | 1.x | 4.x |
+   | 1.x | 3.x name (after step 3) |
    | --- | --- |
    | `oralunal/phpclickhouse-laravel` | `oralunal/laravel-clickhouse` |
    | `PhpClickHouseLaravel\…` (the package's own classes) | `Oralunal\LaravelClickHouse\…` |
    | `oralunal/clickhouse-builder` (`Tinderbox\ClickhouseBuilder\…`) | `Oralunal\LaravelClickHouse\ClickhouseBuilder\…` |
    | `glushkovds/php-clickhouse-schema-builder` (`PhpClickHouseSchemaBuilder\…`) | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\…` |
    | `myclabs/php-enum` (`MyCLabs\Enum\Enum`, used by the builder enums) | `Oralunal\LaravelClickHouse\Enum\Enum` |
-   | global `raw()`, `tp()`, `array_flatten()` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\raw()`, `…\tp()`, `…\array_flatten()` |
+   | global `raw()`, `tp()`, `array_flatten()` | removed in 4.0: `DB::raw()`, `tap()`, `Arr::flatten()` (step 4) |
 
    Class names and the folder layout below each prefix are the same, for
    example `PhpClickHouseSchemaBuilder\Tables\MergeTree` →
    `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree`.
 
-2. **The 4.0 changes (step 9).** 4.0 brings breaking changes and behavior
-   changes. They are handled by the steps of the `lc-upgrade-3x-to-4x` skill,
-   which you follow from its step 3.
+2. **The 4.0 changes (step 9).** 4.0 removes the package's model
+   (`BaseModel`), query builder, migration class (`Migration`), schema builder
+   classes, enums and helpers, without a deprecation phase, and changes some
+   behavior. The steps of the `lc-upgrade-3x-to-4x` skill handle this; you
+   follow them from its step 3.
 
 Work through the steps in order. Do not skip the checks, and do not stop at the
 first file you fix: the goal is zero remaining references. Once the package is
@@ -129,7 +132,9 @@ is unclear.
    it is listed. The package's own provider is auto-discovered.
 
 The `artisan` scripts that Composer runs may fail with a class-not-found error
-for a 1.x class until steps 3 and 4 are done; continue.
+for a 1.x class until steps 3 and 4 are done, and for a class that 4.0 removes,
+such as `Oralunal\LaravelClickHouse\BaseModel`, until step 9 is done;
+continue.
 
 ## Step 3: Rename the namespaces
 
@@ -170,34 +175,27 @@ especially closures typed as `fn (MergeTree $table) => …` passed to
 `static::createMergeTree()`. Fix every migration, including ones that already
 ran: they are loaded again on a fresh install, in CI and by `migrate:fresh`.
 
-`MyCLabs\Enum\Enum`: the package's enums (`Operator`, `Format`, `JoinType`,
-`JoinStrict`, `OrderDirection`) now extend `Oralunal\LaravelClickHouse\Enum\Enum`.
-Their constants and methods (`isValid()`, `getValue()`, `Operator::EQUALS()`
-and so on) are unchanged. Only update code that type-checks a package enum
-against `MyCLabs\Enum\Enum`, for example with `instanceof` or a parameter type.
-Leave the application's own enums that extend `MyCLabs\Enum\Enum` alone; step
-2.2 keeps that package installed for them.
+`MyCLabs\Enum\Enum`: 4.0 removes the package's enums (`Operator`, `Format`,
+`JoinType`, `JoinStrict`, `OrderDirection`); step 9 replaces their uses
+(operators and directions become strings, `Format` becomes the native enum
+`Oralunal\LaravelClickHouse\Enums\Format`). Leave the application's own
+enums that extend `MyCLabs\Enum\Enum` alone; step 2.2 keeps that package
+installed for them.
 
-## Step 4: Import the helper functions
+## Step 4: Check the helper functions
 
-`raw()`, `tp()` and `array_flatten()` are no longer global. They are now
-`Oralunal\LaravelClickHouse\ClickhouseBuilder\raw()`, `…\tp()` and
-`…\array_flatten()`.
+`raw()`, `tp()` and `array_flatten()` were global functions in 1.x. 4.0 has no
+such functions, so do not import them. Step 9 replaces each call:
+`raw('count()')` with `DB::raw('count()')` (`Illuminate\Support\Facades\DB`),
+`tp($value, $callback)` with `tap($value, $callback)`, and
+`array_flatten($array)` with `Arr::flatten($array)`
+(`Illuminate\Support\Arr`).
 
-For every file that calls one of them as a bare function, add the matching
-import. Put it after the `namespace` line and with the other `use` statements;
-in a file without a namespace, such as an anonymous migration or a route file,
-put it right after `<?php`:
-
-```php
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
-```
-
-Before you add the import, check that the call really used this helper and not
-some other global function with the same name. `array_flatten()` in
+For now, check that each call from step 1 really used this package's helper
+and not some other global function with the same name. `array_flatten()` in
 particular may come from another helper package. If the project defines its
 own global `raw()`, `tp()` or `array_flatten()`, ask the user which one each
-call means.
+call means, and leave the calls that are not the package's alone in step 9.
 
 ## Step 5: Refresh Laravel's caches
 
@@ -228,30 +226,24 @@ This package never sent their files to ClickHouse, so they could not work in
 
 | Removed | Replacement |
 | --- | --- |
-| `->addFile(...)`, `->getFiles()`, `->values(...)`, `->getValues()` on the builder | Insert rows with `Model::insertAssoc()`, `Model::insertBulk()` or `Model::buffer()` |
+| `->addFile(...)`, `->getFiles()`, `->values(...)`, `->getValues()` on the builder | Insert rows with `Model::insert()`, `Model::buffer()`, or `insertFiles()` of the query builder |
 | `into_memory_table()`, `file_from()` | Same as above |
-| `Tinderbox\ClickhouseBuilder\Query\Builder` (Tinderbox-client builder) | `Model::select()` / `Model::where()` or `DB::connection('clickhouse')->table(...)` |
-| `Tinderbox\ClickhouseBuilder\Integrations\Laravel\Connection` / `Builder` | `Oralunal\LaravelClickHouse\Connection` / `Oralunal\LaravelClickHouse\Builder` |
+| `Tinderbox\ClickhouseBuilder\Query\Builder` (Tinderbox-client builder) | `Model::query()` or `DB::connection('clickhouse')->table(...)` |
+| `Tinderbox\ClickhouseBuilder\Integrations\Laravel\Connection` / `Builder` | `Oralunal\LaravelClickHouse\Connection` / `Oralunal\LaravelClickHouse\QueryBuilder` |
 
 If you find any of these, explain what the code tried to do and propose the
 replacement. Then **ask the user before changing it**: the right fix depends on
 what the data is.
-
-`Column::subQuery()` and `Column::getSubQuery()` now return
-`Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder`. Update code
-that type-hints the old `Query\Builder` return value.
 
 ## Step 7: Check `IN` conditions with a string value
 
 In 1.x, `whereIn()` and its variants (`preWhereIn()`, `whereGlobalIn()`,
 `havingIn()`, the `or…` and `…NotIn` forms) treated a string as a table name
 only when that same builder had added a file with that name through
-`addFile()`. Every other string was already quoted as a value, exactly as it
-is in 4.x:
-
-```php
-$query->whereIn('id', 'ids'); // WHERE `id` IN 'ids' in 1.x and in 4.x
-```
+`addFile()`. Every other string was quoted as one value:
+`whereIn('id', 'ids')` gave ``WHERE `id` IN 'ids'``. In 4.x these methods are
+Laravel's: they take a list, a collection or a sub-query, and a string throws
+a `TypeError`.
 
 For each match from step 1 whose second argument is a string (a literal or a
 variable holding one) rather than an array or a closure:
@@ -259,13 +251,13 @@ variable holding one) rather than an array or a closure:
 - **The same builder called `addFile()` with that name** (step 6): the string
   named a temporary table. Handle it together with the `addFile()` call from
   step 6, and ask the user. Where the table now exists in ClickHouse, the
-  equivalent is `->whereIn('id', raw('table_name'))` (import `raw` as in
-  step 4), or a sub-query closure such as
-  `->whereIn('id', fn ($q) => $q->select('id')->from('table_name'))`.
-- **Anything else: do not change it.** The compiled SQL is the same as in 1.x.
-  If the string looks like a table name, the code was probably already wrong
-  in 1.x. List it in the report as a possible existing bug, with the SQL it
-  produces, but leave it as it is.
+  equivalent is a sub-query closure, such as
+  `->whereIn('id', fn ($q) => $q->select('id')->from('table_name'))`, or
+  `->whereRaw('id in table_name')`.
+- **Anything else:** the string was one value. Write it as a list,
+  `->whereIn('id', [$value])`, which gives the same rows. If the string looks
+  like a table name, the code was probably already wrong in 1.x: list it in
+  the report as a possible existing bug.
 
 ## Step 8: Tell the user about the `migrate:fresh` change
 
@@ -295,12 +287,11 @@ Do not change code for this. Instead:
    environment must be allowed to create and drop databases.
 
 Before you go on, check the move: `composer dump-autoload` and
-`php artisan package:discover` must finish without errors, `php -l` must pass
-on every PHP file you changed, and the searches of step 1 must only find what
-steps 3 to 7 left on purpose (the helper calls, each with its
-`use function Oralunal\LaravelClickHouse\ClickhouseBuilder\…;` import; the
-application's own `MyCLabs\Enum` enums, with `myclabs/php-enum` required; the
-`IN` conditions that step 7 told you to leave).
+`php artisan package:discover` must finish without errors, or fail only with a
+class-not-found error for a class that 4.0 removes, which step 9 fixes. `php -l`
+must pass on every PHP file you changed, and the searches of step 1 must only
+find what steps 3 to 7 left on purpose (the helper calls, for step 9; the
+application's own `MyCLabs\Enum` enums, with `myclabs/php-enum` required).
 
 ## Step 9: Apply the 4.0 changes
 

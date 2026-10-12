@@ -72,8 +72,7 @@ class SchemaState extends BaseSchemaState
      * written by 3.0.0 is loaded the same way.
      *
      * Without a cluster_name, each statement goes to every node of the
-     * connection, one after another, the same way migrations written with
-     * Migration::write() do.
+     * connection, one after another, as statementOnEveryNode() sends it.
      *
      * On a connection with a cluster_name, each CREATE TABLE, VIEW,
      * MATERIALIZED VIEW or DICTIONARY statement gets

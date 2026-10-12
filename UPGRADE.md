@@ -20,12 +20,21 @@ for the list of names. It also removes the skills of earlier releases,
 PHP (`^8.5`) and Laravel (`^13`) requirements, the package name and the
 `Oralunal\LaravelClickHouse` namespace are unchanged.
 
-4.0 makes the package write what Laravel's APIs declare and refuse what
-ClickHouse would get wrong. Most of it fixes what 3.x did wrong, but it has a
-few breaking changes, and some behavior changes alter which rows a write
-touches, which values it stores, or which tables a migration creates. The
-`[4.0.0]` section of the [CHANGELOG](CHANGELOG.md) lists every change with the
-SQL before and after; this guide covers what you may have to change or check.
+4.0 is a clean break. The package no longer has a model, a query builder, a
+schema builder or a migration class of its own. You use Laravel's:
+
+| 3.x | 4.0 |
+| --- | --- |
+| `Oralunal\LaravelClickHouse\BaseModel` | `Oralunal\LaravelClickHouse\Eloquent\Model`, an Eloquent model |
+| The package's `Builder` (`ClickhouseBuilder\…`) | `Oralunal\LaravelClickHouse\QueryBuilder`, Laravel's query builder with the ClickHouse clauses |
+| `Oralunal\LaravelClickHouse\Migration` (`write()`, `createMergeTree()`) | Laravel migrations, with `Schema` and `DB` |
+| `ClickhouseSchemaBuilder\Tables\MergeTree` | Laravel's schema builder, `Oralunal\LaravelClickHouse\SchemaBlueprint` |
+| `RawColumn`, `raw()`, `Expression`, `InsertArray` | `DB::raw()`, `selectRaw()`, a PHP array |
+| `Enum\Enum` and the builder enums | Native enums: `Enums\Format`, `Enums\DateTimePrecision` |
+
+There is no deprecation phase: the old classes are gone. The `[4.0.0]` section
+of the [CHANGELOG](CHANGELOG.md) lists every change; this guide covers what you
+have to change or check.
 
 ### Let your coding agent do it
 
@@ -34,6 +43,14 @@ SQL before and after; this guide covers what you may have to change or check.
    ```sh
    composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
    php artisan clickhouse:install-skills
+   ```
+
+   If `php artisan` fails because a class of your app extends a removed class,
+   such as `BaseModel`, copy the skill by hand instead:
+
+   ```sh
+   mkdir -p .claude/skills
+   cp -r vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-3x-to-4x .claude/skills/
    ```
 
 2. In your agent, run:
@@ -45,13 +62,20 @@ SQL before and after; this guide covers what you may have to change or check.
    If your agent does not offer skills as slash commands, ask it to
    "upgrade laravel-clickhouse to 4.x".
 
-The agent fixes the code that 4.0 breaks, reviews with you the writes and the
-migrations whose behavior changes, checks the result, and reports how the test
-suite compares with the run before the upgrade. It never runs
-`migrate:fresh` or changes the data of a real database, and it asks before it
-changes a write or a migration that already ran.
+The agent rewrites the models, the queries and the migrations for 4.0, reviews
+with you the writes and the migrations whose behavior changes, checks the
+result, and reports how the test suite compares with the run before the
+upgrade. It never runs `migrate:fresh` or changes the data of a real database,
+and it asks before it changes what a write does.
 
 ### Or upgrade by hand
+
+To find the code that 4.0 breaks, run:
+
+```sh
+grep -rnE 'BaseModel|LaravelClickHouse\\(Builder|Migration|RawColumn|Grammar|WithClient)\b|ClickhouseBuilder|ClickhouseSchemaBuilder|Enum\\Enum|InsertArray|insertAssoc|insertBulk|prepareAndInsert|getRows\(|getThisClient|createMergeTree|static::write\(|fix_default_query_builder|asyncWithQuery|getQueryFor|(^|[^\w>:$\\])(raw|tp|array_flatten)\(' \
+  app config database routes tests
+```
 
 #### 1. Update the dependency
 
@@ -59,164 +83,327 @@ changes a write or a migration that already ran.
 composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
 ```
 
-#### 2. Subclasses of the package's classes
+#### 2. Configuration
 
-A subclass whose override no longer matches its parent fails to load with
-`Declaration of ... must be compatible with ...`. These signatures changed:
+Remove `fix_default_query_builder` from your ClickHouse connections. In 4.0,
+`DB::connection('clickhouse')->table()` and `->query()` always return
+`Oralunal\LaravelClickHouse\QueryBuilder`, Laravel's query builder with the
+ClickHouse clauses. The packaged `config/clickhouse.php` has new, optional
+options, such as `use_lightweight_delete`, `datetime_precision`,
+`insert_format`, `engine` and `use_on_cluster`. Their defaults keep the 3.x
+behavior.
 
-| Class | 3.x | 4.0 |
-| --- | --- | --- |
-| `Builder` | `insert(array $values)`, returned nothing | `insert(array $values, ?string $format = null): Statement` |
-| `Builder` | `delete(): Statement` | `delete(?bool $lightweight = null, int\|string\|Expression\|ExpressionContract\|null $partition = null): Statement` |
-| `Builder` | `update(array $values): Statement` | `update(array $values, int\|string\|Expression\|ExpressionContract\|null $partition = null): Statement` |
-| `Builder` | `settings(array $settings): self` | `settings(array\|string $settings, mixed $value = null): self` |
-| `BaseBuilder` | `sample(float $coefficient)` | `sample(float $coefficient, ?float $offset = null)` |
-| `BaseModel` | `optimize(bool $final = false, ?string $partition = null): Statement` | `optimize(bool $final = false, int\|string\|Expression\|ExpressionContract\|null $partition = null): Statement` |
-| `SchemaBuilder` | `build(Blueprint $blueprint)` | `build(Blueprint $blueprint): void` |
+#### 3. Models
 
-`Expression` is `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression`
-and `ExpressionContract` is `Illuminate\Contracts\Database\Query\Expression`.
-4.0 also adds public and protected members to the package's classes; a
-subclass member of the same name must be compatible with it. The CHANGELOG
-entry "Breaking for code that extends the package" lists them.
-
-A `BaseBuilder` subclass that overrides `where()` to see every condition must
-override the protected `addCondition()` instead: `orWhere()`, `orPreWhere()`,
-`orHaving()`, `whereDict()` and `orWhereDict()` no longer call `where()`.
-
-#### 3. Removed `BaseModel` methods
-
-`BaseModel` no longer uses Eloquent's `HasAttributes` trait, which made
-Larastan report `class.missingExtends` on every model. It uses the package's
-own `Oralunal\LaravelClickHouse\Concerns\HasAttributes`, which keeps the
-attribute API: `$model->column`, `fill()`, `getAttributes()`, `$casts`,
-accessors, mutators and `toArray()`.
-
-The stubs that 3.x had only for Eloquent's trait are gone:
-`usesTimestamps()`, `getRelationValue()`, `relationResolver()`,
-`relationLoaded()`, `isRelation()` and `relationsToArray()`, and Eloquent's
-protected methods such as `initializeHasAttributes()`, `casts()`,
-`getAttributesForInsert()` and `getDirtyForUpdate()`. A call to one of them
-fails with `Call to undefined method`, and the package no longer calls an
-override of one of them:
-
-- A model whose `usesTimestamps()` returned `true` had the columns of its
-  `getCreatedAtColumn()` and `getUpdatedAtColumn()` as date columns. Cast them
-  instead: `protected $casts = ['created_at' => 'datetime', 'updated_at' => 'datetime'];`.
-- A model whose `getRelationValue()`, `relationLoaded()` or
-  `relationResolver()` computed a value for a key: use an accessor.
-
-#### 4. SQL in the aggregates
-
-`min()`, `max()`, `sum()`, `avg()`, `average()` and `aggregate()` on the
-package's query builder now quote a string as a column name, as `select()`
-does. In 3.x, a column taken from user input, as in
-`->max($request->metric)`, could add SQL to the query. Plain and dotted names
-work as before. Pass SQL with `raw()`:
+Extend `Oralunal\LaravelClickHouse\Eloquent\Model` instead of `BaseModel`. It
+is an Eloquent model. Its key is not incrementing and is a string by default.
 
 ```php
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
+// 3.x
+use Oralunal\LaravelClickHouse\BaseModel;
 
-MyTable::where('active', 1)->sum('price * qty');      // 3.x: sum(price * qty); 4.0: fails with UNKNOWN_IDENTIFIER
-MyTable::where('active', 1)->sum(raw('price * qty')); // sum(price * qty)
+class Event extends BaseModel
+{
+    protected $table = 'events';
+}
+
+// 4.0
+use Oralunal\LaravelClickHouse\Eloquent\Model;
+
+class Event extends Model
+{
+    protected $table = 'events';
+
+    public $timestamps = false; // unless the table has created_at and updated_at
+
+    protected $guarded = [];    // BaseModel filled every attribute
+}
 ```
 
-The same goes for `aggregate('count', ['DISTINCT user_id'])` and the
-condition of `aggregate('sumIf', ['a', 'a > 1'])`. Laravel's query builder
-(`fix_default_query_builder` set to `false`) already quoted these names.
+| 3.x | 4.0 |
+| --- | --- |
+| `Event::insertAssoc($rows)` | `Event::insert($rows)` |
+| `Event::insertBulk($rows, $columns)` | `Event::insert(array_map(fn (array $row): array => array_combine($columns, $row), $rows))` |
+| `Event::prepareAndInsertAssoc()`, `prepareAndInsertBulk()`, `prepareAndInsert()` | Prepare the rows yourself, then `Event::insert()` |
+| `Event::select(...)->getRows()`, `Event::where(...)->getRows()` | `->toBase()->get()->all()` (arrays), or `->get()` (models) |
+| `Event::where(...)->get()` (a `ClickHouseDB\Statement`) | `->get()` returns models; `->getStatement()` returns the statement |
+| `Event::getClient()`, `$event->getThisClient()` | `(new Event())->getConnection()->getClient()` |
+| `$event->resolveConnection()` | `$event->getConnection()` |
+| `protected $tableForInserts` | `DB::connection('clickhouse')->table('events_buffer')->insert($rows)` |
+| `protected $tableSources` | Run the write on `DB::connection('clickhouse')->table('events_local')` |
+| `Event::optimize()` (a `Statement`) | `Event::optimize()` (a `bool`) |
+| `Event::truncate()` (a `Statement`) | `Event::truncate()` (returns nothing) |
+| `Event::flushBuffer()` (a `Statement` or `null`) | `Event::flushBuffer()` (`true`, or `false` when nothing is buffered) |
 
-#### 5. Other code that fails at run time
+What changes for a model:
 
+- **Casts no longer apply to inserts.** `insertAssoc()`, `insertBulk()` and
+  `buffer()` turned a value of a `boolean` cast into `1` or `0`. `insert()` and
+  `buffer()` send the rows as given. A `bool` is still written as `1` or `0`.
+  Cast other values yourself, such as `(int) (bool) $value`. To apply the
+  casts and mutators of the model, build each row with
+  `(new Event())->forceFill($row)->getAttributes()`.
+- **`save()` of an existing model updates it.** BaseModel threw an exception.
+  An Eloquent model loaded from a query sends `alter table ... update ...
+  where "id" = ?` on `save()`, and `alter table ... delete where "id" = ?` on
+  `delete()`. Set `$primaryKey` when the key is not `id`.
+- **Timestamps.** Eloquent sets `created_at` and `updated_at` on `create()` and
+  `save()`. Set `public $timestamps = false;` when the table has no such
+  columns.
+- **Mass assignment.** `create()` and `fill()` follow `$fillable` and
+  `$guarded`, and leave out a key with a dot, such as the Nested column
+  `n.a`. Use `forceCreate()`, `forceFill()` or `insert()` for such a key.
+- **Queries return models.** `Event::where(...)->get()` returns an Eloquent
+  collection, and `first()` a model.
+
+`buffer()`, `bufferCount()`, `getBufferedRows()`, `clearBuffer()` and
+`flushAllBuffers()` keep their names. Every buffered row must have the same
+keys, as in 3.x.
+
+#### 4. Queries
+
+The query builder is Laravel's, so its API is Laravel's API. Change these
+uses of the 3.x builder:
+
+| 3.x | 4.0 |
+| --- | --- |
+| `use Oralunal\LaravelClickHouse\Builder;` | `use Oralunal\LaravelClickHouse\QueryBuilder;` |
+| `->get()` (a `Statement`) | `->get()` (a collection of arrays) |
+| `->getRows()`, `->getCollection()` | `->get()->all()`, `->get()` |
+| `->get()->rows()`, `->get()->fetchOne()` | `->get()->all()`, `->first()` |
+| `->format('CSV')->get()->rawData()` | `->getStatement('CSV')->rawData()` |
+| `->get()->totals()`, `->get()->extremes()` | `->getStatement()->totals()`, `->getStatement()->extremes()` |
+| `->toSql()`, which held the values | `->toRawSql()`; `toSql()` has `?` placeholders |
+| `raw('count() AS n')`, `new Expression('...')`, `new RawColumn('count()', 'n')` | `DB::raw('count() AS n')`, or `selectRaw('count() AS n')` |
+| `new InsertArray(['a', 'b'])` | `['a', 'b']` |
+| `->limit(10, 20)`, `->take(10, 20)` | `->limit(10)->offset(20)` |
+| `->takeBy(1, 'user_id')` | `->limitBy(1, 'user_id')` |
+| `->orderBy('name', 'asc', 'tr')` | `->orderByRaw('name asc collate ?', ['tr'])` |
+| `->orderByAsc('name')` | `->orderBy('name')` |
+| `->anyLeftJoin('users', ['id'])` (a `USING` list) | `->anyLeftJoin('users', 'events.user_id', '=', 'users.id')` |
+| `->leftJoin('users', 'ALL', ['id'], true)` (`GLOBAL`) | `->join('users', 'events.user_id', '=', 'users.id', 'global all left')` |
+| `->from(fn (From $from) => $from->remote(...))` | `->fromRaw('remote(?, ?, ?, ?, ?)', [$host, $database, $table, $user, $password])` |
+| `->from($subQuery)->as('s')` | `->fromSub($subQuery, 's')` |
+| `->where('id', 'in', [1, 2])`, `Operator::IN` | `->whereIn('id', [1, 2])` |
+| `->where('id', 'between', [1, 5])` | `->whereBetween('id', [1, 5])` |
+| `->where('d', 'is null', null)` | `->whereNull('d')` |
+| `->whereIn('id', raw('allowed_ids'))` | `->whereRaw('id in allowed_ids')` |
+| `->whereDict('users', 'name', $id, 'Ann')` | `->select('*')->selectRaw('dictGetString(?, ?, ?) as name', ['users', 'name', $id])->where('name', 'Ann')` |
+| `->havingIn('c', [1, 2])` | `->havingRaw('c in (?, ?)', [1, 2])` |
+| `->asyncWithQuery($other)`, `toAsyncSqls()` | `Parallel::getRows([$query, $other])` |
+| `->chunk(100, fn (array $rows) => ...)` | `->orderBy('id')->chunk(100, fn (Collection $rows) => ...)` |
+| `->delete()`, `->update($values)` (a `Statement`) | `->delete()`, `->update($values)` (an `int`) |
+| `Operator::EQUALS`, `OrderDirection::DESC` | `'='`, `'desc'` |
+
+What else changes:
+
+- **Aggregates take column names.** `sum('price * qty')` quotes the string as
+  a column name and fails with `UNKNOWN_IDENTIFIER`. Pass SQL with
+  `DB::raw()`: `sum(DB::raw('price * qty'))`.
+- **`chunk()` needs an order.** Laravel's `chunk()` throws without `orderBy()`
+  on the query builder, and orders by the key on a model query.
+- **Closures get Laravel's builders.** A closure typed with the 3.x `Builder`
+  or `BaseBuilder`, as in `where(fn (Builder $q) => ...)`, fails with a
+  `TypeError`. Type it with `Illuminate\Contracts\Database\Query\Builder`, or
+  leave the type out.
+- **Lightweight deletes.** `QueryBuilder::delete()` takes Laravel's `$id` as its
+  first argument. Pass the option by name: `delete(lightweight: true)`.
+  `delete(true)` throws. On a model query, `delete(true)` works as before.
+- **`whereIn()` takes a list or a sub-query.** A string or a raw expression
+  fails with a `TypeError`.
+- **`settings()` calls add up.** A later call no longer replaces the earlier
+  ones. Pass `null` for a name to remove it.
+
+#### 5. Migrations
+
+`Oralunal\LaravelClickHouse\Migration` is removed. Extend Laravel's
+`Illuminate\Database\Migrations\Migration`. Change every migration, also the
+ones that already ran: a fresh install, CI and `migrate:fresh` load them again.
+
+`write()` becomes `statementOnEveryNode()` of the migration's connection. It
+sends the statement to every node of the connection, as `write()` did:
+
+```php
+// 3.x
+use Oralunal\LaravelClickHouse\Migration;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        static::write('CREATE TABLE events (id UInt64, name String) ENGINE = MergeTree ORDER BY id');
+    }
+};
+
+// 4.0
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration
+{
+    protected $connection = 'clickhouse';
+
+    public function up(): void
+    {
+        DB::connection($this->connection)->statementOnEveryNode(
+            'CREATE TABLE events (id UInt64, name String) ENGINE = MergeTree ORDER BY id'
+        );
+    }
+};
+```
+
+`statementOnEveryNode()` takes no bindings, and reads a `?` outside quotes as a
+placeholder: write `??` for a question mark. With bindings, use
+`statement($sql, $bindings)`, which runs on the active node, or write each
+value with `DB::connection($this->connection)->escape($value)`.
+
+`createMergeTree()` becomes `Schema::create()`:
+
+```php
+// 3.x
+static::createMergeTree('events', fn (MergeTree $table) => $table
+    ->columns([
+        $table->uInt64('id'),
+        $table->string('name')->nullable(),
+        $table->datetime('created_at', 3),
+        $table->uInt32('version'),
+    ])
+    ->engine(Engine::REPLACING_MERGE_TREE, 'version')
+    ->partition('toYYYYMM(created_at)')
+    ->orderBy('id'));
+
+// 4.0
+use Illuminate\Support\Facades\Schema;
+use Oralunal\LaravelClickHouse\SchemaBlueprint;
+
+Schema::connection('clickhouse')->create('events', function (SchemaBlueprint $table) {
+    $table->unsignedBigInteger('id');
+    $table->string('name')->nullable();
+    $table->dateTime('created_at', 3);
+    $table->unsignedInteger('version');
+    $table->engine('ReplacingMergeTree(version)');
+    $table->partitionBy('toYYYYMM(created_at)');
+    $table->orderBy('id');
+});
+```
+
+| `MergeTree` | `SchemaBlueprint` |
+| --- | --- |
+| `int8()` … `int64()`, `uInt8()` … `uInt64()` | `tinyInteger()` … `bigInteger()`, `unsignedTinyInteger()` … `unsignedBigInteger()` |
+| `int128()`, `uInt256()`, `decimal32()`, any other type | `rawColumn('name', 'Int128')` |
+| `float32()`, `float64()` | `float('name', 24)`, `double('name')` |
+| `datetime('d', 3, 'UTC')` | `dateTime('d', 3)->timezone('UTC')` |
+| `bool()`, `uuid()`, `enum()`, `decimal()`, `date()`, `string()` | `boolean()`, `uuid()`, `enum()`, `decimal()`, `date()`, `string()` |
+| `column('tags', 'Array(String)')` | `array('tags', 'String')`, or `rawColumn('tags', 'Array(String)')` |
+| `engine(Engine::REPLACING_MERGE_TREE, 'v')` | `engine('ReplacingMergeTree(v)')` |
+| `partition()`, `ttl('d', 'INTERVAL 1 DAY')` | `partitionBy()`, `ttl('d + INTERVAL 1 DAY')` |
+| `ifNotExists()`, `settings()`, `orderBy()` | `ifNotExists()`, `settings()`, `orderBy()` |
+| `onCluster()`, `getEngine()->replicated()` | Automatic from `cluster_name` and `cluster`; `withoutOnCluster()`, `replicated(false)` to opt out |
+
+Run `php artisan migrate --pretend` to compare the new statements with the
+tables that exist.
+
+#### 6. Enums and helpers
+
+| 3.x | 4.0 |
+| --- | --- |
+| `ClickhouseBuilder\Query\Enums\Format::CSV`, `JSON_EACH_ROW`, `TAB_SEPARATED`, … | `Enums\Format::Csv`, `JsonEachRow`, `TabSeparated`, … |
+| `new Format(Format::CSV)`, `$format->getValue()` | `Format::Csv`, `$format->value` |
+| `Operator`, `JoinType`, `JoinStrict`, `OrderDirection` | Strings: `'='`, `'left'`, `'any left'`, `'desc'` |
+| `Enum\Enum` | A native PHP enum |
+| `raw($sql)` | `DB::raw($sql)` |
+| `tp($value, $callback)` | `tap($value, $callback)` |
+| `array_flatten($array)` | `Illuminate\Support\Arr::flatten($array)` |
+| `Oralunal\LaravelClickHouse\Grammar` | `Connection::newLiteralGrammar()`, or `escape()` of the connection |
+
+A 3.x `Format` constant was a string. Where code passes one as a string, use
+`Format::Csv->value`. `Format::named('csv')` and `Format::tryNamed('csv')`
+find a case by its name in any letter case.
+
+#### 7. Other code that fails at run time
+
+- **Subclasses of the package's classes.** A class that extends `Connection`,
+  `QueryGrammar`, `SchemaBuilder`, `SchemaGrammar` or `Cluster` may no longer
+  match its parent. Load every class of your app to find the errors.
 - **`FORMAT` in `select()`.** `select()`, `selectOne()`, `scalar()`,
   `cursor()` and the parallel queries refuse SQL whose `FORMAT` clause names a
   format other than `JSON`, `JSONStrings`, `JSONCompact` and
-  `JSONCompactStrings` (`cursor()` refuses every `FORMAT` clause). In 3.x such
-  queries failed or returned no rows. Leave the clause out, or read the result
-  with `getClient()->select($sql)->rawData()` or the query builder's
-  `format('CSV')->get()->rawData()`, as the exception message says.
-- **Placeholders.** A hand-written `#@?` marker is no longer turned into a
-  binding; write `?`. A query that mixes `?` with smi2's `:0` or `{0}`
+  `JSONCompactStrings`. Read such a result with
+  `DB::connection('clickhouse')->selectStatement($sql)->rawData()`.
+- **Placeholders.** A query that mixes `?` with smi2's `:0` or `{0}`
   placeholders or with `{name:Type}` query parameters throws before it is
-  sent; write the ternary operator as `??`.
-- **Quoted table names.** ``table('`my-table`')`` is quoted again and fails;
-  pass the name without backticks.
-- **`settings()`.** Calls add up instead of replacing each other,
-  `settings([])` changes nothing (pass `null` for a name to remove it), and an
-  `Expression` value is written without quotes: pass `'auto'`, not
-  `new Expression('auto')`.
+  sent. Write the ternary operator as `??`.
+- **Quoted table names.** ``table('`my-table`')`` is quoted again and fails.
+  Pass the name without backticks.
 - **Transactions.** `beginTransaction()`, `transaction()` and `commit()` throw
-  a `LogicException`; in 3.x they failed with a PHP error or did nothing. Use
-  the `DatabaseTruncation` test trait for ClickHouse connections.
+  a `LogicException`. Use the `DatabaseTruncation` test trait for ClickHouse
+  connections.
 - **The migration repository.** `app('migration.repository')` is a
   `ClickhouseMigrationRepository`, a subclass of Laravel's
-  `DatabaseMigrationRepository`, so `instanceof` still works but a comparison
-  of the exact class does not. With `fix_default_query_builder` set to
-  `false`, its rows are objects instead of arrays.
-- **Configuration.** The connection checks `datetime_precision`,
-  `insert_format`, `use_on_cluster` and `default_index_type` when they are
-  set, and applies a `timeout_query` or `timeout_connect` with its fraction,
-  where 3.x cut it to an integer, so `0.5` meant no query timeout.
+  `DatabaseMigrationRepository`. Its rows are objects:
+  `$row->migration`, not `$row['migration']`.
 
-#### 6. Writes to check
+#### 8. Writes to check
 
-These behavior changes alter what a write does. Check the code that they reach:
-
-- **`whereNotIn()` with an empty list** now matches every row, as in
-  Laravel, so `->whereNotIn('id', $ids)->delete()` with an empty `$ids`
-  deletes **every row**. In 3.x it sent an invalid statement. Return early
-  when the list is empty.
+- **`whereNotIn()` with an empty list** matches every row, as in Laravel, so
+  `->whereNotIn('id', $ids)->delete()` with an empty `$ids` deletes **every
+  row**. Return early when the list is empty.
 - **`delete()` and `update()`** throw, and send nothing, for a query with a
-  clause that a ClickHouse mutation would ignore, such as `JOIN`, `LIMIT`,
-  `GROUP BY` or an `ORDER BY` alias. In 3.x these changed rows that the query
-  did not select. Select the keys first: `whereIn('id', $query->pluck('id'))`.
-  A condition with a sub-query that ClickHouse cannot run, and a lightweight
-  delete whose condition holds `UNION`, `INTERSECT` or `EXCEPT`, are refused
-  too, because ClickHouse would leave a mutation that blocks every later one.
-- **Floats** are written with every digit, where 3.x wrote 14 significant
-  digits. A float computed in PHP is cut off at the scale of a `Decimal` or
-  integer column: `4.35 * 100` stores `434.99` in a `Decimal(10, 2)` column,
-  where 3.x stored `435.00`. Round such a value, as in
-  `round(4.35 * 100, 2)`, or pass a numeric string or an int; `update()` needs
+  clause that a ClickHouse mutation would ignore, such as a join, `LIMIT`,
+  `GROUP BY`, `FINAL` or an `ORDER BY` alias. Select the keys first:
+  `whereIn('id', $query->pluck('id'))`.
+- **Floats** are written with every digit. A float computed in PHP is cut off
+  at the scale of a `Decimal` or integer column: `4.35 * 100` stores `434.99`
+  in a `Decimal(10, 2)` column. Round it, as in `round(4.35 * 100, 2)`, or pass
   a numeric string or an int.
-- **`insertAssoc()` and `buffer()`** refuse a row whose keys differ from the
-  first row's. 3.x filled a missing key with a made-up value. Give every row
-  every key.
-- With `fix_default_query_builder` set to `false`: `whereLike()` sends
-  `ilike`, `insert()` writes a collection as an array, `timeout()` stops the
-  query on the server, and `affectingStatement()` returns the rows written.
+- **An empty row** is refused: `insert([[]])` throws `Inserting empty values
+  array is not supported in ClickHouse`. `insert([])` returns `true` and sends
+  nothing, as in Laravel.
+- **Buffered rows and model inserts** are sent as given (see step 3).
 
-#### 7. Migrations to check
+#### 9. Migrations to check
 
 These changes only matter for migrations that run after the upgrade, as with
 `migrate:fresh`, in a new environment or in tests. Existing tables are not
 touched.
 
-- **`Schema::hasTable()`** returns `false` for views, materialized views and
-  dictionaries. Guard them with `Schema::hasView()`,
-  `Schema::hasDictionary()` or `CREATE ... IF NOT EXISTS`.
-- **Laravel's schema builder** writes what the blueprint declares:
-  `nullable()`, `default()`, `comment()`, `engine()`, `primary()` as the
-  sorting key, `DateTime64` precisions and ClickHouse index types. 3.x wrote
-  names and types only, always `MergeTree()`, sorted by the first column.
-  `Schema::table()` now sends the statements of added columns, `dropColumn()`,
-  `index()`, `comment()`, `orderBy()`, `ttl()`, `settings()` and
-  `Schema::rename()`, which 3.x ignored. A fresh run can therefore create
-  tables that differ from the ones 3.x created, and these calls now fail it:
-  a MySQL engine such as `engine('InnoDB')`, a MySQL index type such as
-  `btree`, `time()`, `set()`, `computed()`, `fullText()`, and `primary()`,
-  `dropPrimary()` or `renameIndex()` inside `Schema::table()`. To keep a
-  table exactly as 3.x created it, write its `CREATE TABLE` with
-  `Migration::write()`.
-- **`Migration::createMergeTree()`** escapes comments, string defaults, enum
-  values and setting strings itself: remove escaping that you added by hand,
-  such as `->comment("it\\'s")` or `'storage_policy' => "'hot_cold'"`.
-- **Cluster connections.** On a connection with a `cluster_name`, Laravel's
-  schema builder sends its statements `ON CLUSTER`, and creates MergeTree
-  tables, the `migrations` table included, with a replicated engine when the
-  connection also lists its nodes. An `ON CLUSTER` statement waits for every
-  host, so raise `timeout_query` for migration commands. A table that 3.x
-  created on the active node only can be changed there with
-  `$table->withoutOnCluster()`.
+- **Integer types.** Laravel's schema builder gives each integer column its
+  exact type: `tinyInteger()` is `Int8`, `smallInteger()` `Int16`,
+  `integer()` `Int32` and `bigInteger()` `Int64`, and their unsigned forms are
+  `UInt8` to `UInt64`. `id()`, `increments()` and `foreignId()` are unsigned.
+  3.x wrote `Int16`, `Int32` and `Int64`, signed even for an unsigned column.
+- **The schema builder writes what the blueprint declares**: `nullable()`,
+  `default()`, `comment()`, `engine()`, `primary()` as the sorting key,
+  `DateTime64` precisions and ClickHouse index types. `Schema::table()` runs
+  added columns, `dropColumn()`, `index()`, `comment()`, `orderBy()`,
+  `ttl()`, `settings()` and `Schema::rename()`, which 3.x ignored. These calls
+  now fail a fresh run: a MySQL engine such as `engine('InnoDB')`, a MySQL
+  index type such as `btree`, `time()`, `set()`, `computed()`, `fullText()`,
+  and `primary()`, `dropPrimary()` or `renameIndex()` inside `Schema::table()`.
+  To keep a table exactly as it is, write its `CREATE TABLE` with
+  `statementOnEveryNode()`.
+- **`Schema::hasTable()`** returns `false` for views and dictionaries. Guard
+  them with `Schema::hasView()`, `Schema::hasDictionary()` or
+  `CREATE ... IF NOT EXISTS`.
+- **Cluster connections.** On a connection with a `cluster_name`, the schema
+  builder sends its statements `ON CLUSTER`, and creates MergeTree tables with
+  a replicated engine when the connection also lists its nodes in `cluster`.
+  An `ON CLUSTER` statement waits for every host, so raise `timeout_query` for
+  migration commands. Call `$table->withoutOnCluster()` to change a table of
+  the active node only.
+
+#### 10. Reads to check
+
+- **Aggregates** are Laravel's: `sum()`, `min()`, `max()`, `avg()` and
+  `aggregate()` replace the select list of the query. `count()` and the total
+  of `paginate()` count the rows that `get()` returns, in a sub-query when the
+  select list, `GROUP BY`, `distinct()`, `limitBy()` or the order changes them.
+- **`value($column)`** on a query with a select list returns the first column
+  of that list, as in Laravel.
+- **A date with a sub-second part** is compared as a `DateTime64(6)` when the
+  connection's `datetime_precision` is `microsecond`. It does not equal the
+  value of a `DateTime` or `DateTime64(3)` column that has fewer digits. This
+  only applies when you set the new `datetime_precision` option.
 
 Then run `php artisan config:clear`, and `php artisan config:cache` after the
 deploy if you cache the config.
@@ -233,12 +420,11 @@ is abandoned. 3.0 renamed the package and its namespace, and nothing else:
 | Composer package | `oralunal/phpclickhouse-laravel` | `oralunal/laravel-clickhouse` |
 | Namespace | `PhpClickHouseLaravel\` | `Oralunal\LaravelClickHouse\` |
 
-Class names below the namespace and the folder layout are the same, for example
-`PhpClickHouseLaravel\ClickhouseSchemaBuilder\Tables\MergeTree` becomes
-`Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree`.
 `oralunal/laravel-clickhouse` conflicts with `oralunal/phpclickhouse-laravel`,
-so Composer never installs both. After the rename, the changes of 4.0 apply,
-as in [Upgrading from 3.x to 4.0](#upgrading-from-3x-to-40).
+so Composer never installs both. After the rename, the changes of 4.0 apply, as
+in [Upgrading from 3.x to 4.0](#upgrading-from-3x-to-40): most classes that
+your 2.x code uses, such as `BaseModel`, `Migration` and the builder classes,
+no longer exist in 4.0.
 
 ### Let your coding agent do it
 
@@ -263,10 +449,9 @@ The agent renames the namespace everywhere, refreshes Laravel's caches, then
 does what `/lc-upgrade-3x-to-4x` does for the changes of 4.0, and reports how
 the test suite compares with the run before the upgrade.
 
-If `php artisan` fails after step 1 with a class-not-found error for a
-`PhpClickHouseLaravel\…` class, your app uses the 2.x namespace while it boots.
-Copy the skills by hand instead of running `clickhouse:install-skills`, for
-example:
+If `php artisan` fails after step 1 with a class-not-found error, your app
+uses a class that 4.0 renamed or removed while it boots. Copy the skills by
+hand instead of running `clickhouse:install-skills`:
 
 ```sh
 mkdir -p .claude/skills
@@ -284,7 +469,7 @@ cp -r vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-2x-to-4x \
    ```
 
    The `artisan` scripts that Composer runs may fail with a class-not-found
-   error until step 2 is done.
+   error until step 4 is done.
 
 2. Rename the namespace in your code, migrations, config and tests. This keeps
    the escaping of strings such as `'PhpClickHouseLaravel\\BaseModel'`:
@@ -304,14 +489,15 @@ cp -r vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-2x-to-4x \
    delete `bootstrap/cache/packages.php` and `bootstrap/cache/services.php` and
    run `php artisan package:discover` again.
 
-4. Values serialized with the 2.x class names cannot be unserialized by 4.0:
+4. Continue with [Upgrading from 3.x to 4.0](#upgrading-from-3x-to-40), from
+   its step 2. After the rename, your code names the 3.x classes, such as
+   `Oralunal\LaravelClickHouse\BaseModel`, and that section replaces them.
+
+5. Values serialized with the 2.x class names cannot be unserialized by 4.0:
    cache entries, queued jobs and sessions that hold objects of the package's
    classes, such as `RawColumn` or the builder enums. If your app stores such
    values, let the queues drain before you deploy and clear the cache
    afterwards.
-
-5. Continue with [Upgrading from 3.x to 4.0](#upgrading-from-3x-to-40), from
-   its step 2.
 
 ## Upgrading from 1.x to 4.0
 
@@ -323,12 +509,12 @@ together:
 - 2.0 bundled the libraries this package used to pull in: the query builder
   (`oralunal/clickhouse-builder`), the schema builder behind
   `Migration::createMergeTree()` (`glushkovds/php-clickhouse-schema-builder`)
-  and the enum base class (`myclabs/php-enum`). They generate the same SQL as
-  before, but their classes are in this package's namespaces. Apart from
-  Laravel, the only remaining dependency is `smi2/phpclickhouse`.
+  and the enum base class (`myclabs/php-enum`). Apart from Laravel, the only
+  remaining dependency is `smi2/phpclickhouse`.
 - 3.0 renamed the package to `oralunal/laravel-clickhouse` and its namespace
   from `PhpClickHouseLaravel\` to `Oralunal\LaravelClickHouse\`.
-- 4.0 brings the changes of [Upgrading from 3.x to 4.0](#upgrading-from-3x-to-40).
+- 4.0 removed the bundled builders, the model and the migration class, as in
+  [Upgrading from 3.x to 4.0](#upgrading-from-3x-to-40).
 
 ### Let your coding agent do it
 
@@ -349,17 +535,16 @@ together:
    If your agent does not offer skills as slash commands, ask it to
    "upgrade phpclickhouse-laravel 1.x to laravel-clickhouse 4.x".
 
-The agent renames the namespaces, imports the helper functions, stops to ask
-you before changing code whose meaning it cannot decide alone, such as uses of
-the removed file/temporary-table API, then does what `/lc-upgrade-3x-to-4x`
-does for the changes of 4.0. At the end it reports what it changed and how the
-test suite compares with the run before the upgrade.
+The agent renames the namespaces, stops to ask you before changing code whose
+meaning it cannot decide alone, such as uses of the removed file and
+temporary-table API, then does what `/lc-upgrade-3x-to-4x` does for the
+changes of 4.0. At the end it reports what it changed and how the test suite
+compares with the run before the upgrade.
 
 If `php artisan` fails right after step 1 with a class-not-found error, such as
 `Class "Tinderbox\ClickhouseBuilder\...\ClickhouseServiceProvider" not found`,
 delete `bootstrap/cache/packages.php` and `bootstrap/cache/services.php` and
-try again. If the app still does not boot, copy the skills by hand, for
-example:
+try again. If the app still does not boot, copy the skills by hand:
 
 ```sh
 mkdir -p .claude/skills
@@ -372,11 +557,11 @@ cp -r vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-1x-to-4x \
 To find what needs changing, run:
 
 ```sh
-grep -rnE 'Tinderbox\\ClickhouseBuilder|PhpClickHouseSchemaBuilder|PhpClickHouseLaravel|MyCLabs\\Enum|[^>:$a-zA-Z_]raw\(|array_flatten\(|[^a-zA-Z_]tp\(|into_memory_table|file_from|addFile\(|getFiles\(' \
+grep -rnE 'Tinderbox\\ClickhouseBuilder|Tinderbox\\Clickhouse\\|PhpClickHouseSchemaBuilder|PhpClickHouseLaravel|MyCLabs\\Enum|[^>:$a-zA-Z_]raw\(|array_flatten\(|[^a-zA-Z_]tp\(|into_memory_table|file_from|addFile\(|getFiles\(' \
   app config database routes tests
 ```
 
-### 1. Update the dependencies
+#### 1. Update the dependencies
 
 ```sh
 composer remove oralunal/phpclickhouse-laravel oralunal/clickhouse-builder glushkovds/php-clickhouse-schema-builder --no-update
@@ -386,31 +571,25 @@ composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
 `the-tinderbox/clickhouse-php-client` and `myclabs/php-enum` are no longer
 installed. If your own code uses one of them, require it yourself.
 
-### 2. Rename the namespaces
+If you registered the old
+`Tinderbox\ClickhouseBuilder\Integrations\Laravel\ClickhouseServiceProvider`
+in `bootstrap/providers.php` or `config/app.php`, remove it. The class no
+longer exists, so the app fails to boot while it is listed. The package's own
+provider is auto-discovered. If every artisan command fails with this class
+name, delete `bootstrap/cache/packages.php` and `bootstrap/cache/services.php`;
+Laravel regenerates them on the next `php artisan package:discover`.
 
-Only the namespace prefixes change; class names and the folder layout are the
-same.
+#### 2. Rename the namespaces
 
-| 1.x | 4.0 |
+Rename the prefixes to the 3.x names first. Step 6 then replaces the classes
+that 4.0 removed.
+
+| 1.x | 3.x name, then 4.0 |
 | --- | --- |
-| `PhpClickHouseLaravel\BaseModel`, `Migration`, `RawColumn`, … | `Oralunal\LaravelClickHouse\BaseModel`, `Migration`, `RawColumn`, … |
-| `Tinderbox\ClickhouseBuilder\Query\Expression` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression` |
-| `Tinderbox\ClickhouseBuilder\Query\Enums\Operator` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Operator` |
-| `Tinderbox\ClickhouseBuilder\Query\TwoElementsLogicExpression` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\TwoElementsLogicExpression` |
-| `Tinderbox\ClickhouseBuilder\Query\BaseBuilder` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder` |
-| `Tinderbox\ClickhouseBuilder\Query\Grammar` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Grammar` |
-| `Tinderbox\ClickhouseBuilder\Exceptions\*` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\*` |
-| `PhpClickHouseSchemaBuilder\Tables\MergeTree` | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree` |
-| `PhpClickHouseSchemaBuilder\Expression` | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Expression` |
-| `PhpClickHouseSchemaBuilder\Engine`, `Column`, `TTL`, `Exceptions\*` | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Engine`, `Column`, `TTL`, `Exceptions\*` |
-
-Your migration files count too. A migration that still imports
-`PhpClickHouseSchemaBuilder\Tables\MergeTree` fails with `Class not found`
-the next time it runs, for example on a fresh install or in CI.
-
-To replace them across your app and keep the escaping of strings such as
-`'PhpClickHouseLaravel\\BaseModel'` (the classes of
-`Tinderbox\ClickhouseBuilder\Integrations\` are left for step 4):
+| `PhpClickHouseLaravel\BaseModel`, `Migration`, `RawColumn`, … | `Oralunal\LaravelClickHouse\BaseModel`, … (step 6 replaces them) |
+| `Tinderbox\ClickhouseBuilder\Query\…` | `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\…` (step 6 replaces them) |
+| `PhpClickHouseSchemaBuilder\…` | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\…` (step 6 replaces them) |
+| `PhpClickHouseLaravel\Connection`, `ClickhouseServiceProvider`, … | `Oralunal\LaravelClickHouse\Connection`, `ClickhouseServiceProvider`, … |
 
 ```sh
 grep -rlIE 'Tinderbox\\+ClickhouseBuilder|PhpClickHouseSchemaBuilder|PhpClickHouseLaravel' app config database routes tests \
@@ -421,94 +600,36 @@ grep -rlIE 'Tinderbox\\+ClickhouseBuilder|PhpClickHouseSchemaBuilder|PhpClickHou
     '
 ```
 
-### 3. Import the helper functions
+#### 3. Stop using the removed parts of the old builder
 
-`raw()`, `tp()` and `array_flatten()` used to be global functions. They are
-now in the `Oralunal\LaravelClickHouse\ClickhouseBuilder` namespace. If you
-call them without importing them, PHP fails with
-`Call to undefined function raw()`.
-
-```php
-// 1.x
-$query->select(raw('count() AS n'));
-
-// 4.0
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
-
-$query->select(raw('count() AS n'));
-```
-
-You can also use the classes directly:
-
-```php
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
-use Oralunal\LaravelClickHouse\RawColumn;
-
-$query->select(new Expression('count() AS n'));
-$query->select(new RawColumn('count()', 'n')); // count() AS `n`
-```
-
-### 4. Stop using the removed parts of the old builder
-
-These parts only worked with `the-tinderbox/clickhouse-php-client`. This
-package's `Builder` runs queries through `smi2/phpClickHouse`, so they never
-did anything useful here. They are no longer included:
+These parts only worked with `the-tinderbox/clickhouse-php-client`, so they
+never did anything useful with this package:
 
 | Removed | Use instead |
 | --- | --- |
-| `addFile()`, `getFiles()`, `values()`, `getValues()` | Insert the rows with `insertAssoc()`, `insertBulk()` or `buffer()` |
+| `addFile()`, `getFiles()`, `values()`, `getValues()` | `Model::insert()`, `Model::buffer()`, or `insertFiles()` of the query builder |
 | `into_memory_table()`, `file_from()` | Same as above |
-| `Tinderbox\ClickhouseBuilder\Query\Builder` (Tinderbox-client builder) | `BaseModel::select()` / `where()`, or `DB::connection('clickhouse')->table(...)` |
-| `Tinderbox\ClickhouseBuilder\Integrations\Laravel\Connection` / `Builder` | `Oralunal\LaravelClickHouse\Connection` and `Oralunal\LaravelClickHouse\Builder` |
-| `Tinderbox\ClickhouseBuilder\Integrations\Laravel\ClickhouseServiceProvider` | `Oralunal\LaravelClickHouse\ClickhouseServiceProvider` (auto-discovered) |
+| `Tinderbox\ClickhouseBuilder\Query\Builder` | `Model::query()`, or `DB::connection('clickhouse')->table(...)` |
+| `Tinderbox\ClickhouseBuilder\Integrations\Laravel\Connection` / `Builder` | `Oralunal\LaravelClickHouse\Connection` / `QueryBuilder` |
 
-If you registered the old `ClickhouseServiceProvider` yourself in
-`bootstrap/providers.php` or `config/app.php`, remove it. The class no longer
-exists, so the app fails to boot while it is still listed.
+#### 4. `whereIn()` with a string value
 
-If every artisan command, `package:discover` included, fails with
-`Class "Tinderbox\ClickhouseBuilder\Integrations\Laravel\ClickhouseServiceProvider" not found`,
-Laravel's cached package manifest still lists the 1.x provider. This happens
-when Composer ran with `--no-scripts`. Delete `bootstrap/cache/packages.php`
-and `bootstrap/cache/services.php`; Laravel regenerates them on the next
-`php artisan package:discover`.
-
-### 5. `whereIn()` with a string value
-
-In 1.x, `whereIn()`, `preWhereIn()`, `whereGlobalIn()` and `havingIn()` turned
-a string into a table reference, but only when it matched a file added with
-`addFile()`. Since `addFile()` is gone, a string is now always quoted as a
-value:
+In 1.x, `whereIn()` turned a string into a table reference when it matched a
+file added with `addFile()`, and quoted any other string as one value. In 4.0,
+`whereIn()` takes a list or a sub-query, and a string fails with a `TypeError`.
+Give one value as a list, `whereIn('id', [$value])`, and compare against a
+table explicitly:
 
 ```php
-$query->whereIn('id', 'ids');  // WHERE `id` IN 'ids'
+$query->whereIn('id', fn ($q) => $q->select('id')->from('allowed')); // where "id" in (select "id" from "allowed")
+$query->whereRaw('id in allowed_ids');                               // where id in allowed_ids
 ```
 
-To compare against a table or a sub-query, write it out explicitly:
-
-```php
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
-
-$query->whereIn('id', raw('allowed_ids'));                           // WHERE `id` IN allowed_ids
-$query->whereIn('id', fn ($q) => $q->select('id')->from('allowed')); // WHERE `id` IN (SELECT `id` FROM `allowed`)
-```
-
-### 6. `Column::subQuery()` return type
-
-`Column::subQuery()` and `Column::getSubQuery()` now declare
-`Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\BaseBuilder` as their
-return type. In 1.x they declared the Tinderbox-client `Query\Builder`, which
-made column sub-queries built from this package's `Builder` throw a
-`TypeError`. Only code that type-checks the return value against the old class
-needs a change.
-
-### 7. `migrate:fresh` also empties secondary ClickHouse connections
+#### 5. `migrate:fresh` also empties secondary ClickHouse connections
 
 This step only applies when MySQL or PostgreSQL holds the `migrations` table
 and some migrations write to ClickHouse. In 1.x, `migrate:fresh` emptied only
-the MySQL or PostgreSQL database and left ClickHouse as it was. Migrations
-written with `CREATE TABLE IF NOT EXISTS` therefore kept their ClickHouse data
-across `migrate:fresh`.
+the MySQL or PostgreSQL database and left ClickHouse as it was.
 
 Since 2.0, `migrate:fresh` also empties these ClickHouse connections:
 
@@ -521,30 +642,21 @@ command still asks for confirmation in production.
 `RefreshDatabase` and the other database test traits run `migrate:fresh` too.
 If you run your tests with `--parallel`, each test process gets its own
 database on these ClickHouse connections, `<database>_test_<token>` (for
-example `analytics_test_1`), just as Laravel does for the default connection.
-The ClickHouse user needs permission to create and drop databases. Test runs
-without `--parallel` keep using the configured database.
-
-See
+example `analytics_test_1`). The ClickHouse user needs permission to create
+and drop databases. See
 [The connection that holds the migrations table](https://laravel-clickhouse.oralunal.com/schema/migration-commands#the-connection-that-holds-the-migrations-table).
 
-### 8. Enums extend the bundled `Enum` class
+#### 6. The changes of 4.0
 
-`Operator`, `Format`, `JoinType`, `JoinStrict` and `OrderDirection` now extend
-`Oralunal\LaravelClickHouse\Enum\Enum` instead of `MyCLabs\Enum\Enum`. Their
-constants and methods (`isValid()`, `getValue()`, `Operator::EQUALS()` and so
-on) are unchanged. Only code that type-checks against `MyCLabs\Enum\Enum` needs
-to change.
+Continue with [Upgrading from 3.x to 4.0](#upgrading-from-3x-to-40), from its
+step 2. It replaces `BaseModel`, the builder classes, `Migration`, the schema
+builder classes, the enums, and the helper functions `raw()`, `tp()` and
+`array_flatten()`, which 1.x had as global functions.
 
-### 9. Serialized values and caches
+#### 7. Serialized values and caches
 
 Values serialized with the 1.x class names cannot be unserialized by 4.0:
 cache entries, queued jobs and sessions that hold objects of the package's
 classes, such as `RawColumn`, `Expression` or the builder enums. If your app
 stores such values, let the queues drain before you deploy and clear the cache
 afterwards. Run `php artisan package:discover` and `php artisan optimize:clear`.
-
-### 10. The changes of 4.0
-
-Continue with [Upgrading from 3.x to 4.0](#upgrading-from-3x-to-40), from its
-step 2.

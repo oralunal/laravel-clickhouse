@@ -4,20 +4,23 @@ declare(strict_types=1);
 
 namespace Oralunal\LaravelClickHouse;
 
+use ClickHouseDB\Client;
 use ClickHouseDB\Exception\QueryException as ClientQueryException;
+use ClickHouseDB\Statement;
 use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Expression;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Enumerable;
 use Illuminate\Support\Stringable;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
+use Oralunal\LaravelClickHouse\Enums\Format;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use RuntimeException;
 
 /**
  * Laravel's query builder on a ClickHouse connection, as Connection::query(), DB::table() and Eloquent models
- * return it when the connection sets fix_default_query_builder to false.
+ * return it.
  *
  * It is Laravel's builder, so its methods and macros apply, with these differences:
  * - count() without a column and the paginate() total count the rows that get() returns, in a sub-query, when the
@@ -26,10 +29,10 @@ use RuntimeException;
  * - whereDay(), whereMonth() and whereYear() compare with numbers, integers for whole numbers, and whereTime() with
  *   a time padded to 'HH:MM:SS' (see addDateBasedWhere());
  * - insert() writes a collection value as an array, as update() does, and takes an insert format, Values or
- *   JSONEachRow, as the package builder's insert() does; without one, the connection's insert_format decides;
+ *   JSONEachRow; without one, the connection's insert_format decides;
  * - insertGetId() returns the key that the row carries, and refuses a row without one before anything is sent.
  *
- * It also writes the ClickHouse clauses that the package's own builder writes: FINAL (final()), SAMPLE (sample()),
+ * It also writes the ClickHouse clauses: FINAL (final()), SAMPLE (sample()),
  * ARRAY JOIN (arrayJoin(), leftArrayJoin()), the ClickHouse joins (anyLeftJoin(), semiLeftJoin(), asofJoin() and
  * the others, each with a *Sub form), PREWHERE (preWhere() and its forms), GLOBAL IN (whereGlobalIn()), empty() and
  * notEmpty() (whereEmpty(), havingEmpty()), LIMIT ... BY (limitBy()), SETTINGS (settings()), WITH
@@ -922,6 +925,29 @@ class QueryBuilder extends Builder
     }
 
     /**
+     * Handle preWhere<Method>() and orPreWhere<Method>() for each where method of the builder, such as
+     * preWhereColumn(), preWhereDate(), preWhereAny() or orPreWhereLike(): the call runs as where<Method>() or
+     * orWhere<Method>(), with the conditions in the PREWHERE clause (see addToPreWheres()). Any other call is
+     * Laravel's.
+     *
+     * @param string $method
+     * @param array<int, mixed> $parameters
+     * @return mixed
+     */
+    public function __call($method, $parameters)
+    {
+        if (preg_match('/^(orP|p)reWhere(\w+)$/', $method, $matches) === 1) {
+            $whereMethod = ($matches[1] === 'orP' ? 'orWhere' : 'where') . $matches[2];
+
+            if (method_exists($this, $whereMethod)) {
+                return $this->addToPreWheres(fn () => $this->{$whereMethod}(...$parameters));
+            }
+        }
+
+        return parent::__call($method, $parameters);
+    }
+
+    /**
      * Run a where method so that the conditions it adds go to the PREWHERE clause: the where conditions and their
      * bindings change places with the prewhere conditions while the callback runs.
      *
@@ -1353,13 +1379,25 @@ class QueryBuilder extends Builder
      * partition: in partition <partition>, where an int is a number, a string a string literal and an expression
      * its SQL.
      *
+     * The first argument is Laravel's $id, so a bool there is refused before anything is sent: delete(true) would
+     * delete the row whose id is 1. Pass the option by name: delete(lightweight: true).
+     *
      * @param mixed $id
      * @param bool|null $lightweight
      * @param int|string|ExpressionContract|null $partition
      * @return int
+     * @throws InvalidArgumentException When $id is a bool
      */
     public function delete($id = null, ?bool $lightweight = null, int|string|ExpressionContract|null $partition = null)
     {
+        if (is_bool($id)) {
+            throw new InvalidArgumentException(sprintf(
+                'delete() takes the id of a row as its first argument, a bool given. Pass the option by name:'
+                . ' delete(lightweight: %s).',
+                var_export($id, true)
+            ));
+        }
+
         $this->lightweightDelete = $lightweight;
         $this->partition = $partition;
 
@@ -1372,15 +1410,38 @@ class QueryBuilder extends Builder
     }
 
     /**
+     * Start a merge of the parts of the table: optimize table "t" [on cluster '<name>'] [partition <partition>]
+     * [final]. FINAL merges also the parts that are merged already, so that a ReplacingMergeTree keeps one row of each
+     * key. The partition is written as the partition of delete() is. The cluster is that of onCluster(), or the
+     * default cluster of the connection's use_on_cluster option.
+     *
+     * @param bool $final
+     * @param int|string|ExpressionContract|null $partition
+     * @return bool
+     */
+    public function optimize(bool $final = false, int|string|ExpressionContract|null $partition = null): bool
+    {
+        $this->applyBeforeQueryCallbacks();
+
+        return $this->connection->statement($this->grammar->compileOptimize($this, $final, $partition));
+    }
+
+    /**
      * Update the rows that the where and prewhere conditions match, with an alter table "t" update ... mutation.
-     * $partition limits the update to one partition (see delete()).
+     * $partition limits the update to one partition (see delete()). An update without values is refused before
+     * anything is sent.
      *
      * @param array<string, mixed> $values
      * @param int|string|ExpressionContract|null $partition
      * @return int
+     * @throws QueryException When $values is empty
      */
     public function update(array $values, int|string|ExpressionContract|null $partition = null)
     {
+        if ($values === []) {
+            throw QueryException::cannotUpdateEmptyValues();
+        }
+
         $this->partition = $partition;
 
         try {
@@ -1413,6 +1474,110 @@ class QueryBuilder extends Builder
         }
 
         return parent::aggregate($function, $columns);
+    }
+
+    /**
+     * Get the values of a column, as Laravel does, read from each row by the name that ClickHouse gives the column.
+     * ClickHouse (24.8 checked) names a column of a joined table with its table, such as regression_reads_other.s,
+     * and a column of the query's own table without it, where Laravel reads every column by the name after the last
+     * dot. A name that the first row holds as given, without its quotes, is read as it is.
+     *
+     * @param ExpressionContract|string $column
+     * @param ExpressionContract|string|null $key
+     * @return Collection<array-key, mixed>
+     */
+    public function pluck($column, $key = null)
+    {
+        $original = $this->columns;
+        $this->columns ??= $key === null || $key === $column ? [$column] : [$column, $key];
+
+        try {
+            $queryResult = $this->processor->processSelect($this, $this->runSelect());
+        } finally {
+            $this->columns = $original;
+        }
+
+        if (empty($queryResult)) {
+            return new Collection();
+        }
+
+        $row = (array) $queryResult[0];
+        $column = $this->nameOfAColumnInARow($column, $row);
+        $key = $this->nameOfAColumnInARow($key, $row);
+
+        return $this->applyAfterQueryCallbacks(
+            is_array($queryResult[0])
+                ? $this->pluckFromArrayColumn($queryResult, $column, $key)
+                : $this->pluckFromObjectColumn($queryResult, $column, $key)
+        );
+    }
+
+    /**
+     * Get the name of a column in a row of the query (see pluck()): the column as given, without quotes, when the row
+     * holds that name and it has no alias, and otherwise the name that Laravel reads.
+     *
+     * @param ExpressionContract|string|null $column
+     * @param array<string, mixed> $row
+     * @return string|null
+     */
+    protected function nameOfAColumnInARow($column, array $row): ?string
+    {
+        if ($column === null) {
+            return null;
+        }
+
+        $name = str_replace(['"', '`'], '', (string) ($column instanceof ExpressionContract ? $this->grammar->getValue($column) : $column));
+
+        return !str_contains(strtolower($name), ' as ') && array_key_exists($name, $row)
+            ? $name
+            : $this->stripTableForPluck($column);
+    }
+
+    /**
+     * Set the aggregate of the query, as Laravel does, except that a union keeps the order of its first query.
+     * Laravel drops the order of the query, which in a union belongs to the first query and decides, with its limit,
+     * which rows that query returns: sum() of (... order by "x" limit 1) union all (...) would add another row.
+     *
+     * @param string $function
+     * @param array<int, ExpressionContract|string> $columns
+     * @return $this
+     */
+    protected function setAggregate($function, $columns)
+    {
+        if (empty($this->unions)) {
+            return parent::setAggregate($function, $columns);
+        }
+
+        $this->aggregate = ['function' => $function, 'columns' => $columns];
+
+        return $this;
+    }
+
+    /**
+     * Determine if the query returns a row: select exists(...) as "exists", as Laravel runs it. The answer is read
+     * from the only column of the row, whatever its name: without the analyzer (enable_analyzer = 0), ClickHouse
+     * (24.8 checked) names the column of exists() over a query with a with expression or a join in(1, _subquery1)
+     * instead of exists.
+     *
+     * @return bool
+     */
+    public function exists()
+    {
+        $this->applyBeforeQueryCallbacks();
+
+        $results = $this->connection->select(
+            $this->grammar->compileExists($this),
+            $this->getBindings(),
+            !$this->useWritePdo
+        );
+
+        if (!isset($results[0])) {
+            return false;
+        }
+
+        $row = (array) $results[0];
+
+        return (bool) ($row['exists'] ?? reset($row));
     }
 
     /**
@@ -1470,6 +1635,8 @@ class QueryBuilder extends Builder
      *   count(distinct "column");
      * - limitBy(), which keeps some rows of each group, and arrayJoin(), which repeats the rows and reads the aliases
      *   of its arrays;
+     * - withAlias(), whose expression, such as arrayJoin(tags) or count(), ClickHouse only runs when the select list,
+     *   a condition or the order reads it;
      * - a select alias or expression, such as selectRaw('arrayJoin(tags) as tag') (see
      *   QueryGrammar::selectsAnAliasOrAnExpression());
      * - an order that defines an alias, calls arrayJoin(), adds rows with WITH FILL, limits the rows with raw
@@ -1483,6 +1650,7 @@ class QueryBuilder extends Builder
     {
         if (!empty($this->groups) || $this->distinct === true || $this->groupLimit !== null
             || $this->limitBy !== null || $this->arrayJoins !== []
+            || array_filter($this->withs, fn (array $with): bool => $with['type'] === 'alias') !== []
         ) {
             return true;
         }
@@ -1564,6 +1732,38 @@ class QueryBuilder extends Builder
     }
 
     /**
+     * Run the query and return the smi2 statement of its result, in the given format, or in JSON.
+     *
+     * rawData() of the statement gives the result: the body of a text format, such as CSV, Pretty or XML, and the
+     * decoded document of a JSON format. totals() and extremes() read a JSON result. The query runs as the
+     * connection's selectStatement() runs it, with FORMAT and the format after the SQL of the query.
+     *
+     * @param Format|string|null $format A case, or the name of a ClickHouse output format, such as 'TSVRaw'; the
+     *                                   name of a case is matched in any letter case
+     * @return Statement
+     * @throws InvalidArgumentException When the name is no format name, or the connection is not a ClickHouse
+     *                                  connection
+     */
+    public function getStatement(Format|string|null $format = null): Statement
+    {
+        $connection = $this->connection;
+        if (!$connection instanceof Connection) {
+            throw new InvalidArgumentException('getStatement() needs a ClickHouse connection.');
+        }
+
+        if (is_string($format) && preg_match('/^[A-Za-z][A-Za-z0-9]*\z/', $format) !== 1) {
+            throw new InvalidArgumentException("Invalid ClickHouse format name [{$format}].");
+        }
+
+        $sql = $this->toSql();
+        if ($format !== null) {
+            $sql .= ' format ' . ($format instanceof Format ? $format->value : (Format::tryNamed($format)?->value ?? $format));
+        }
+
+        return $connection->selectStatement($sql, $this->getBindings());
+    }
+
+    /**
      * Insert one row, or a list of rows, and return true, as Laravel's insert() does.
      *
      * A collection value, such as a Collection or a LazyCollection, is inserted as the array of its toArray(), as
@@ -1576,24 +1776,24 @@ class QueryBuilder extends Builder
      * - Values: Laravel's insert, insert into "t" ("a", "b") values (?, ?), whose bindings the connection writes as
      *   ClickHouse literals;
      * - JSONEachRow: insert into "t" ("a", "b") format JSONEachRow, followed by one JSON object per row (see
-     *   insertJsonEachRow()), as the package builder's insert() sends it. The values that both formats take are
-     *   stored alike, such as floats with every digit, dates at the connection's datetime_precision into DateTime
-     *   columns, null, arrays and collections. ClickHouse reads some values differently in JSONEachRow (24.8
+     *   insertJsonEachRow()). The values that both formats take are stored alike, such as floats with every digit,
+     *   dates at the connection's datetime_precision into DateTime columns, null, arrays and collections. ClickHouse reads some values differently in JSONEachRow (24.8
      *   checked): a Date column refuses a date with a time, such as a Carbon; a Map column refuses [] and takes an
      *   array with keys, which Values refuses; a Tuple column takes a list, which Values refuses; an integer column
      *   refuses a float with a fraction, which Values cuts off. Raw SQL, such as DB::raw(), and a string that is not
      *   valid UTF-8 are refused before anything is sent.
      *
      * @param array<int|string, mixed> $values One row, or a list of rows
-     * @param string|null $format 'Values' or 'JSONEachRow', in any letter case; null uses the connection's
-     *                            insert_format
+     * @param Format|string|null $format Format::Values or Format::JsonEachRow, or 'Values' or 'JSONEachRow' in any
+     *                                   letter case; null uses the connection's insert_format
      * @return bool
      * @throws InvalidArgumentException When the format is neither Values nor JSONEachRow, or, in JSONEachRow, a
      *                                  value cannot be sent as JSON or the connection is not a ClickHouse connection
      * @throws QueryException When, in JSONEachRow, a row's keys differ from the first row's
-     * @throws ClientQueryException When, in JSONEachRow, a row has no keys, or the insert fails
+     * @throws ClientQueryException When a row has no keys, before anything is sent, or, in JSONEachRow, the insert
+     *                              fails
      */
-    public function insert(array $values, ?string $format = null)
+    public function insert(array $values, Format|string|null $format = null)
     {
         $format = $this->insertFormat($format);
 
@@ -1608,35 +1808,38 @@ class QueryBuilder extends Builder
             is_array(array_first($values)) ? $values : [$values]
         );
 
-        return $format === Format::JSON_EACH_ROW ? $this->insertJsonEachRow($rows) : parent::insert($rows);
+        if (in_array([], $rows, true)) {
+            throw ClientQueryException::cannotInsertEmptyValues();
+        }
+
+        return $format === Format::JsonEachRow ? $this->insertJsonEachRow($rows) : parent::insert($rows);
     }
 
     /**
-     * Get the input format of an insert: 'Values' or 'JSONEachRow', as Format spells it, from a name in any letter
-     * case and with surrounding spaces, or, for null, the insert_format option of the connection. A connection other
-     * than this package's inserts in Values.
+     * Get the input format of an insert: Format::Values or Format::JsonEachRow, from one of them, from a name in any
+     * letter case and with surrounding spaces, or, for null, the insert_format option of the connection. A connection
+     * other than this package's inserts in Values.
      *
-     * @param string|null $format
-     * @return string Format::VALUES or Format::JSON_EACH_ROW
+     * @param Format|string|null $format
+     * @return Format
      * @throws InvalidArgumentException For any other format
      */
-    protected function insertFormat(?string $format): string
+    protected function insertFormat(Format|string|null $format): Format
     {
         if ($format === null) {
-            return $this->connection instanceof Connection ? $this->connection->getInsertFormat() : Format::VALUES;
+            return $this->connection instanceof Connection ? $this->connection->getInsertFormat() : Format::Values;
         }
 
-        foreach ([Format::VALUES, Format::JSON_EACH_ROW] as $allowed) {
-            if (strcasecmp(trim($format), $allowed) === 0) {
-                return $allowed;
-            }
+        $named = $format instanceof Format ? $format : Format::tryNamed($format);
+        if ($named === Format::Values || $named === Format::JsonEachRow) {
+            return $named;
         }
 
         throw new InvalidArgumentException(sprintf(
             "insert() takes the format '%s' or '%s', [%s] given.",
-            Format::VALUES,
-            Format::JSON_EACH_ROW,
-            $format
+            Format::Values->value,
+            Format::JsonEachRow->value,
+            $format instanceof Format ? $format->value : $format
         ));
     }
 
@@ -1664,7 +1867,7 @@ class QueryBuilder extends Builder
         if (!$connection instanceof Connection) {
             throw new InvalidArgumentException(sprintf(
                 'Cannot insert in %s on a %s connection: only a ClickHouse connection sends JSONEachRow rows.',
-                Format::JSON_EACH_ROW,
+                Format::JsonEachRow->value,
                 get_debug_type($connection)
             ));
         }
@@ -1677,26 +1880,110 @@ class QueryBuilder extends Builder
 
         [$columns, $body] = ClientRequests::encodeJsonEachRow(
             $rows,
-            new JsonEachRowEncoder($connection->newBuilderGrammar()->formatDateTime(...))
+            new JsonEachRowEncoder($connection->newLiteralGrammar()->formatDateTime(...))
         );
         $head = sprintf(
             'insert into %s (%s) format %s',
             $this->grammar->wrapTable($this->from),
             $this->grammar->columnize(array_map(fn (int|string $column): string => (string) $column, $columns)),
-            Format::JSON_EACH_ROW
+            Format::JsonEachRow->value
         );
 
         $connection->runBeforeExecutingCallbacks($head, []);
         $start = microtime(true);
 
         if (!$connection->pretending()) {
-            ClientRequests::sendInsert($connection->getClient(), $head, $body, Format::JSON_EACH_ROW);
+            ClientRequests::sendInsert($connection->getClient(), $head, $body, Format::JsonEachRow->value);
             $connection->recordsHaveBeenModified();
         }
 
         $connection->logQuery($head, [], round((microtime(true) - $start) * 1000, 2));
 
         return true;
+    }
+
+    /**
+     * Insert the rows of files in an input format, one INSERT per file, sent together by smi2's
+     * Client::insertBatchFiles().
+     *
+     * The statement of each file is insert into "t" ("a", "b") format <format>, with the file as its body; without
+     * columns the list is left out. The format name is matched in any letter case.
+     *
+     * Every path must be a readable file: otherwise nothing is sent. Each file is a separate INSERT, and the files are
+     * sent together: smi2 throws for the first file that the server refused, or that timed out, after every file was
+     * sent, so the files before and after it may have been inserted. Each statement is logged when every file was
+     * inserted. While the connection pretends, the statements are logged and nothing is sent or read. Each file has to
+     * be inserted within the connection's timeout_query, and the connection's retries do not apply.
+     *
+     * @param string|array<int, string> $paths
+     * @param Format|string $format TabSeparated, TabSeparatedWithNames, CSV, CSVWithNames, JSONEachRow,
+     *                              CSVWithNamesAndTypes or TSVWithNamesAndTypes, as a case or in any letter case
+     * @param array<int, string> $columns
+     * @return array<string, Statement> The statement of each file, keyed by path
+     * @throws InvalidArgumentException For a format that smi2 cannot send from a file, before anything is sent
+     * @throws QueryException In a ClickHouse session, or when a path is not a readable file, before anything is sent
+     * @throws ClientQueryException When an insert fails or times out
+     */
+    public function insertFiles(string|array $paths, Format|string $format = Format::Csv, array $columns = []): array
+    {
+        $connection = $this->connection;
+        if (!$connection instanceof Connection) {
+            throw new InvalidArgumentException('insertFiles() needs a ClickHouse connection.');
+        }
+
+        $name = $format instanceof Format ? $format->value : $format;
+        $supported = null;
+        foreach (Client::SUPPORTED_FORMATS as $candidate) {
+            if (strcasecmp($candidate, trim($name)) === 0) {
+                $supported = $candidate;
+            }
+        }
+
+        if ($supported === null) {
+            throw new InvalidArgumentException(sprintf(
+                'insertFiles() cannot send the format [%s]: use one of %s, in any letter case.',
+                $name,
+                implode(', ', Client::SUPPORTED_FORMATS)
+            ));
+        }
+
+        if ($connection->getClient()->getSession() !== false) {
+            throw new QueryException(
+                'Cannot insert files in a ClickHouse session: smi2/phpclickhouse sends the files as asynchronous'
+                . ' requests, which fail in a session after the file is sent, and ClickHouse runs one query of a'
+                . ' session at a time. Insert the files outside session().'
+            );
+        }
+
+        $table = $this->grammar->wrapTable($this->from);
+        $quotedColumns = array_map(fn (int|string $column): string => $this->grammar->wrap((string) $column), array_values($columns));
+
+        if ($connection->pretending()) {
+            $sql = $quotedColumns === []
+                ? "INSERT INTO {$table} FORMAT {$supported}"
+                : "INSERT INTO {$table} ( " . implode(',', $quotedColumns) . " ) FORMAT {$supported}";
+            $statements = [];
+            foreach ((array) $paths as $path) {
+                $connection->logQuery($sql, [], 0.0);
+                $statements[$path] = ClientRequests::pretendedStatement($sql);
+            }
+
+            return $statements;
+        }
+
+        foreach ((array) $paths as $path) {
+            if (!is_file($path) || !is_readable($path)) {
+                throw new QueryException("Cannot insert the file [{$path}]: it is not a readable file. No file was sent.");
+            }
+        }
+
+        $statements = $connection->getClient()->insertBatchFiles($table, $paths, $quotedColumns, $supported);
+        foreach ($statements as $statement) {
+            $connection->logQuery($statement->sql(), [], round($statement->totalTimeRequest() * 1000, 2));
+        }
+        $connection->recordsHaveBeenModified();
+
+        return $statements;
     }
 
     /**

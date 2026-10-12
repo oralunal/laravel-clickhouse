@@ -1,17 +1,37 @@
-# Updates and deletions
+# Inserts, updates and deletions
 
-For inserts, see [Insert rows](/models/inserting-rows).
+The examples use `$query = DB::connection('clickhouse')->table('my_table')`. An Eloquent model has the same methods, see [Eloquent models](/models/eloquent).
+
+## Inserts
+
+```php
+$query->insert([['id' => 20, 'field_one' => 'p'], ['id' => 21, 'field_one' => 'q']]);
+// insert into "my_table" ("field_one", "id") values ('p', 20), ('q', 21)
+
+$query->insert([['id' => 20, 'field_one' => 'p']], 'JSONEachRow');
+// insert into "my_table" ("id", "field_one") format JSONEachRow, with the rows in the request body
+```
+
+- `insert($values, $format = null)` takes one row or a list of rows. The format is `Values`, `JSONEachRow`, a case of `Oralunal\LaravelClickHouse\Enums\Format`, or `null` for the `insert_format` option of the connection.
+- `insert([])` returns `true` and sends nothing. A row without keys throws `Inserting empty values array is not supported in ClickHouse` before the request.
+- `insertGetId()` inserts the row and returns its key as you gave it. ClickHouse has no auto-increment.
+- `insertFiles()` inserts CSV, TSV or JSONEachRow files.
+
+For the formats, buffered inserts and files, see [Insert rows](/models/inserting-rows).
 
 ## Deletions
 
 `delete()` sends a lightweight delete or a mutation:
 
 ```php
-MyTable::where('id', 123)->delete(true);
-// DELETE FROM my_table WHERE `id` = 123
+$query->where('id', 123)->delete(lightweight: true);
+// delete from "my_table" where "id" = 123
 
-MyTable::where('id', 123)->delete(false);
-// ALTER TABLE my_table DELETE WHERE `id` = 123
+$query->where('id', 123)->delete(lightweight: false);
+// alter table "my_table" delete where "id" = 123
+
+$query->delete(5);
+// alter table "my_table" delete where "id" = 5
 ```
 
 | | Lightweight `DELETE FROM` | `ALTER TABLE ... DELETE` |
@@ -19,78 +39,96 @@ MyTable::where('id', 123)->delete(false);
 | Speed | Marks the rows as deleted | Writes all data parts that hold a row again. It uses many resources. |
 | When the call returns | The rows are marked. `SELECT` does not see them (`lightweight_deletes_sync = 2`). | The mutation is in the queue. The rows can still be there (`mutations_sync = 0`). |
 
-A lightweight delete works only on tables of the MergeTree family. ClickHouse refuses it on other engines, such as `Memory`.
+- `delete($id = null, $lightweight = null, $partition = null)`: `true` sends a lightweight `delete from`, `false` an `alter table ... delete`, and `null` follows the `use_lightweight_delete` option of the connection. The default is `false`:
 
-`delete()` without an argument sends a lightweight delete when `use_lightweight_delete` is `true`. The default is `false`:
+  ```dotenv
+  CLICKHOUSE_USE_LIGHTWEIGHT_DELETE=true
+  ```
 
-```dotenv
-CLICKHOUSE_USE_LIGHTWEIGHT_DELETE=true
-```
+- The first argument is Laravel's `$id`. Give the options by name. A bool as the first argument throws an `InvalidArgumentException`, because `delete(true)` would delete the row whose `id` is `1`:
+  `delete() takes the id of a row as its first argument, a bool given. Pass the option by name: delete(lightweight: true).`
+- The `delete()` of an Eloquent builder has no `$id`: `MyModel::where('id', 1)->delete(true)` sends a lightweight delete.
+- A lightweight delete works only on tables of the MergeTree family. ClickHouse refuses it on other engines, such as `Memory`.
 
 ### Rules
 
-- `delete()` needs a `where()` or `preWhere()` condition. Without one, it throws a `QueryException` and sends nothing. To remove all rows, use `truncate()`.
-- A delete has no `PREWHERE`. The `preWhere()` conditions join the `where()` conditions:
+- `delete()` needs a `where()` or `preWhere()` condition. Without one, it throws a `QueryException` and sends nothing:
+  `Cannot delete without a where condition. Add a where condition, or call truncate() to remove every row.`
+- A mutation has no `PREWHERE`. The `preWhere()` conditions join the `where()` conditions:
 
   ```php
-  MyTable::where('field_two', '<', 0)->preWhere('created_at', '<', '2024-01-01 00:00:00')->delete(false);
-  // ALTER TABLE my_table DELETE WHERE (`created_at` < '2024-01-01 00:00:00') AND (`field_two` < 0)
+  $query->where('field_two', '<', 0)->preWhere('created_at', '<', '2024-01-01 00:00:00')->delete(lightweight: false);
+  // alter table "my_table" delete where ("created_at" < '2024-01-01 00:00:00') and ("field_two" < 0)
   ```
 
+- A mutation removes the table name and the alias from the column names of its own table.
+- Laravel's `first()`, `value()`, `find()`, `sole()`, `chunk()` and `paginate()` leave a `LIMIT` on the builder, which a mutation refuses. Start a new query for a mutation.
+- `updateOrInsert()` adds `limit(1)` to its update, so it throws when the row exists.
+
 ::: danger
-`whereNotIn('id', $ids)` with an empty `$ids` adds `1 = 1`. As the only condition, or with `OR`, it deletes all rows.
+`whereNotIn('id', $ids)` with an empty `$ids` adds `1 = 1`. As the only condition, or with `or`, it deletes all rows.
 :::
 
 ### Refused clauses
 
-A mutation uses only the `where` and `prewhere` conditions. The package refuses a query with a clause that the mutation ignores.
-It throws a `QueryException` and sends nothing, because the mutation can change rows that the query does not select.
+A mutation uses only the `where` and `prewhere` conditions. The package refuses a query with a clause that the mutation would ignore.
+It throws a `QueryException` and sends nothing, because the mutation could change rows that the query does not select.
 
 | Refused | Example |
 | --- | --- |
-| `WITH`, `SAMPLE`, `ARRAY JOIN`, `JOIN`, `GROUP BY`, `HAVING`, `LIMIT BY`, `LIMIT`, set operations | `->limit(2)->delete()` |
-| `FINAL` | `->final()->delete()` |
-| A select list with anything but plain columns | `select('id as x')` |
-| A sub-query or raw SQL in `from()` that is not a table name | `from(raw('numbers(3)'))` |
-| An `ORDER BY` with `arrayJoin()`, an alias, an aggregate, a position, or a raw limit | `orderBy('a as b')`, `orderBy(1)` |
-| `SETTINGS` | `->settings([...])->delete()` |
+| `limit()`, `groupLimit()`, an `offset()` above `0` | `->limit(2)->delete()` |
+| `groupBy()`, `having()`, unions, `intersect()`, `except()` | `->groupBy('id')->update([...])` |
+| Joins, `arrayJoin()`, `limitBy()`, `withExpression()`, `withAlias()` | `->join(...)->delete()` |
+| `final()`, `sample()` | `->final()->delete()` |
+| A select alias or expression | `->select('id as x')` |
+| An order that defines an alias, calls `arrayJoin()`, or limits the rows with a raw `LIMIT`, `LIMIT ... BY`, `OFFSET` or `FETCH` | `->orderBy('a as b')` |
+| `settings()` | `->settings([...])->delete()` |
 
-The mutation ignores a select list of plain columns, `format()` and other `ORDER BY` entries.
+```php
+$query->where('field_two', '<', 0)->orderBy('created_at')->limit(2)->delete(lightweight: false);
+// Throws QueryException: Cannot delete with a query that uses LIMIT: a ClickHouse DELETE only takes the where
+// and prewhere conditions, so this clause would be ignored, ... Select the keys first, and delete by them instead:
+// whereIn('id', $query->pluck('id')). ...
+```
 
 To delete the rows of such a query, select their keys first:
 
 ```php
-MyTable::where('field_two', '<', 0)->orderBy('created_at')->limit(2)->delete(false);
-// Throws QueryException: Cannot delete with a query that uses LIMIT: ...
+$ids = DB::connection('clickhouse')->table('my_table')
+    ->where('field_two', '<', 0)->orderBy('created_at')->limit(2)->pluck('id');
 
-$ids = MyTable::select('id')->where('field_two', '<', 0)->orderBy('created_at')->limit(2)->pluck('id');
-MyTable::where('id', $ids)->delete(false);
-// ALTER TABLE my_table DELETE WHERE `id` IN (123, 124)
+DB::connection('clickhouse')->table('my_table')->whereIn('id', $ids)->delete(lightweight: false);
+// alter table "my_table" delete where "id" in (123, 124)
 ```
 
-For a long list of keys, increase `max_query_size` (256 KiB by default) in the connection `settings`.
-Do not give the query as a sub-query, as in `whereIn('id', $query)`, when its rows depend on other rows of the table.
-ClickHouse can run the sub-query again for each data part, so the mutation can delete more or fewer rows.
+- The mutation ignores a select list of plain columns and another order.
+- For settings of a mutation, such as `mutations_sync`, use the connection `settings`.
+- Raw SQL in `fromRaw()`, such as a table function, is no table. ClickHouse refuses the mutation with `SYNTAX_ERROR`.
+- For a long list of keys, increase `max_query_size` (256 KiB by default) in the connection `settings`.
+  Do not give the query as a sub-query, as in `whereIn('id', $query)`, when its rows depend on other rows of the table.
+  ClickHouse can run the sub-query again for each data part, so the mutation can delete more or fewer rows.
 
 ### Conditions that ClickHouse cannot run
 
 ClickHouse accepts some conditions in a mutation, but then fails the mutation again and again in the background.
 Such a mutation stops all later mutations of the table. The package refuses these conditions before it sends the mutation:
 
-- **A sub-query, or `IN` with a table.** Before the mutation, the package sends `EXPLAIN PLAN SELECT 1 FROM <table> <conditions>`.
+- **A sub-query, or `in` with a table.** Before the mutation, the package sends `explain plan select 1 from <table> <conditions>`.
   If ClickHouse refuses it, the call throws a `QueryException`. The ClickHouse error is the previous exception:
 
   ```php
   DB::connection('clickhouse')->table('users')
       ->whereExists(fn ($query) => $query->from('orders')->whereColumn('orders.user_id', 'users.id'))
-      ->delete(false);
+      ->delete(lightweight: false);
   // Throws QueryException: Cannot delete with a where condition that ClickHouse cannot run: it refused
   // the condition in a SELECT with UNSUPPORTED_METHOD. ... Nothing was sent. Select the keys first, and
   // delete by them instead: whereIn('id', $query->pluck('id')).
   ```
 
-  The `EXPLAIN` is one more read-only request. Each error refuses the mutation, `ACCESS_DENIED` included. ClickHouse 26.3 and 26.8 refuse a correlated sub-query in a mutation themselves, at once.
-- **A lightweight delete with `UNION`, `INTERSECT` or `EXCEPT` in its condition.** ClickHouse 24.8 and 26.3 fail it and keep its mutation. Use `delete(false)`. Raw SQL with these words, such as `SELECT * EXCEPT (col)`, is also refused.
+  The `EXPLAIN` is one more read-only request. Each error refuses the mutation, `ACCESS_DENIED` included. While the connection pretends, it is not sent.
+  ClickHouse 26.3 and 26.8 refuse a correlated sub-query in a mutation themselves, at once.
+- **A lightweight delete with `UNION`, `INTERSECT` or `EXCEPT` in its condition.** ClickHouse 24.8 and 26.3 fail it and keep its mutation.
+  Use `delete(lightweight: false)`. Raw SQL with these words, such as `SELECT * EXCEPT (col)`, is also refused.
 
 To remove a failed mutation that you sent with `statement()`:
 
@@ -100,7 +138,7 @@ KILL MUTATION WHERE database = 'default' AND table = 'my_table';
 
 ### Projections
 
-ClickHouse refuses a lightweight delete on a table with projections, unless `lightweight_mutation_projection_mode` is `drop`. `delete(false)` works on such tables.
+ClickHouse refuses a lightweight delete on a table with projections, unless `lightweight_mutation_projection_mode` is `drop`. `delete(lightweight: false)` works on such tables.
 
 - On 24.8, it is a query setting. Put it in the connection `settings`.
 - From 24.9, it is a table setting. Set it on the table:
@@ -112,18 +150,21 @@ ClickHouse refuses a lightweight delete on a table with projections, unless `lig
 ## Updates
 
 ```php
-MyTable::where('id', 123)->update(['field_one' => 'new_val']);
-// ALTER TABLE my_table UPDATE `field_one` = 'new_val' WHERE `id` = 123
+$query->where('id', 123)->update(['field_one' => 'new_val']);
+// alter table "my_table" update "field_one" = 'new_val' where "id" = 123
 
-MyTable::where('id', 123)
-    ->update(['field_one' => new RawColumn("concat(field_one,'new_val')")]);
-// ALTER TABLE my_table UPDATE `field_one` = concat(field_one,'new_val') WHERE `id` = 123
+$query->where('id', 123)->update(['field_one' => DB::raw("concat(field_one, 'new_val')")]);
+// alter table "my_table" update "field_one" = concat(field_one, 'new_val') where "id" = 123
+
+$query->where('id', 123)->update(['tags' => ['a', 'b']]);
+// alter table "my_table" update "tags" = ['a', 'b'] where "id" = 123
 ```
 
-- `update()` sends an `ALTER TABLE ... UPDATE` mutation. The call returns when the mutation is in the queue.
-- Values are written as in [conditions](/query-builder/conditions#values). An array is an array literal: `update(['tags' => ['a', 'b']])` sets `` `tags` = ['a', 'b'] ``.
-- The package quotes each column name as one identifier. A Nested column such as `n.a` is `` `n.a` ``.
+- `update($values, $partition = null)` sends an `ALTER TABLE ... UPDATE` mutation. It returns `1`, or `0` while the connection pretends. The call returns when the mutation is in the queue.
+- Values are written as in [conditions](/query-builder/conditions#values). An array or a collection is an array literal. For a `Map`, use `DB::raw("map('k', 1)")`.
+- The grammar quotes each column name as one identifier. A column name such as `{0}` stays a name. Do not take column names from user input: Laravel reads a dot in a name as a qualifier and the word `as` as an alias.
 - `update()` has the rules and refusals of `delete()`. To update all rows, add `whereRaw('1')`.
+- ClickHouse cannot update a column of the sorting key. A `ReplacingMergeTree` table also refuses an update of its version column.
 
 ::: warning
 ClickHouse reads a float in a mutation as `Float64` and cuts it at the scale of the column.
@@ -133,47 +174,47 @@ Give a numeric string, such as `'19.99'`, or an int, such as `(int) round(0.29 *
 
 ## Partitions
 
-`delete()` and `update()` take a partition as the second argument. An int is a number, a string is a quoted string, and an expression is written as it is.
+`delete()` and `update()` take a partition. An int is a number, a string is a quoted string, and `DB::raw()` is SQL.
 The examples use a table with `PARTITION BY toYYYYMM(created_at)`:
 
 ```php
-MyTable::where('field_two', '<', 0)->delete(false, 202401);
-// ALTER TABLE my_table DELETE IN PARTITION 202401 WHERE `field_two` < 0
+$query->where('field_two', '<', 0)->delete(lightweight: false, partition: 202401);
+// alter table "my_table" delete in partition 202401 where "field_two" < 0
 
-MyTable::where('field_two', '<', 0)->delete(false, new RawColumn("ID '202401'"));
-// ALTER TABLE my_table DELETE IN PARTITION ID '202401' WHERE `field_two` < 0
+$query->where('field_two', '<', 0)->delete(lightweight: false, partition: DB::raw("ID '202401'"));
+// alter table "my_table" delete in partition ID '202401' where "field_two" < 0
 
-MyTable::where('id', 123)->update(['field_one' => 'new_val'], '202401');
-// ALTER TABLE my_table UPDATE `field_one` = 'new_val' IN PARTITION '202401' WHERE `id` = 123
+$query->where('id', 123)->update(['field_one' => 'new_val'], '202401');
+// alter table "my_table" update "field_one" = 'new_val' in partition '202401' where "id" = 123
 ```
 
-A lightweight delete in a partition, `delete(true, $partition)`, needs ClickHouse 24.9 or later.
+A lightweight delete in a partition, `delete(lightweight: true, partition: $partition)`, needs ClickHouse 24.9 or later.
 
 ## ON CLUSTER
 
 On a cluster with tables that are not replicated, each node holds its own rows. `onCluster()` sends the statement to all nodes:
 
 ```php
-MyTable::where('id', 123)->onCluster('company_cluster')->delete(true);
-// DELETE FROM my_table ON CLUSTER 'company_cluster' WHERE `id` = 123
+$query->where('id', 123)->onCluster('company_cluster')->delete(lightweight: true);
+// delete from "my_table" on cluster 'company_cluster' where "id" = 123
 
-MyTable::where('id', 123)->onCluster('company_cluster')->update(['field_one' => 'new_val']);
-// ALTER TABLE my_table ON CLUSTER 'company_cluster' UPDATE `field_one` = 'new_val' WHERE `id` = 123
+$query->where('id', 123)->onCluster('company_cluster')->update(['field_one' => 'new_val']);
+// alter table "my_table" on cluster 'company_cluster' update "field_one" = 'new_val' where "id" = 123
 ```
 
 A `Replicated*MergeTree` table does not need it. ClickHouse sends deletes, updates and `TRUNCATE` to the other replicas.
 
-The `use_on_cluster` option adds `ON CLUSTER '<cluster_name>'` to all `delete()`, `update()`, `truncate()` and `optimize()` statements of the connection:
+The `use_on_cluster` option adds `on cluster '<cluster_name>'` to all `delete()`, `update()`, `truncate()` and `optimize()` statements of the connection:
 
 ```php
-MyTable::optimize(true, 202401);
-// OPTIMIZE TABLE my_table ON CLUSTER 'company_cluster' PARTITION 202401 FINAL
+$query->optimize(true, 202401);
+// optimize table "my_table" on cluster 'company_cluster' partition 202401 final
 
-MyTable::where('id', 123)->withoutOnCluster()->delete(false);
-// ALTER TABLE my_table DELETE WHERE `id` = 123
+$query->where('id', 123)->withoutOnCluster()->delete(lightweight: false);
+// alter table "my_table" delete where "id" = 123
 
-DB::connection('clickhouse')->withoutOnCluster(fn () => MyTable::truncate());
-// TRUNCATE TABLE my_table
+DB::connection('clickhouse')->withoutOnCluster(fn () => DB::connection('clickhouse')->table('my_table')->truncate());
+// truncate table "my_table"
 ```
 
 - `onCluster('other_cluster')` names another cluster for one query.
@@ -186,50 +227,41 @@ See [Clusters](/advanced/clusters).
 ## Truncate
 
 ```php
-MyTable::truncate();
-// TRUNCATE TABLE my_table
+$query->truncate();
+// truncate table "my_table"
 
 DB::connection('clickhouse')->table('default.my_table')->truncate();
-// TRUNCATE TABLE `default`.`my_table`
+// truncate table "default"."my_table"
 
 DB::connection('clickhouse')->table('my_table')->onCluster('company_cluster')->truncate();
-// TRUNCATE TABLE `my_table` ON CLUSTER 'company_cluster'
+// truncate table "my_table" on cluster 'company_cluster'
 ```
 
-`truncate()` ignores the conditions of the query.
+`truncate()` ignores the conditions and the alias of the query.
 
 ## Optimize
 
 [`OPTIMIZE`](https://clickhouse.com/docs/en/sql-reference/statements/optimize/) merges the data parts of a table:
 
 ```php
-MyTable::optimize(true, 202401);
-// OPTIMIZE TABLE my_table PARTITION 202401 FINAL
+$query->optimize(true, 202401);
+// optimize table "my_table" partition 202401 final
 
-MyTable::optimize(false, "it's");
-// OPTIMIZE TABLE my_table PARTITION 'it\'s'
+$query->optimize(false, "it's");
+// optimize table "my_table" partition 'it\'s'
+
+MyModel::optimize(true);
+// optimize table "my_table" final
 ```
 
-The partition is written as in `delete()`. Only `null` removes the `PARTITION` clause, so `''` and `'0'` are partitions.
+- `optimize($final = false, $partition = null)` returns `true`. The query builder, the Eloquent builder and the model have it.
+- The partition is written as in `delete()`. Only `null` removes the `partition` clause, so `''` and `'0'` are partitions.
 
 ## Table names
 
-`delete()`, `update()`, `truncate()` and `insert()` quote the table of `table()` or `from()` as a `SELECT` does: `default.my-table` is `` `default`.`my-table` ``.
-Give the name without backticks. A `raw()` table is written as it is.
-
-The queries of a model use `$tableSources` for `delete()`, `update()`, `truncate()` and `optimize()`. Without it, they use `$table`:
-
-```php
-class MyTable extends BaseModel
-{
-    protected $table = 'my_table_buffer'; // SELECT and INSERT
-    protected $tableSources = 'my_table';  // OPTIMIZE, TRUNCATE, update() and delete()
-}
-```
-
-A model query sets this table with `setSourcesTable()`. On another query, `setSourcesTable('my_table')` sets the table of `delete()`, `update()`, `truncate()` and `insert()`.
-The package writes it as given, without quotes.
+`delete()`, `update()`, `truncate()`, `optimize()` and `insert()` quote the table of `table()` or `from()` as a `select` does: `default.my-table` is `"default"."my-table"`.
+Give the name without quotes.
 
 ## Pretend
 
-While the connection [pretends](/advanced/raw-sql#pretend-mode), as in `migrate --pretend`, the package logs `delete()`, `update()` and `truncate()` and does not send them.
+While the connection [pretends](/advanced/raw-sql#pretend-mode), as in `migrate --pretend`, the package logs `insert()`, `delete()`, `update()`, `truncate()` and `optimize()` and does not send them.

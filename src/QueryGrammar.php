@@ -8,20 +8,20 @@ use ClickHouseDB\Exception\DatabaseException;
 use ClickHouseDB\Query\Degeneration\Bindings;
 use ClickHouseDB\Query\Query;
 use Closure;
+use DateTimeInterface;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Grammars\Grammar;
 use Illuminate\Database\Query\IndexHint;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Enumerable;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\DateTimePrecision;
 use Oralunal\LaravelClickHouse\Concerns\SubstitutesBindings;
+use Oralunal\LaravelClickHouse\Enums\DateTimePrecision;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
-use Oralunal\LaravelClickHouse\Grammar as LiteralGrammar;
 use Stringable;
 
 /**
- * The grammar of Laravel's query builder on a ClickHouse connection, used when fix_default_query_builder is false.
+ * The grammar of Laravel's query builder on a ClickHouse connection.
  *
  * Bindings are Laravel's "?" placeholders, which the connection writes into the SQL as ClickHouse literals before
  * the query is sent (see SubstitutesBindings::prepareQueryForClient()). Identifiers are double-quoted, with
@@ -31,14 +31,6 @@ use Stringable;
 class QueryGrammar extends Grammar
 {
     use SubstitutesBindings;
-
-    /**
-     * The placeholder that parameter() wrote before Laravel's "?" was used.
-     *
-     * @deprecated parameter() writes "?", and the connection writes the bindings into the SQL. Nothing writes or
-     *             reads this marker any more; it will be removed in 5.0.
-     */
-    const PARAMETER_SIGN = '#@?';
 
     /**
      * The package grammar that writes the literals of compileLiteral(), created when it is first needed.
@@ -63,6 +55,22 @@ class QueryGrammar extends Grammar
      * @var int
      */
     protected int $queryDepth = 0;
+
+    /**
+     * Whether a with expression of a query being compiled holds INTERSECT or EXCEPT, so that an EXISTS sub-query,
+     * which can read it by its name, reads every column of its rows (see whereExists()).
+     *
+     * @var bool
+     */
+    protected bool $withsHoldIntersectOrExcept = false;
+
+    /**
+     * Whether parameter() writes a date with a sub-second part as toDateTime64(?, 6). False while an insert is
+     * compiled, whose values stay strings (see compileInsert()).
+     *
+     * @var bool
+     */
+    protected bool $writesSubSecondDatesAsDateTime64 = true;
 
     /**
      * The components of a select, in the order of ClickHouse's SELECT: Laravel's, with WITH first, ARRAY JOIN before
@@ -92,31 +100,10 @@ class QueryGrammar extends Grammar
     ];
 
     /**
-     * Turn the deprecated "#@?" markers in a query into smi2's placeholders :0, :1 and so on, in order.
-     *
-     * @deprecated parameter() writes Laravel's "?", so queries have no such markers, and the connection writes "?"
-     *             bindings into the SQL itself (see SubstitutesBindings::prepareQueryForClient()). A query without
-     *             a marker is returned as it is. It will be removed in 5.0.
-     *
-     * @param string $sql
-     * @return string
-     */
-    public static function prepareParameters(string $sql): string
-    {
-        $parameterNum = 0;
-        while (($pos = strpos($sql, QueryGrammar::PARAMETER_SIGN)) !== false) {
-            $sql = substr_replace($sql, ":$parameterNum", $pos, strlen(QueryGrammar::PARAMETER_SIGN));
-            $parameterNum++;
-        }
-
-        return $sql;
-    }
-
-    /**
      * Write a PHP value as a ClickHouse literal: a Laravel database expression, such as DB::raw(), as its SQL, and
      * any other value as the package grammar writes it, with dates at the connection's datetime_precision.
      *
-     * @see \Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Grammar::compileLiteral()
+     * @see LiteralGrammar::compileLiteral()
      *
      * @param mixed $value
      * @return string
@@ -133,9 +120,51 @@ class QueryGrammar extends Grammar
     }
 
     /**
-     * Get the package grammar that writes the literals of compileLiteral(). On this package's connection it is the
-     * connection's own builder grammar (see Connection::newBuilderGrammar()), which writes dates at the connection's
-     * datetime_precision; on any other connection, a package grammar at its datetime_precision option (see
+     * Get the placeholder of a value: Laravel's "?", or the SQL of an expression. At the microsecond precision of
+     * datetime_precision, a date with a sub-second part is compared as toDateTime64(?, 6), in conditions and in the
+     * values of update(): ClickHouse compares it exactly with a DateTime64 column, and also with a DateTime column,
+     * where a string with a fraction fails with TYPE_MISMATCH on 24.8 and 26.3. In an IN list, ClickHouse (every
+     * version) still refuses such a date for a DateTime column. The binding is the date's string (see
+     * Connection::prepareBindings()).
+     *
+     * @param mixed $value
+     * @return string
+     */
+    public function parameter($value)
+    {
+        if ($this->writesSubSecondDatesAsDateTime64 && $value instanceof DateTimeInterface
+            && $this->getLiteralGrammar()->hasSubSecondPart($value)
+        ) {
+            return 'toDateTime64(?, 6)';
+        }
+
+        return parent::parameter($value);
+    }
+
+    /**
+     * Compile an insert, with the dates of its values as strings (see parameter()): ClickHouse (25.8 and earlier)
+     * refuses a fraction for a DateTime column in an insert also as toDateTime64(), and a string keeps the VALUES
+     * fast to parse.
+     *
+     * @param Builder $query
+     * @param array<int|string, mixed> $values
+     * @return string
+     */
+    public function compileInsert(Builder $query, array $values)
+    {
+        $this->writesSubSecondDatesAsDateTime64 = false;
+
+        try {
+            return parent::compileInsert($query, $values);
+        } finally {
+            $this->writesSubSecondDatesAsDateTime64 = true;
+        }
+    }
+
+    /**
+     * Get the grammar that writes the literals of compileLiteral(). On this package's connection it is the
+     * connection's literal grammar (see Connection::newLiteralGrammar()), which writes dates at the connection's
+     * datetime_precision; on any other connection, a literal grammar at its datetime_precision option (see
      * getDateTimePrecisionOption()). Either way it reads a Laravel database expression in an array value through
      * this grammar.
      *
@@ -146,7 +175,7 @@ class QueryGrammar extends Grammar
     {
         if ($this->literalGrammar === null) {
             $grammar = $this->connection instanceof Connection
-                ? $this->connection->newBuilderGrammar()
+                ? $this->connection->newLiteralGrammar()
                 : (new LiteralGrammar())->setDateTimePrecision($this->getDateTimePrecisionOption());
 
             $this->literalGrammar = $grammar->setLaravelGrammarResolver(fn (): self => $this);
@@ -157,36 +186,33 @@ class QueryGrammar extends Grammar
 
     /**
      * Get the datetime_precision option of a connection other than this package's, read as
-     * Connection::getDateTimePrecision() reads it: DateTimePrecision::SECOND when the option is left out, null or
+     * Connection::getDateTimePrecision() reads it: DateTimePrecision::Second when the option is left out, null or
      * blank (as an empty environment variable gives), and otherwise 'second' or 'microsecond' in any letter case and
-     * with surrounding spaces, or a DateTimePrecision instance.
+     * with surrounding spaces, or a DateTimePrecision case. Any other value is refused, with the value as given, or
+     * its type when it is no string.
      *
-     * Any other value is refused with the message of Grammar::setDateTimePrecision(), which names the value as given,
-     * or its type when it is no string.
-     *
-     * @return string
+     * @return DateTimePrecision
      * @throws InvalidArgumentException For any other value
      */
-    protected function getDateTimePrecisionOption(): string
+    protected function getDateTimePrecisionOption(): DateTimePrecision
     {
         $value = $this->connection->getConfig('datetime_precision');
         if ($value instanceof DateTimePrecision) {
-            return $value->getValue();
+            return $value;
         }
 
         if ($value === null || (is_string($value) && trim($value) === '')) {
-            return DateTimePrecision::SECOND;
+            return DateTimePrecision::Second;
         }
 
-        $precision = is_string($value) ? strtolower(trim($value)) : null;
-        if ($precision !== null && DateTimePrecision::isValid($precision)) {
+        $precision = is_string($value) ? DateTimePrecision::tryFrom(strtolower(trim($value))) : null;
+        if ($precision !== null) {
             return $precision;
         }
 
         throw new InvalidArgumentException(sprintf(
-            "Invalid datetime precision [%s]: use '%s'.",
-            is_string($value) ? $value : get_debug_type($value),
-            implode("' or '", DateTimePrecision::toArray())
+            "Invalid datetime precision [%s]: use 'second' or 'microsecond'.",
+            is_string($value) ? $value : get_debug_type($value)
         ));
     }
 
@@ -208,6 +234,7 @@ class QueryGrammar extends Grammar
     {
         $isOutermost = $this->queryDepth === 0;
         $qualifiers = $this->mutationTableQualifiers;
+        $withsHoldIntersectOrExcept = $this->withsHoldIntersectOrExcept;
         $this->mutationTableQualifiers = null;
         $this->queryDepth++;
 
@@ -216,6 +243,7 @@ class QueryGrammar extends Grammar
         } finally {
             $this->queryDepth--;
             $this->mutationTableQualifiers = $qualifiers;
+            $this->withsHoldIntersectOrExcept = $withsHoldIntersectOrExcept;
         }
 
         return $isOutermost ? $this->compileQuerySettings($query, $sql) : $sql;
@@ -226,13 +254,18 @@ class QueryGrammar extends Grammar
      * are written after the whole union, which is selected from as a sub-query (see compileSelect()).
      *
      * A query with an aggregate, as count() of a union compiles it, is left to Laravel's grammar, which compiles
-     * the union itself through compileSelect() again, without the aggregate.
+     * the union itself through compileSelect() again, without the aggregate. An aggregate reads every column of the
+     * rows that INTERSECT or EXCEPT compare (see compileReadingEveryColumnOfIntersectOrExcept()).
      *
      * @param Builder $query
      * @return string
      */
     protected function compileSelectWithUnionClausesOutside(Builder $query): string
     {
+        if ($query->aggregate && empty($query->unions) && empty($query->havings)) {
+            return $this->compileReadingEveryColumnOfIntersectOrExcept($query, fn (): string => parent::compileSelect($query));
+        }
+
         $unionOrders = $query->unionOrders;
         $unionLimit = $query->unionLimit;
         $unionOffset = $query->unionOffset;
@@ -267,6 +300,8 @@ class QueryGrammar extends Grammar
      * Compile an exists query: select exists(...) as "exists", which gets the settings of timeout(), forceIndex()
      * and ignoreIndex() when it is the outermost query (see compileQuerySettings()).
      *
+     * ClickHouse compares every column of the rows that INTERSECT or EXCEPT compare (see compileExistsSubQuery()).
+     *
      * @param Builder $query
      * @return string
      */
@@ -276,12 +311,133 @@ class QueryGrammar extends Grammar
         $this->queryDepth++;
 
         try {
-            $sql = parent::compileExists($query);
+            $select = $this->compileExistsSubQuery($query);
         } finally {
             $this->queryDepth--;
         }
 
+        $sql = "select exists({$select}) as {$this->wrap('exists')}";
+
         return $isOutermost ? $this->compileQuerySettings($query, $sql) : $sql;
+    }
+
+    /**
+     * Compile a where exists condition: exists (...), whose sub-query reads every column of the rows that INTERSECT
+     * or EXCEPT compare (see compileExistsSubQuery()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereExists(Builder $query, $where)
+    {
+        return 'exists (' . $this->compileExistsSubQuery($where['query']) . ')';
+    }
+
+    /**
+     * Compile a where not exists condition: not exists (...) (see whereExists()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereNotExists(Builder $query, $where)
+    {
+        return 'not exists (' . $this->compileExistsSubQuery($where['query']) . ')';
+    }
+
+    /**
+     * Compile the sub-query of exists() or of a where exists condition, so that ClickHouse reads the rows that the
+     * sub-query returns:
+     * - a sub-query that calls arrayJoin(), or a union that holds INTERSECT or EXCEPT, is selected from:
+     *   select * from (...) as "exists_table" where not ignore(*). ClickHouse 26.8, with the analyzer, answered
+     *   exists of a query that selects arrayJoin() of an empty array with 1, as if it had a row;
+     * - any other sub-query that holds INTERSECT or EXCEPT, also one that reads a with expression of an outer query
+     *   by its name, gets the condition not ignore(*) (see compileReadingEveryColumnOfIntersectOrExcept()).
+     *   ClickHouse (24.8 checked) answered exists of (<a>) except (<b>) without comparing every column of the rows.
+     *   Without the analyzer, it rejects not ignore(*) around a join on such a sub-query, which the condition of the
+     *   sub-query itself avoids.
+     *
+     * @param Builder $query
+     * @return string
+     */
+    protected function compileExistsSubQuery(Builder $query): string
+    {
+        $readsIntersectOrExcept = $this->withsHoldIntersectOrExcept;
+        $select = $this->compileSelect($query);
+        $callsArrayJoin = preg_match('/\barrayJoin\s*\(/i', $this->getSqlOutsideQuotes($select)) === 1;
+
+        if (!$callsArrayJoin && !$readsIntersectOrExcept && !$this->holdsIntersectOrExcept($select)) {
+            return $select;
+        }
+
+        if ($callsArrayJoin || !empty($query->unions)) {
+            return "select * from ({$select}) as {$this->wrapTable('exists_table')} where not ignore(*)";
+        }
+
+        $query->wheres[] = ['type' => 'raw', 'sql' => 'not ignore(*)', 'boolean' => 'and'];
+
+        try {
+            return $this->compileSelect($query);
+        } finally {
+            array_pop($query->wheres);
+        }
+    }
+
+    /**
+     * Compile an aggregate of a union or of a query with a having clause, as Laravel's grammar does: select
+     * count(*) as aggregate from (...) as temp_table. When the query holds INTERSECT or EXCEPT, the outer query gets
+     * where not ignore(*) (see compileReadingEveryColumnOfIntersectOrExcept()).
+     *
+     * @param Builder $query
+     * @return string
+     */
+    protected function compileUnionAggregate(Builder $query)
+    {
+        $sql = parent::compileUnionAggregate($query);
+
+        return $this->holdsIntersectOrExcept($sql) ? $sql . ' where not ignore(*)' : $sql;
+    }
+
+    /**
+     * Compile a query that count() or another aggregate runs, so that ClickHouse reads every column of the rows that
+     * INTERSECT or EXCEPT compare: when the SQL holds INTERSECT or EXCEPT, as a sub-query in the from clause, a join
+     * or a with expression writes them, the query is compiled again with the condition not ignore(*).
+     *
+     * ClickHouse (24.8 checked) removes the columns that an outer query does not read from the queries that INTERSECT
+     * and EXCEPT compare, so that select count(*) from ((<a>) except (<b>)) compared fewer columns than get() and gave
+     * another answer: the count of an EXCEPT that returns two rows was 0. not ignore(*) is true for every row, and
+     * ClickHouse reads every column of the from clause and its joins for it.
+     *
+     * @param Builder $query
+     * @param Closure(): string $compile
+     * @return string
+     */
+    protected function compileReadingEveryColumnOfIntersectOrExcept(Builder $query, Closure $compile): string
+    {
+        $sql = $compile();
+        if (!$this->holdsIntersectOrExcept($sql)) {
+            return $sql;
+        }
+
+        $query->wheres[] = ['type' => 'raw', 'sql' => 'not ignore(*)', 'boolean' => 'and'];
+
+        try {
+            return $compile();
+        } finally {
+            array_pop($query->wheres);
+        }
+    }
+
+    /**
+     * Determine if SQL holds INTERSECT or EXCEPT outside string literals and quoted names.
+     *
+     * @param string $sql
+     * @return bool
+     */
+    protected function holdsIntersectOrExcept(string $sql): bool
+    {
+        return preg_match('/\b(?:intersect|except)\b/i', $this->getSqlOutsideQuotes($sql)) === 1;
     }
 
     /**
@@ -312,7 +468,7 @@ class QueryGrammar extends Grammar
         }
 
         if ($query instanceof QueryBuilder && $query->settings !== []) {
-            $settings[] = substr($this->getLiteralGrammar()->compileSettingsComponent(null, $query->settings), strlen('SETTINGS '));
+            $settings[] = $this->getLiteralGrammar()->compileSettings($query->settings);
         }
 
         if ($settings === []) {
@@ -404,8 +560,14 @@ class QueryGrammar extends Grammar
             $withs
         );
 
-        return 'with ' . ($query instanceof QueryBuilder && $query->recursiveWith ? 'recursive ' : '')
+        $sql = 'with ' . ($query instanceof QueryBuilder && $query->recursiveWith ? 'recursive ' : '')
             . implode(', ', $entries);
+
+        if ($this->holdsIntersectOrExcept($sql)) {
+            $this->withsHoldIntersectOrExcept = true;
+        }
+
+        return $sql;
     }
 
     /**
@@ -742,7 +904,7 @@ class QueryGrammar extends Grammar
 
     /**
      * Compile a whereDate(), whereTime(), whereDay(), whereMonth() or whereYear() clause with a ClickHouse function
-     * of the column, as the package builder does:
+     * of the column:
      *
      * - date → toDate32(column), which also holds dates before 1970 and after 2149, where toDate() wraps around;
      * - time → formatDateTime(column, '%H:%i:%S'), compared as text in the column's own time zone, to the second;
@@ -1104,6 +1266,38 @@ class QueryGrammar extends Grammar
     }
 
     /**
+     * Compile an OPTIMIZE TABLE statement (see QueryBuilder::optimize()): optimize table "t" [on cluster '<name>']
+     * [partition <partition>] [final]. The table is written without its alias. In a session, a statement with ON
+     * CLUSTER of a name that a temporary table of the session has is refused, as for truncate().
+     *
+     * @param QueryBuilder $query
+     * @param bool $final
+     * @param int|string|\Illuminate\Contracts\Database\Query\Expression|null $partition
+     * @return string
+     * @throws QueryException When the statement would miss a temporary table of the session
+     */
+    public function compileOptimize(QueryBuilder $query, bool $final, int|string|\Illuminate\Contracts\Database\Query\Expression|null $partition): string
+    {
+        $from = $query->from;
+        if (is_string($from)) {
+            $from = preg_split('/\s+as\s+/i', trim($from))[0];
+        }
+
+        $cluster = $this->getClusterOf($query);
+        if ($cluster !== null) {
+            $this->refuseATemporaryTableThatTheStatementMisses(
+                $query,
+                'OPTIMIZE TABLE ... ON CLUSTER',
+                $this->describeHowToLeaveOutOnCluster()
+            );
+        }
+
+        return 'optimize table ' . $this->wrapTable($from) . $this->compileOnClusterClause($cluster)
+            . ($partition === null ? '' : ' partition ' . $this->compileLiteral($partition))
+            . ($final ? ' final' : '');
+    }
+
+    /**
      * Get the cluster that a delete, an update or a truncate of a query is sent ON CLUSTER to: the cluster of
      * QueryBuilder::onCluster(), else none after QueryBuilder::withoutOnCluster(), else the default cluster of the
      * connection (see getDefaultCluster()).
@@ -1169,7 +1363,7 @@ class QueryGrammar extends Grammar
     /**
      * Refuse a statement that would miss a temporary table of the session and change the table of that name in the
      * database instead: a lightweight DELETE FROM, or a statement with ON CLUSTER, which ClickHouse (24.8 checked)
-     * runs on the database table (see Builder::refuseATemporaryTableThatTheStatementMisses()).
+     * runs on the database table.
      *
      * The check runs when the query's table is a name without a database, and the connection is in a session and
      * does not pretend: Connection::hasTemporaryTable() then sends EXISTS TEMPORARY TABLE `<name>`, with the
@@ -1224,8 +1418,8 @@ class QueryGrammar extends Grammar
      * names, as a whereIn() or whereExists() sub-query with a union writes them.
      *
      * ClickHouse (24.8 checked) runs a lightweight DELETE FROM as a mutation that fails for such a condition, and the
-     * failed mutation stays: every later mutation of the table waits behind it until KILL MUTATION (see
-     * Builder::refuseASetOperationInALightweightDelete()). ALTER TABLE ... DELETE runs the same condition.
+     * failed mutation stays: every later mutation of the table waits behind it until KILL MUTATION. ALTER TABLE ...
+     * DELETE runs the same condition.
      *
      * @param string $where The compiled where clause of the delete
      * @return void
@@ -1241,7 +1435,7 @@ class QueryGrammar extends Grammar
             'Cannot send a lightweight DELETE FROM whose where condition holds a sub-query with UNION, INTERSECT or'
             . ' EXCEPT: ClickHouse (24.8 checked) fails such a delete and leaves its mutation behind, which blocks'
             . ' every later mutation of the table until KILL MUTATION. Nothing was sent. Send ALTER TABLE ... DELETE'
-            . " with the same condition, with the connection's statement() or the package builder's delete(false), or"
+            . " with the same condition, with delete(lightweight: false) or the connection's statement(), or"
             . " select the keys first, and delete by them instead: whereIn('id', \$query->pluck('id'))."
         );
     }
@@ -1250,7 +1444,7 @@ class QueryGrammar extends Grammar
      * Refuse a delete or an update whose conditions hold a sub-query or an IN <table> that ClickHouse cannot run in a
      * SELECT, such as whereExists() with whereColumn() on the table of the mutation, which ClickHouse (24.8 checked)
      * accepts as a mutation that then never finishes and blocks every later mutation of the table until KILL
-     * MUTATION (see Builder::refuseConditionsThatClickHouseCannotRun()).
+     * MUTATION.
      *
      * When the conditions hold select, or in followed by anything but a parenthesis, outside string literals and
      * quoted names, and the connection does not pretend, explain plan select 1 from <table> <where> runs with the
@@ -1313,8 +1507,7 @@ class QueryGrammar extends Grammar
     }
 
     /**
-     * Describe the refusal of a mutation whose explain ClickHouse refused, as the package builder describes it (see
-     * Builder::describeConditionsThatClickHouseCannotRun()).
+     * Describe the refusal of a mutation whose explain ClickHouse refused.
      *
      * @param string $statement The statement: delete or update
      * @param DatabaseException $exception The refusal of the explain

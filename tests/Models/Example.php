@@ -2,9 +2,13 @@
 
 namespace Tests\Models;
 
-use Oralunal\LaravelClickHouse\BaseModel;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 
-class Example extends BaseModel
+class Example extends Model
 {
+    protected $table = 'examples';
 
+    protected $guarded = [];
+
+    public $timestamps = false;
 }

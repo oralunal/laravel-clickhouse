@@ -9,14 +9,13 @@ use DateTimeZone;
 use Illuminate\Database\Query\Expression as LaravelExpression;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
 use Oralunal\LaravelClickHouse\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
-use Tests\Unit\ClickhouseBuilder\IntBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\StringBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\UnitEnumFixture;
+use Tests\Fixtures\IntBackedEnumFixture;
+use Tests\Fixtures\StringBackedEnumFixture;
+use Tests\Fixtures\UnitEnumFixture;
 
 /**
  * Connection::escape() without PDO: the ClickHouse literals of the query grammar's compileLiteral(), x'..' for binary
@@ -63,7 +62,6 @@ class ConnectionEscapeTest extends TestCase
             'a string-backed enum' => [StringBackedEnumFixture::Active, "'active'"],
             'a pure enum' => [UnitEnumFixture::Hearts, "'Hearts'"],
             'a Stringable value' => [Str::of("it's"), "'it\\'s'"],
-            'raw SQL of the package' => [new Expression('now()'), 'now()'],
             'a Laravel expression' => [new LaravelExpression('now()'), 'now()'],
         ];
     }

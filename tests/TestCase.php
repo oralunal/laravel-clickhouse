@@ -48,7 +48,6 @@ abstract class TestCase extends OrchestraTestCase
             'https'           => false,
             'retries'         => 0,
             'settings'        => ['max_partitions_per_insert_block' => 300],
-            'fix_default_query_builder' => true,
         ]);
 
         $config->set('database.connections.clickhouse2', [

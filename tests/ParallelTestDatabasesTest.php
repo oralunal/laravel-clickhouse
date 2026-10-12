@@ -65,17 +65,20 @@ class ParallelTestDatabasesTest extends TestCase
         $events = <<<'PHP'
             <?php
 
-            return new class extends \Oralunal\LaravelClickHouse\Migration {
+            use Illuminate\Database\Migrations\Migration;
+            use Illuminate\Support\Facades\DB;
+
+            return new class extends Migration {
                 protected $connection = 'phpch_parallel';
 
                 public function up(): void
                 {
-                    static::write('CREATE TABLE events (id UInt64) ENGINE = MergeTree ORDER BY id');
+                    DB::connection($this->connection)->statementOnEveryNode('CREATE TABLE events (id UInt64) ENGINE = MergeTree ORDER BY id');
                 }
 
                 public function down(): void
                 {
-                    static::write('DROP TABLE IF EXISTS events');
+                    DB::connection($this->connection)->statementOnEveryNode('DROP TABLE IF EXISTS events');
                 }
             };
             PHP;

@@ -6,25 +6,29 @@ use Carbon\Carbon;
 use ClickHouseDB\Client;
 use ClickHouseDB\Exception\DatabaseException;
 use Closure;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
-use Oralunal\LaravelClickHouse\BaseModel;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 use PHPUnit\Framework\Attributes\DataProvider;
-use Tests\Models\ExampleWithDateCast;
 
 /**
  * A model of date_cast_examples without casts, so its dates reach the insert as objects.
  */
-class DateTimePrecisionRow extends BaseModel
+class DateTimePrecisionRow extends Model
 {
     protected $table = 'date_cast_examples';
+
+    protected $guarded = [];
+
+    public $timestamps = false;
 }
 
 /**
- * DateTimePrecisionRow with JSONEachRow inserts.
+ * A model of date_cast_examples with date casts.
  */
-class DateTimePrecisionJsonRow extends DateTimePrecisionRow
+class ExampleWithDateCast extends DateTimePrecisionRow
 {
-    protected $insertFormat = 'JSONEachRow';
+    protected $casts = ['d6' => 'datetime', 'dt' => 'datetime', 'd' => 'date'];
 }
 
 /**
@@ -54,28 +58,25 @@ class DateTimePrecisionTest extends TestCase
             . ' ENGINE = MergeTree ORDER BY id'
         );
         DateTimePrecisionRow::clearBuffer();
-        DateTimePrecisionJsonRow::clearBuffer();
     }
 
     protected function tearDown(): void
     {
         DateTimePrecisionRow::clearBuffer();
-        DateTimePrecisionJsonRow::clearBuffer();
         $this->client()->write('DROP TABLE IF EXISTS ' . self::TABLE . ' SYNC');
 
         parent::tearDown();
     }
 
     /**
-     * Each insert path of a model and of the package builder, given one keyed row.
+     * Each insert path of a model and of the query builder, given one keyed row.
      *
      * @return array<string, array{Closure(array<string, mixed>): mixed}>
      */
     public static function insertPaths(): array
     {
         return [
-            'insertAssoc()' => [fn (array $row) => DateTimePrecisionRow::insertAssoc([$row])],
-            'insertBulk()' => [fn (array $row) => DateTimePrecisionRow::insertBulk([array_values($row)], array_keys($row))],
+            'insert()' => [fn (array $row) => DateTimePrecisionRow::insert([$row])],
             'create()' => [fn (array $row) => DateTimePrecisionRow::create($row)],
             'save()' => [fn (array $row) => DateTimePrecisionRow::make($row)->save()],
             'buffer() and flushBuffer()' => [function (array $row) {
@@ -83,15 +84,9 @@ class DateTimePrecisionTest extends TestCase
 
                 return DateTimePrecisionRow::flushBuffer();
             }],
-            'JSONEachRow insertAssoc()' => [fn (array $row) => DateTimePrecisionJsonRow::insertAssoc([$row])],
-            'JSONEachRow insertBulk()' => [fn (array $row) => DateTimePrecisionJsonRow::insertBulk([array_values($row)], array_keys($row))],
-            'JSONEachRow buffer() and flushBuffer()' => [function (array $row) {
-                DateTimePrecisionJsonRow::buffer($row);
-
-                return DateTimePrecisionJsonRow::flushBuffer();
-            }],
-            'the package builder\'s insert()' => [fn (array $row) => DB::connection('clickhouse')->table(self::TABLE)->insert([$row])],
-            'the package builder\'s JSONEachRow insert()' => [
+            'JSONEachRow insert()' => [fn (array $row) => DateTimePrecisionRow::query()->insert([$row], 'JSONEachRow')],
+            'the query builder\'s insert()' => [fn (array $row) => DB::connection('clickhouse')->table(self::TABLE)->insert([$row])],
+            'the query builder\'s JSONEachRow insert()' => [
                 fn (array $row) => DB::connection('clickhouse')->table(self::TABLE)->insert($row, 'JSONEachRow'),
             ],
         ];
@@ -132,27 +127,29 @@ class DateTimePrecisionTest extends TestCase
     }
 
     /**
-     * A model query follows the connection, so a condition on a date with a sub-second part finds the row that the
-     * same date inserted, on DateTime64(6) and on DateTime64(3), which cuts the literal to its precision.
+     * A model query follows the connection, so a condition on a date with a sub-second part, written as a
+     * DateTime64(6), finds the row that the same date inserted. A DateTime64(3) column holds the date cut to
+     * milliseconds, which the exact date does not match.
      */
     public function testModelConditionsFindTheRowsTheSameDateInserted(): void
     {
         $this->usePrecision('microsecond');
         $date = Carbon::parse('2024-01-02 03:04:05.123456', 'UTC');
-        DateTimePrecisionRow::insertAssoc([
+        DateTimePrecisionRow::insert([
             ['id' => 1, 'd3' => $date, 'd6' => $date],
             ['id' => 2, 'd3' => $date->copy()->addMicroseconds(1000), 'd6' => $date->copy()->addMicrosecond()],
         ]);
 
         $this->assertSame(
-            "SELECT * FROM `date_cast_examples` WHERE `d6` = '2024-01-02 03:04:05.123456'",
-            DateTimePrecisionRow::where('d6', $date)->toSql()
+            "select * from \"date_cast_examples\" where \"d6\" = toDateTime64('2024-01-02 03:04:05.123456', 6)",
+            DateTimePrecisionRow::where('d6', $date)->toRawSql()
         );
-        $this->assertSame([1], $this->ids(DateTimePrecisionRow::where('d6', $date)->getRows()));
-        $this->assertSame([1], $this->ids(DateTimePrecisionRow::where('d3', $date)->getRows()));
-        $this->assertSame([2], $this->ids(DateTimePrecisionRow::query()->where('d6', '>', $date)->getRows()));
-        $this->assertSame([1, 2], $this->ids(DateTimePrecisionRow::select()->whereIn('d6', [$date, $date->copy()->addMicrosecond()])->orderBy('id')->getRows()));
-        $this->assertSame([2], $this->ids(DateTimePrecisionRow::select()->whereBetween('d6', [$date->copy()->addMicrosecond(), $date->copy()->addSecond()])->getRows()));
+        $this->assertSame([1], $this->ids(DateTimePrecisionRow::where('d6', $date)));
+        $this->assertSame([], $this->ids(DateTimePrecisionRow::where('d3', $date)));
+        $this->assertSame([1], $this->ids(DateTimePrecisionRow::where('d3', $date->copy()->startOfMillisecond())));
+        $this->assertSame([2], $this->ids(DateTimePrecisionRow::query()->where('d6', '>', $date)));
+        $this->assertSame([1, 2], $this->ids(DateTimePrecisionRow::query()->whereIn('d6', [$date, $date->copy()->addMicrosecond()])));
+        $this->assertSame([2], $this->ids(DateTimePrecisionRow::query()->whereBetween('d6', [$date->copy()->addMicrosecond(), $date->copy()->addSecond()])));
 
         DateTimePrecisionRow::where('d6', $date)->delete(true);
 
@@ -165,49 +162,40 @@ class DateTimePrecisionTest extends TestCase
     public function testModelConditionsUseSecondsByDefault(): void
     {
         $this->assertSame(
-            "SELECT * FROM `date_cast_examples` WHERE `d6` = '2024-01-02 03:04:05'",
-            DateTimePrecisionRow::where('d6', Carbon::parse('2024-01-02 03:04:05.123456', 'UTC'))->toSql()
+            "select * from \"date_cast_examples\" where \"d6\" = '2024-01-02 03:04:05'",
+            DateTimePrecisionRow::where('d6', Carbon::parse('2024-01-02 03:04:05.123456', 'UTC'))->toRawSql()
         );
     }
 
     /**
-     * A DateTime column refuses a date with a sub-second part at microsecond precision, loudly, in an insert and in
-     * a condition, on a server that parses date strings strictly. The package writes the fraction either way; what
-     * the server does with it follows two settings, read from system.settings (24.8, 26.3 and 26.8 checked):
-     * - a condition is refused (TYPE_MISMATCH) when cast_string_to_date_time_mode is basic. ClickHouse 24.8 has no
-     *   such setting and refuses it too.
-     * - a VALUES insert is refused (CANNOT_PARSE_TEXT) only when date_time_input_format is basic as well. With
-     *   cast_string_to_date_time_mode best_effort, 26.8 stores the second even when date_time_input_format is basic.
+     * A DateTime column refuses a date with a sub-second part in a VALUES insert at microsecond precision, on a
+     * server that parses date strings strictly; what the server does follows two settings, read from system.settings
+     * (24.8, 26.3 and 26.8 checked): the insert is refused (CANNOT_PARSE_TEXT) when date_time_input_format and
+     * cast_string_to_date_time_mode are basic (ClickHouse 24.8 has no cast_string_to_date_time_mode and casts as its
+     * basic mode does). ClickHouse 26.8 defaults both to best_effort and stores the second.
      *
-     * Both are basic on 26.3, as date_time_input_format is on 24.8. ClickHouse 26.8 defaults both to best_effort and
-     * cuts the fraction: the insert stores the second, and the condition compares with the second, so it matches the
-     * row that the insert stored.
+     * A condition writes the date as a DateTime64(6), which every server compares with the DateTime column: it does
+     * not match the whole second.
      */
-    public function testADateTimeColumnRefusesAFractionAtMicrosecondPrecision(): void
+    public function testADateTimeColumnRefusesAFractionInAnInsertAtMicrosecondPrecision(): void
     {
         $this->usePrecision('microsecond');
         $date = Carbon::parse('2024-01-02 03:04:05.5', 'UTC');
         $settings = $this->dateTimeParsingSettings();
-        $refusesTheCondition = $settings['cast_string_to_date_time_mode'] === 'basic';
-        $refusesTheInsert = $refusesTheCondition && $settings['date_time_input_format'] === 'basic';
+        $refusesTheInsert = $settings['cast_string_to_date_time_mode'] === 'basic' && $settings['date_time_input_format'] === 'basic';
 
         try {
-            DateTimePrecisionRow::insertAssoc([['id' => 1, 'dt' => $date]]);
+            DateTimePrecisionRow::insert([['id' => 1, 'dt' => $date]]);
             $this->assertFalse($refusesTheInsert, 'The insert did not throw.');
             $this->assertSame('2024-01-02 03:04:05', $this->rows()[0][1], 'A server that cuts the fraction stores the second.');
         } catch (DatabaseException $exception) {
             $this->assertTrue($refusesTheInsert, 'The insert threw: ' . $exception->getMessage());
             $this->assertSame('CANNOT_PARSE_TEXT', $exception->getClickHouseExceptionName());
+            DateTimePrecisionRow::insert([['id' => 1, 'dt' => $date->copy()->startOfSecond()]]);
         }
 
-        try {
-            $rows = DateTimePrecisionRow::where('dt', $date)->getRows();
-            $this->assertFalse($refusesTheCondition, 'The condition did not throw.');
-            $this->assertSame([1], $this->ids($rows), 'A server that cuts the fraction compares with the second.');
-        } catch (DatabaseException $exception) {
-            $this->assertTrue($refusesTheCondition, 'The condition threw: ' . $exception->getMessage());
-            $this->assertSame('TYPE_MISMATCH', $exception->getClickHouseExceptionName());
-        }
+        $this->assertSame([], $this->ids(DateTimePrecisionRow::where('dt', $date)));
+        $this->assertSame([1], $this->ids(DateTimePrecisionRow::where('dt', '<', $date)));
     }
 
     /**
@@ -219,7 +207,7 @@ class DateTimePrecisionTest extends TestCase
         $this->app['config']->set('database.connections.clickhouse.settings', ['mutations_sync' => 2]);
         $this->usePrecision('microsecond');
         $date = Carbon::parse('2024-01-02 03:04:05.123456', 'UTC');
-        DateTimePrecisionRow::insertAssoc([['id' => 1, 'd6' => $date], ['id' => 2, 'd6' => $date->copy()->addMicrosecond()]]);
+        DateTimePrecisionRow::insert([['id' => 1, 'd6' => $date], ['id' => 2, 'd6' => $date->copy()->addMicrosecond()]]);
 
         DateTimePrecisionRow::where('d6', $date)->update(['d3' => $date->copy()->addMicroseconds(654321)]);
 
@@ -331,12 +319,12 @@ class DateTimePrecisionTest extends TestCase
     }
 
     /**
-     * @param array<int, array<string, mixed>> $rows
+     * @param Builder<DateTimePrecisionRow> $query
      * @return list<int>
      */
-    private function ids(array $rows): array
+    private function ids(Builder $query): array
     {
-        return array_map(fn (array $row): int => (int) $row['id'], $rows);
+        return $query->orderBy('id')->pluck('id')->map(fn (mixed $id): int => (int) $id)->all();
     }
 
     private function client(): Client

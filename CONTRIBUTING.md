@@ -95,12 +95,13 @@ The filter is: **does this change anything for someone who runs
 Include:
 
 - Anything in `src/` that changes behavior, changes a signature, or adds
-  public API — `BaseModel`, `Builder`, the grammars, the service provider
+  public API — `Eloquent\Model`, `QueryBuilder`, the grammars, the service
+  provider
 - Changes to the publishable `config/clickhouse.php`, which users copy into
   their own app
 - `composer.json` constraint changes: `php`, `laravel/framework`,
   `smi2/phpclickhouse`
-- Bug fixes users could have hit, and deprecations
+- Bug fixes users could have hit, and removals
 
 Leave out:
 
@@ -138,15 +139,15 @@ perspective:
 
 | | When | Example |
 | --- | --- | --- |
-| **MAJOR** | Removing or renaming public API, incompatible signature change, raising the minimum PHP/Laravel version, changing a default in a breaking way | `php: ^8.5` → `^8.6`; flipping the `fix_default_query_builder` default |
+| **MAJOR** | Removing or renaming public API, incompatible signature change, raising the minimum PHP/Laravel version, changing a default in a breaking way | `php: ^8.5` → `^8.6`; removing `BaseModel` in 4.0.0 |
 | **MINOR** | New public method, new config option with a safe default, *widening* a supported version range | `buffer()` in 1.2.0; `laravel: ^13` → `^13\|^14` |
-| **PATCH** | Bug fix, internal refactor, performance | Fixing a cast in `insertAssoc()` |
+| **PATCH** | Bug fix, internal refactor, performance | Fixing the quoting of a column name in `insert()` |
 
-One caveat specific to this package: `BaseModel` is designed to be extended, so
-**every public method name added to it is part of the API surface**. Adding
-`buffer()` can collide with a subclass that already defines its own. That is
-MINOR by the letter of SemVer but breaking in practice — choose new public
-method names with that in mind.
+One caveat specific to this package: `Eloquent\Model` and `QueryBuilder` are
+designed to be extended, so **every public method name added to them is part of
+the API surface**. Adding `buffer()` can collide with a subclass that already
+defines its own. That is MINOR by the letter of SemVer but breaking in practice
+— choose new public method names with that in mind.
 
 ### Release checklist
 

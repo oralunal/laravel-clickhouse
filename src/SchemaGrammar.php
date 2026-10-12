@@ -12,7 +12,6 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Grammars\Grammar as BaseGrammar;
 use Illuminate\Support\Fluent;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression as BuilderExpression;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use RuntimeException;
 use Stringable;
@@ -425,7 +424,7 @@ class SchemaGrammar extends BaseGrammar
      * On an Atomic database, ClickHouse removes the data of a dropped table
      * only after database_atomic_delay_before_drop_table_sec (480 seconds by
      * default). Until then a replicated table with a fixed replica path, such
-     * as one that createMergeTree() creates on a cluster, cannot be created
+     * as one that 3.x created on a cluster, cannot be created
      * again (REPLICA_ALREADY_EXISTS). SYNC waits until the data and the
      * replica's metadata are gone.
      *
@@ -1670,8 +1669,7 @@ class SchemaGrammar extends BaseGrammar
      * table is replicated when the CREATE goes ON CLUSTER, on a connection
      * with a cluster_name and without withoutOnCluster() (see
      * getOnClusterName()), and the connection lists its nodes in the cluster
-     * option, the condition on which Migration::createMergeTree() makes a
-     * table replicated (see Connection::hasClusterNodes()). A temporary table
+     * option (see Connection::hasClusterNodes()). A temporary table
      * is never replicated.
      *
      * @param Blueprint $blueprint
@@ -1970,7 +1968,7 @@ class SchemaGrammar extends BaseGrammar
      * every settings() command; a later value for the same name wins, and a
      * null value leaves the setting out. Names and values are checked and
      * written by the query builder's settings writer
-     * (Grammar::compileSettingsComponent()); a Laravel expression is written
+     * (LiteralGrammar::compileSettings()); a Laravel expression is written
      * as its SQL.
      *
      * @param Blueprint $blueprint
@@ -1993,8 +1991,8 @@ class SchemaGrammar extends BaseGrammar
 
     /**
      * Compile settings as `<name>=<value>, ...`. Names and values are checked
-     * and written by the query builder's settings writer
-     * (Grammar::compileSettingsComponent()); a Laravel expression is written
+     * and written by the settings writer of the literal grammar
+     * (LiteralGrammar::compileSettings()); a Laravel expression is written
      * as its SQL, and a null value is left out.
      *
      * @param array<string, mixed> $settings
@@ -2003,14 +2001,11 @@ class SchemaGrammar extends BaseGrammar
      */
     protected function compileSettingsList(array $settings): ?string
     {
-        $clause = (new Grammar())->compileSettingsComponent(null, array_map(
-            fn (mixed $value): mixed => $this->isExpression($value)
-                ? new BuilderExpression((string) $this->getValue($value))
-                : $value,
-            $settings
-        ));
+        $list = (new LiteralGrammar())
+            ->setLaravelGrammarResolver(fn (): self => $this)
+            ->compileSettings($settings);
 
-        return $clause === '' ? null : substr($clause, strlen('SETTINGS '));
+        return $list === '' ? null : $list;
     }
 
     /**
@@ -2345,34 +2340,15 @@ class SchemaGrammar extends BaseGrammar
     }
 
     /**
-     * Determine if the connection maps Laravel's integer types to their exact
-     * widths and signs (the `exact_integer_types` option, false by default).
-     *
-     * @return bool
-     */
-    protected function usesExactIntegerTypes(): bool
-    {
-        return filter_var($this->connection->getConfig('exact_integer_types') ?? false, FILTER_VALIDATE_BOOLEAN);
-    }
-
-    /**
-     * Get the ClickHouse type of an integer column.
-     *
-     * With exact_integer_types, the type has the column's width and is UInt
-     * when the column is unsigned. Without it, the type is the given signed
-     * one, as in 3.0.0, and unsigned() is ignored.
+     * Get the ClickHouse type of an integer column: the column's width, and
+     * UInt when the column is unsigned.
      *
      * @param Fluent $column
-     * @param int $bits The width with exact_integer_types.
-     * @param string $type The type without exact_integer_types.
+     * @param int $bits
      * @return string
      */
-    protected function compileIntegerType(Fluent $column, int $bits, string $type): string
+    protected function compileIntegerType(Fluent $column, int $bits): string
     {
-        if (! $this->usesExactIntegerTypes()) {
-            return $type;
-        }
-
         return ($column->unsigned ? 'UInt' : 'Int') . $bits;
     }
 
@@ -2446,64 +2422,63 @@ class SchemaGrammar extends BaseGrammar
     }
 
     /**
-     * Create the column definition for a tiny integer type: Int8 or UInt8
-     * with exact_integer_types, Int16 without, as in 3.0.0.
+     * Create the column definition for a tiny integer type: Int8, or UInt8
+     * when the column is unsigned.
      *
      * @param Fluent $column
      * @return string
      */
     protected function typeTinyInteger(Fluent $column): string
     {
-        return $this->compileIntegerType($column, 8, 'Int16');
+        return $this->compileIntegerType($column, 8);
     }
 
     /**
-     * Create the column definition for a small integer type: Int16 or UInt16
-     * with exact_integer_types. Without it, Int16, or Int32 when the column
-     * is unsigned, so that the unsigned range up to 65535 fits.
+     * Create the column definition for a small integer type: Int16, or
+     * UInt16 when the column is unsigned.
      *
      * @param Fluent $column
      * @return string
      */
     protected function typeSmallInteger(Fluent $column): string
     {
-        return $this->compileIntegerType($column, 16, $column->unsigned ? 'Int32' : 'Int16');
+        return $this->compileIntegerType($column, 16);
     }
 
     /**
-     * Create the column definition for a medium integer type: Int32 or
-     * UInt32 with exact_integer_types, Int32 without.
+     * Create the column definition for a medium integer type: Int32, or
+     * UInt32 when the column is unsigned. ClickHouse has no 24-bit integer.
      *
      * @param Fluent $column
      * @return string
      */
     protected function typeMediumInteger(Fluent $column): string
     {
-        return $this->compileIntegerType($column, 32, 'Int32');
+        return $this->compileIntegerType($column, 32);
     }
 
     /**
-     * Create the column definition for an integer type: Int32 or UInt32 with
-     * exact_integer_types, Int32 without, as in 3.0.0.
+     * Create the column definition for an integer type: Int32, or UInt32
+     * when the column is unsigned.
      *
      * @param Fluent $column
      * @return string
      */
     protected function typeInteger(Fluent $column): string
     {
-        return $this->compileIntegerType($column, 32, 'Int32');
+        return $this->compileIntegerType($column, 32);
     }
 
     /**
-     * Create the column definition for a big integer type: Int64 or UInt64
-     * with exact_integer_types, Int64 without, as in 3.0.0.
+     * Create the column definition for a big integer type: Int64, or UInt64
+     * when the column is unsigned, as id() is.
      *
      * @param Fluent $column
      * @return string
      */
     protected function typeBigInteger(Fluent $column): string
     {
-        return $this->compileIntegerType($column, 64, 'Int64');
+        return $this->compileIntegerType($column, 64);
     }
 
     /**
@@ -2568,9 +2543,8 @@ class SchemaGrammar extends BaseGrammar
      * ClickHouse numbers from 1, array_unique([200, 404, 200]) gives
      * Enum('200', '404'), and ['200' => 1, '404' => 2] gives Enum('1', '2').
      * To number names that are all numbers, write the type with rawColumn():
-     * rawColumn('status', "Enum8('200' = 1, '404' = 2)"). AddsColumns::enum()
-     * of createMergeTree() follows the same rule. ClickHouse picks Enum8 or
-     * Enum16.
+     * rawColumn('status', "Enum8('200' = 1, '404' = 2)"). ClickHouse picks
+     * Enum8 or Enum16.
      *
      * @param Fluent $column
      * @return string

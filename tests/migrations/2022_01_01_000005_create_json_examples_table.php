@@ -1,15 +1,15 @@
 <?php
 
-return new class extends \Oralunal\LaravelClickHouse\Migration {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
-    public function up()
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration
+{
+    protected $connection = 'clickhouse';
+
+    public function up(): void
     {
-        static::write(
-            "
+        DB::connection($this->connection)->statementOnEveryNode(<<<'SQL'
             CREATE TABLE IF NOT EXISTS json_examples (
                 id UInt32,
                 f_map Map(String, UInt32),
@@ -25,17 +25,12 @@ return new class extends \Oralunal\LaravelClickHouse\Migration {
             )
             ENGINE = MergeTree()
             ORDER BY (id)
-        "
-        );
+
+        SQL);
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
-    public function down()
+    public function down(): void
     {
-        static::write('DROP TABLE json_examples');
+        DB::connection($this->connection)->statementOnEveryNode('DROP TABLE IF EXISTS json_examples');
     }
 };

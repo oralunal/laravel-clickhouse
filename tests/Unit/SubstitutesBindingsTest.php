@@ -17,20 +17,16 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Expression as LaravelExpression;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Identifier;
-use Oralunal\LaravelClickHouse\Expressions\InsertArray;
-use Oralunal\LaravelClickHouse\Grammar;
 use Oralunal\LaravelClickHouse\QueryGrammar;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use stdClass;
-use Tests\Unit\ClickhouseBuilder\IntBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\StringBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\UnitEnumFixture;
+use Tests\Fixtures\IntBackedEnumFixture;
+use Tests\Fixtures\StringBackedEnumFixture;
+use Tests\Fixtures\UnitEnumFixture;
 
 /**
- * The SubstitutesBindings trait of the package Grammar and of QueryGrammar: a single scan that writes "?" bindings
+ * The SubstitutesBindings trait of QueryGrammar: a single scan that writes "?" bindings
  * into the SQL as ClickHouse literals, and the choice between that and smi2's own placeholders.
  */
 class SubstitutesBindingsTest extends TestCase
@@ -83,7 +79,7 @@ class SubstitutesBindingsTest extends TestCase
             'negative infinity after a minus sign is no comment' => ['select 10-?', [-INF], 'select 10- -inf'],
             'negative zero after a unary minus is no comment' => ['select -?', [-0.0], 'select - -0.0'],
             'a negative int after a spaced minus sign is no comment' => ['select 10 -?, ?-?', [-5, -1, -2], 'select 10 - -5, -1- -2'],
-            'raw SQL after a slash is no comment' => ['select 4/?', [new Expression('/* two */ 2')], 'select 4/ /* two */ 2'],
+            'raw SQL after a slash is no comment' => ['select 4/?', [new LaravelExpression('/* two */ 2')], 'select 4/ /* two */ 2'],
             'a positive int after a minus sign' => ['select 10-?', [5], 'select 10-5'],
             'a negative int after a minus sign and a space' => ['select 10 - ?', [-5], 'select 10 - -5'],
             'escaped question mark' => ['select ? > 1 ?? 10 : 20 as t', [5], 'select 5 > 1 ? 10 : 20 as t'],
@@ -105,13 +101,12 @@ class SubstitutesBindingsTest extends TestCase
     #[DataProvider('scanProvider')]
     public function test_placeholders_are_found_outside_literals_identifiers_heredocs_and_comments(string $sql, array $bindings, string $expected): void
     {
-        $this->assertSame($expected, (new Grammar())->substituteBindings($sql, $bindings));
         $this->assertSame($expected, $this->queryGrammar()->substituteBindings($sql, $bindings));
     }
 
     public function test_binding_keys_are_ignored(): void
     {
-        $this->assertSame("select 1, 'a'", (new Grammar())->substituteBindings('select ?, ?', ['x' => 1, 5 => 'a']));
+        $this->assertSame("select 1, 'a'", $this->queryGrammar()->substituteBindings('select ?, ?', ['x' => 1, 5 => 'a']));
     }
 
     /**
@@ -135,7 +130,7 @@ class SubstitutesBindingsTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage($message);
 
-        (new Grammar())->substituteBindings($sql, $bindings);
+        $this->queryGrammar()->substituteBindings($sql, $bindings);
     }
 
     public function test_substitute_bindings_into_raw_sql_is_lenient(): void
@@ -146,7 +141,7 @@ class SubstitutesBindingsTest extends TestCase
         $this->assertSame('select 1', $grammar->substituteBindingsIntoRawSql('select ?', [1, 2]));
         $this->assertSame('select ? ?', $grammar->substituteBindingsIntoRawSql('select ? ??', []));
         $this->assertSame("select * from \"t\" where \"name\" = 'it\\'s'", $grammar->substituteBindingsIntoRawSql('select * from "t" where "name" = ?', ['name' => "it's"]));
-        $this->assertSame('select 0.1', (new Grammar())->substituteBindingsIntoRawSql('select ?', [0.1]));
+        $this->assertSame('select 0.1', $this->queryGrammar()->substituteBindingsIntoRawSql('select ?', [0.1]));
         $this->assertSame('select 10- -3, ?', $grammar->substituteBindingsIntoRawSql('select 10-?, ?', [-3]));
     }
 
@@ -310,28 +305,25 @@ class SubstitutesBindingsTest extends TestCase
 
     /**
      * Raw SQL and NaN reach smi2 as expressions that smi2 writes as the "?" placeholders write them, for :key and
-     * {key} placeholders and in lists, with no PHP 8.5 warning for NaN. In 3.0.0, smi2 failed with an Error for an
-     * Expression, an Identifier or DB::raw() at any placeholder, and for a smi2 Raw or an InsertArray at {key} or in
-     * a list, and NaN raised the warning "unexpected NAN value was coerced to string".
+     * {key} placeholders and in lists, with no PHP 8.5 warning for NaN. In 3.0.0, smi2 failed with an Error for
+     * DB::raw() at any placeholder, and for a smi2 Raw at {key} or in a list, and NaN raised the warning "unexpected
+     * NAN value was coerced to string".
      *
      * @return array<string, array{string, array<int|string, mixed>, string}>
      */
     public static function smi2RawSqlProvider(): array
     {
         return [
-            'expression' => ['select :e, {e}', ['e' => new Expression('now()')], 'select now(), now()'],
-            'identifier' => ['select :i, {i}', ['i' => new Identifier('db.col')], 'select `db`.`col`, `db`.`col`'],
             'laravel expression' => ['select :e, {e}', ['e' => new LaravelExpression('now()')], 'select now(), now()'],
             'smi2 raw expression' => ['select :e, {e}', ['e' => new Raw('now()')], 'select now(), now()'],
-            'insert array' => ['select :a, {a}', ['a' => new InsertArray(['x', 'y'])], "select ['x','y'], ['x','y']"],
             'NaN' => ['select :f, {f}', ['f' => NAN], 'select nan, nan'],
             'infinities' => ['select :f, {g}', ['f' => INF, 'g' => -INF], 'select INF, -INF'],
             'a list' => [
                 'select 1 where x in (:l) or y in ({l})',
-                ['l' => [NAN, INF, new Expression('1 + 1'), 2]],
+                ['l' => [NAN, INF, new LaravelExpression('1 + 1'), 2]],
                 'select 1 where x in (nan,INF,1 + 1,2) or y in (nan, INF, 1 + 1, 2)',
             ],
-            'a list of bindings without "?"' => ['select :0, {1}', [new Expression('now()'), NAN], 'select now(), nan'],
+            'a list of bindings without "?"' => ['select :0, {1}', [new LaravelExpression('now()'), NAN], 'select now(), nan'],
         ];
     }
 
@@ -356,14 +348,6 @@ class SubstitutesBindingsTest extends TestCase
         }
     }
 
-    public function test_a_laravel_expression_for_smi2_needs_the_grammar_of_a_connection(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cannot write the Laravel database expression Illuminate\Database\Query\Expression without the grammar of a database connection.');
-
-        (new Grammar())->prepareQueryForClient('select :e', ['e' => new LaravelExpression('now()')]);
-    }
-
     /**
      * The "?" placeholders write the values of the smi2 client as smi2 wrote them for the ":0" placeholders of
      * 3.0.0's Laravel query builder: numbers and expressions without quotes.
@@ -371,13 +355,12 @@ class SubstitutesBindingsTest extends TestCase
     public function test_values_of_the_smi2_client_are_written_as_smi2_writes_them(): void
     {
         $this->assertSame(
-            ["select 18446744073709551615 + 0, 0.5, now(), nan, ['a','b'], map('k', 1), '2024-01-02 03:04:05.123'", []],
-            $this->queryGrammar()->prepareQueryForClient('select ? + 0, ?, ?, ?, ?, ?, ?', [
+            ["select 18446744073709551615 + 0, 0.5, now(), nan, map('k', 1), '2024-01-02 03:04:05.123'", []],
+            $this->queryGrammar()->prepareQueryForClient('select ? + 0, ?, ?, ?, ?, ?', [
                 UInt64::fromString('18446744073709551615'),
                 Float64::fromString('0.5'),
                 new Raw('now()'),
                 new Raw('nan'),
-                new InsertArray(['a', 'b']),
                 MapType::fromArray(['k' => 1]),
                 DateTime64::fromString('2024-01-02 03:04:05.123'),
             ])

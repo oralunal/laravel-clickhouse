@@ -32,8 +32,9 @@ A repository that your application or another package binds stays. On other conn
 | Remove a migration (rollback) | `alter table "migrations" delete where "migration" = ? settings mutations_sync = 1` |
 | Drop the table before a dump loads | ``DROP TABLE `migrations` SYNC`` |
 
-- The repository reads the table with Laravel's query builder and returns the migrations as objects, whatever `fix_default_query_builder` is.
-- `exact_integer_types` does not change the columns. The `engine` option applies only when it is `MergeTree`, `ReplicatedMergeTree` or `SharedMergeTree` with its arguments.
+- The repository reads the table with Laravel's query builder and returns the migrations as objects.
+- The columns are those of 3.x: `id` is `Int32`, although `increments()` of the schema builder gives `UInt32` in 4.0. A migrations table of 3.x works as it is.
+- The `engine` option applies only when it is `MergeTree`, `ReplicatedMergeTree` or `SharedMergeTree` with its arguments.
 - The insert is synchronous, so the row is there when the next command reads the table. The token keeps a row that is identical to an earlier row, in a table that removes duplicate inserts.
 - The rollback waits until the active node deletes the row, so `migrate:refresh` runs all rolled-back migrations again.
   The delete usually takes less than 20 ms. On ClickHouse 26.8 with little RAM, it can take more than 2 seconds: increase `timeout_query` for migration commands.

@@ -12,7 +12,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Oralunal\LaravelClickHouse\Connection;
-use Oralunal\LaravelClickHouse\Grammar;
+use Oralunal\LaravelClickHouse\LiteralGrammar;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 use Oralunal\LaravelClickHouse\QueryGrammar;
 use Oralunal\LaravelClickHouse\QueryProcessor;
@@ -20,15 +20,15 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The SQL that the grammar of Laravel's query builder writes on a ClickHouse connection (fix_default_query_builder
- * false): placeholders, identifiers, random order, unions, like, null-safe and bitwise conditions, date conditions,
- * and the settings of timeout(), forceIndex() and ignoreIndex().
+ * The SQL that the grammar of Laravel's query builder writes on a ClickHouse connection: placeholders, identifiers,
+ * random order, unions, like, null-safe and bitwise conditions, date conditions, and the settings of timeout(),
+ * forceIndex() and ignoreIndex().
  */
 class QueryGrammarTest extends TestCase
 {
     /**
      * A query builder of the package on a stub ClickHouse connection with the given config, which hands out the
-     * grammar's literal writer as Connection::newBuilderGrammar() does.
+     * grammar's literal writer as Connection::newLiteralGrammar() does.
      *
      * @param array<string, mixed> $config
      * @return QueryBuilder
@@ -38,45 +38,12 @@ class QueryGrammarTest extends TestCase
         $connection = $this->createStub(Connection::class);
         $connection->method('getConfig')->willReturnCallback(fn (?string $option = null) => $config[$option] ?? null);
         $connection->method('getTablePrefix')->willReturn('');
-        $connection->method('newBuilderGrammar')->willReturnCallback(fn (): Grammar => new Grammar());
+        $connection->method('newLiteralGrammar')->willReturnCallback(fn (): LiteralGrammar => new LiteralGrammar());
         $connection->method('prepareBindings')->willReturnArgument(0);
         $grammar = new QueryGrammar($connection);
         $connection->method('getQueryGrammar')->willReturn($grammar);
 
         return (new QueryBuilder($connection, $grammar, new QueryProcessor()))->from('t');
-    }
-
-    public function test_prepare_parameters_leaves_sql_unchanged_when_no_marker(): void
-    {
-        $result = QueryGrammar::prepareParameters('SELECT 1');
-
-        $this->assertSame('SELECT 1', $result);
-    }
-
-    public function test_prepare_parameters_leaves_question_mark_placeholders_alone(): void
-    {
-        $sql = 'select * from "t" where "a" = ? and "b" = ?';
-
-        $this->assertSame($sql, QueryGrammar::prepareParameters($sql));
-    }
-
-    public function test_prepare_parameters_replaces_single_marker(): void
-    {
-        $sql = 'SELECT * FROM t WHERE id = ' . QueryGrammar::PARAMETER_SIGN;
-
-        $result = QueryGrammar::prepareParameters($sql);
-
-        $this->assertSame('SELECT * FROM t WHERE id = :0', $result);
-    }
-
-    public function test_prepare_parameters_replaces_multiple_markers_sequentially(): void
-    {
-        $sign = QueryGrammar::PARAMETER_SIGN;
-        $sql = "SELECT * FROM t WHERE a = $sign AND b = $sign AND c = $sign";
-
-        $result = QueryGrammar::prepareParameters($sql);
-
-        $this->assertSame('SELECT * FROM t WHERE a = :0 AND b = :1 AND c = :2', $result);
     }
 
     public function test_parameter_returns_a_question_mark_for_a_plain_value(): void
@@ -390,8 +357,8 @@ class QueryGrammarTest extends TestCase
     }
 
     /**
-     * The date conditions call ClickHouse functions of the column, as the package builder does. QueryBuilder writes
-     * numeric day, month and year values as numbers, integers for whole numbers, and pads a time to HH:MM:SS.
+     * The date conditions call ClickHouse functions of the column. QueryBuilder writes numeric day, month and year
+     * values as numbers, integers for whole numbers, and pads a time to HH:MM:SS.
      *
      * @return array<string, array{Closure(QueryBuilder): QueryBuilder, string, list<mixed>}>
      */

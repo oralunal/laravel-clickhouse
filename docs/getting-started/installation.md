@@ -81,8 +81,15 @@ $statement = $client->select('SELECT * FROM summing_url_views LIMIT 2');
 
 For the client API, see the [smi2/phpClickHouse README](https://github.com/smi2/phpClickHouse/blob/master/README.md).
 
+Laravel's query builder works on the connection, with the ClickHouse clauses of the package:
+
+```php
+DB::connection('clickhouse')->table('summing_url_views')->final()->where('url', 'like', '%/docs%')->count();
+// select count(*) as "aggregate" from "summing_url_views" final where "url" like '%/docs%'
+```
+
 ## Next steps
 
-- [Define a model](/models/defining-models).
+- [Define an Eloquent model](/models/defining-models).
 - [Write a migration](/schema/migrations).
 - [Query with the query builder](/query-builder/basics).

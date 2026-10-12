@@ -4,23 +4,22 @@ namespace Tests;
 
 use ClickHouseDB\Client;
 use Illuminate\Support\Facades\DB;
-use Oralunal\LaravelClickHouse\BaseModel;
-use Oralunal\LaravelClickHouse\Builder;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
+use Oralunal\LaravelClickHouse\QueryBuilder as Builder;
 
-class MutationClusterRow extends BaseModel
+class MutationClusterRow extends Model
 {
     protected $connection = 'clickhouse-cluster';
+
     protected $table = 'mutation_cluster_rows';
+
+    public $timestamps = false;
 }
 
 /**
  * delete(), update() and truncate() with onCluster(), or with the use_on_cluster
  * option, on a table that is not replicated: each node holds its own copy of the
  * rows, so only ON CLUSTER reaches both.
- *
- * The clickhouse-cluster connection gets fix_default_query_builder, as in the
- * README's cluster config, so DB::connection()->table() returns this package's
- * builder.
  */
 class MutationClusterTest extends TestCase
 {
@@ -36,7 +35,6 @@ class MutationClusterTest extends TestCase
             $this->markTestSkipped('company_cluster config requires docker-compose services');
         }
 
-        config(['database.connections.clickhouse-cluster.fix_default_query_builder' => true]);
         DB::purge('clickhouse-cluster');
 
         $this->node('clickhouse')->write('DROP TABLE IF EXISTS ' . self::TABLE . " ON CLUSTER '" . self::CLUSTER . "' SYNC");
@@ -63,7 +61,7 @@ class MutationClusterTest extends TestCase
 
     public function testAlterDeleteOnClusterChangesBothNodes(): void
     {
-        $this->table()->where('id', 1)->onCluster(self::CLUSTER)->delete(false);
+        $this->table()->where('id', 1)->onCluster(self::CLUSTER)->delete(lightweight: false);
         $this->waitForMutations();
 
         $this->assertRowsOnEveryNode([[2, 'b'], [3, 'c']]);
@@ -71,7 +69,7 @@ class MutationClusterTest extends TestCase
 
     public function testAlterDeleteOnClusterInPartitionChangesBothNodes(): void
     {
-        $this->table()->where('id', '>', 0)->onCluster(self::CLUSTER)->delete(false, 202401);
+        $this->table()->where('id', '>', 0)->onCluster(self::CLUSTER)->delete(lightweight: false, partition: 202401);
         $this->waitForMutations();
 
         $this->assertRowsOnEveryNode([[3, 'c']]);
@@ -79,7 +77,7 @@ class MutationClusterTest extends TestCase
 
     public function testLightweightDeleteOnClusterChangesBothNodes(): void
     {
-        $this->table()->where('id', 1)->onCluster(self::CLUSTER)->delete(true);
+        $this->table()->where('id', 1)->onCluster(self::CLUSTER)->delete(lightweight: true);
 
         $this->assertRowsOnEveryNode([[2, 'b'], [3, 'c']]);
     }
@@ -118,7 +116,7 @@ class MutationClusterTest extends TestCase
 
     public function testWithoutOnClusterOnlyTheActiveNodeChanges(): void
     {
-        $this->table()->where('id', 1)->delete(true);
+        $this->table()->where('id', 1)->delete(lightweight: true);
 
         $this->assertSame([[2, 'b'], [3, 'c']], $this->rows('clickhouse'));
         $this->assertSame([[1, 'a'], [2, 'b'], [3, 'c']], $this->rows('clickhouse2'));
@@ -155,7 +153,7 @@ class MutationClusterTest extends TestCase
     {
         $this->useOnCluster();
 
-        $this->table()->where('id', 1)->delete(false);
+        $this->table()->where('id', 1)->delete(lightweight: false);
         $this->table()->where('id', 2)->update(['v' => 'x']);
         $this->waitForMutations();
 
@@ -167,16 +165,13 @@ class MutationClusterTest extends TestCase
     }
 
     /**
-     * With use_on_cluster, Laravel's query builder (fix_default_query_builder set to false) sends its delete(),
-     * update() and truncate() ON CLUSTER as well.
+     * With use_on_cluster, delete() with no argument, update() and truncate() of the query builder send ON CLUSTER,
+     * as the query log shows.
      */
     public function testUseOnClusterSendsLaravelStatementsToEveryNode(): void
     {
         $this->useOnCluster();
-        config(['database.connections.clickhouse-cluster-laravel' => array_merge(
-            config('database.connections.clickhouse-cluster'),
-            ['fix_default_query_builder' => false]
-        )]);
+        config(['database.connections.clickhouse-cluster-laravel' => config('database.connections.clickhouse-cluster')]);
         DB::purge('clickhouse-cluster-laravel');
         $connection = DB::connection('clickhouse-cluster-laravel');
         $connection->enableQueryLog();
@@ -202,15 +197,15 @@ class MutationClusterTest extends TestCase
     }
 
     /**
-     * Builder::withoutOnCluster() and Connection::withoutOnCluster() leave the default cluster out, so only the active
-     * node changes.
+     * QueryBuilder::withoutOnCluster() and Connection::withoutOnCluster() leave the default cluster out, so only the
+     * active node changes.
      */
     public function testWithoutOnClusterChangesOnlyTheActiveNode(): void
     {
         $this->useOnCluster();
         $connection = DB::connection('clickhouse-cluster');
 
-        $this->table()->where('id', 1)->withoutOnCluster()->delete(true);
+        $this->table()->where('id', 1)->withoutOnCluster()->delete(lightweight: true);
         $connection->withoutOnCluster(function (): void {
             MutationClusterRow::where('id', 2)->delete(true);
             foreach (self::NODES as $node) {

@@ -4,7 +4,7 @@ layout: home
 hero:
   name: laravel-clickhouse
   text: ClickHouse for Laravel
-  tagline: Models, query builders, the schema builder and migrations for ClickHouse, on the smi2/phpClickHouse HTTP client.
+  tagline: Eloquent models, Laravel's query builder, the schema builder and migrations for ClickHouse, on the smi2/phpClickHouse HTTP client.
   actions:
     - theme: brand
       text: Get started
@@ -17,11 +17,11 @@ hero:
       link: https://github.com/oralunal/laravel-clickhouse
 
 features:
-  - title: Models
-    details: BaseModel with casts, accessors, mutators and events, or an Eloquent model with relations. Insert rows in batches, in a buffer or as JSONEachRow.
+  - title: Eloquent models
+    details: Eloquent models with casts, events, relations and timestamps on ClickHouse. Insert rows in batches, in a buffer or as JSONEachRow.
     link: /models/defining-models
   - title: Query builder
-    details: Laravel's query methods, and ClickHouse SQL such as PREWHERE, SAMPLE, ARRAY JOIN, WITH, set operations and SETTINGS.
+    details: Laravel's query builder, with ClickHouse SQL such as FINAL, PREWHERE, SAMPLE, ARRAY JOIN, WITH, set operations and SETTINGS.
     link: /query-builder/basics
   - title: Safe mutations
     details: Lightweight DELETE, ALTER TABLE mutations, IN PARTITION and ON CLUSTER. The package refuses clauses that ClickHouse ignores.

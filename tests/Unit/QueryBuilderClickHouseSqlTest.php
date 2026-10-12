@@ -9,16 +9,16 @@ use InvalidArgumentException;
 use LogicException;
 use Oralunal\LaravelClickHouse\Connection;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
-use Oralunal\LaravelClickHouse\Grammar;
+use Oralunal\LaravelClickHouse\LiteralGrammar;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 use Oralunal\LaravelClickHouse\QueryGrammar;
 use Oralunal\LaravelClickHouse\QueryProcessor;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The ClickHouse clauses of Laravel's query builder on a ClickHouse connection (fix_default_query_builder false):
- * FINAL, SAMPLE, ARRAY JOIN, the ClickHouse joins, PREWHERE, GLOBAL IN, empty(), LIMIT ... BY, SETTINGS, WITH,
- * INTERSECT and EXCEPT, and the ON CLUSTER, lightweight and IN PARTITION options of the mutations.
+ * The ClickHouse clauses of Laravel's query builder on a ClickHouse connection: FINAL, SAMPLE, ARRAY JOIN, the
+ * ClickHouse joins, PREWHERE, GLOBAL IN, empty(), LIMIT ... BY, SETTINGS, WITH, INTERSECT and EXCEPT, and the ON
+ * CLUSTER, lightweight and IN PARTITION options of the mutations.
  */
 class QueryBuilderClickHouseSqlTest extends TestCase
 {
@@ -33,7 +33,7 @@ class QueryBuilderClickHouseSqlTest extends TestCase
         $connection = $this->createStub(Connection::class);
         $connection->method('getConfig')->willReturnCallback(fn (?string $option = null) => $config[$option] ?? null);
         $connection->method('getTablePrefix')->willReturn('');
-        $connection->method('newBuilderGrammar')->willReturnCallback(fn (): Grammar => new Grammar());
+        $connection->method('newLiteralGrammar')->willReturnCallback(fn (): LiteralGrammar => new LiteralGrammar());
         $connection->method('prepareBindings')->willReturnArgument(0);
         $connection->method('getDefaultCluster')->willReturn($config['default_cluster'] ?? null);
         $grammar = new QueryGrammar($connection);

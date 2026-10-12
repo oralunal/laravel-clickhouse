@@ -1,101 +1,134 @@
 # ClickHouse SQL
 
-The package's query builder writes ClickHouse clauses that Laravel's query builder does not have.
-The examples use these imports:
-
-```php
-use Illuminate\Support\Facades\DB;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause;
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
-```
+The query builder adds the ClickHouse clauses that Laravel's query builder does not have.
+Their arguments follow Laravel's methods. The examples use `$query = DB::connection('clickhouse')->table('my_table')`.
 
 ## PREWHERE and FINAL
 
 ```php
 $query->final()->preWhere('event_date', '2024-01-05')->where('user_id', 7);
-// SELECT * FROM `my_table` FINAL PREWHERE `event_date` = '2024-01-05' WHERE `user_id` = 7
+// select * from "my_table" final prewhere "event_date" = '2024-01-05' where "user_id" = 7
 ```
 
-All `where` methods have a `preWhere` form, such as `preWhereIn()`, `orPreWhere()` and `preWhereNull()`.
+- `final()` adds `FINAL`. `final(false)` removes it. `table($table, $as, true)` and `from($table, $as, true)` also add it.
+- A query on a sub-query cannot have `FINAL`: `toSql()` throws a `LogicException`. Put `final()` on the query of the sub-query.
+- Each `where` method has a `preWhere` form, such as `preWhereIn()` or `orPreWhereDate()`. See [WHERE, PREWHERE and HAVING](/query-builder/conditions#where-prewhere-and-having).
 
 ## SAMPLE
 
 ```php
-$query->sample(0.1);      // SAMPLE 0.1
-$query->sample(0.1, 0.5); // SAMPLE 0.1 OFFSET 0.5
+$query->sample(0.1);       // select * from "my_table" sample 0.1
+$query->sample(0.1, 0.5);  // select * from "my_table" sample 0.1 offset 0.5
+$query->sample(1_000_000); // select * from "my_table" sample 1000000
 ```
 
-The table needs a `SAMPLE BY` key. Without it, ClickHouse fails with `SAMPLING_NOT_SUPPORTED`.
+- A coefficient from 0 to 1 is a part of the data. A coefficient above 1 is a number of rows. The offset is from 0 to 1.
+- A coefficient of 0 or less throws an `InvalidArgumentException`.
+- The table needs a `SAMPLE BY` key. Without it, ClickHouse fails with `SAMPLING_NOT_SUPPORTED`.
 
-## Set operations
+## ARRAY JOIN
 
 ```php
-MyTable::select('user_id')
-    ->where('event', 'signup')
-    ->except(MyTable::select('user_id')->where('event', 'purchase'));
-// SELECT `user_id` FROM `my_table` WHERE `event` = 'signup'
-// EXCEPT SELECT `user_id` FROM `my_table` WHERE `event` = 'purchase'
+$query->select(['id', 'tags'])->arrayJoin('tags');
+// select "id", "tags" from "my_table" array join "tags"
+
+$query->select('id', 'tag')->arrayJoin('tags', 'tag');
+// select "id", "tag" from "my_table" array join "tags" as "tag"
+
+$query->select(['id', 'tag', 'score'])->arrayJoin(['tag' => 'tags', 'score' => 'scores']);
+// select "id", "tag", "score" from "my_table" array join "tags" as "tag", "scores" as "score"
+
+$query->leftArrayJoin('tags');
+// select * from "my_table" left array join "tags"
+
+$query->arrayJoinSub(fn ($query) => $query->from('users')->selectRaw('groupArray(id)'), 'ids');
+// select * from "my_table" array join (select groupArray(id) from "users") as "ids"
 ```
 
-| Method | Keyword |
-| --- | --- |
-| `unionAll()` | `UNION ALL` |
-| `unionDistinct()` | `UNION DISTINCT` |
-| `intersect()` | `INTERSECT` |
-| `intersectDistinct()` | `INTERSECT DISTINCT` |
-| `except()` | `EXCEPT` |
-| `exceptDistinct()` | `EXCEPT DISTINCT` |
+- A string key of the array is the alias of its array. An array without a key keeps its name. The grammar does not add the aliases to the select list.
+- `leftArrayJoin()` and `leftArrayJoinSub()` keep a row with an empty array one time.
+- Each call adds an `ARRAY JOIN` clause. `count()` counts such a query in a sub-query.
+- The arrays must have the same length in each row. If not, ClickHouse fails with `SIZES_OF_ARRAYS_DONT_MATCH`.
+  The `enable_unaligned_array_join` setting fills the shorter arrays with default values.
 
-- Each method takes a builder, or a closure that gets a new builder.
-- There is no `union()`. ClickHouse refuses a bare `UNION` without the `union_default_mode` setting.
-- `intersect()` and `except()` keep the duplicate rows of the first query. The `Distinct` forms return each row one time.
+## Joins
 
-### Order of the operations
+Laravel's `join()`, `leftJoin()`, `rightJoin()`, `crossJoin()` and their `Sub` forms work. The query builder adds a method for each ClickHouse join.
+Each method takes the arguments of Laravel's `join()`, and its `Sub` form the arguments of `joinSub()`:
 
-The operations follow the call order without parentheses. ClickHouse calculates `INTERSECT` first, then `UNION` and `EXCEPT` from left to right.
-`$a->unionAll($b)->intersect($c)` returns the rows of `$a` and the rows of `$b` that are also in `$c`.
-
-To intersect all of the union, select from it as a sub-query:
+| Method | SQL | Returns |
+| --- | --- | --- |
+| `innerJoin()`, `innerJoinSub()` | `inner join`, as `join()` | Rows that have a match |
+| `anyInnerJoin()`, `allInnerJoin()`, `anyInnerJoinSub()`, `allInnerJoinSub()` | `any inner join`, `all inner join` | Rows that have a match, one or all |
+| `anyLeftJoin()`, `allLeftJoin()`, `anyLeftJoinSub()`, `allLeftJoinSub()` | `any left join`, `all left join` | Left rows, with one match or all matches |
+| `anyRightJoin()`, `allRightJoin()`, `anyRightJoinSub()`, `allRightJoinSub()` | `any right join`, `all right join` | Right rows, with one match or all matches |
+| `fullJoin()`, `fullJoinSub()` | `full join` | All rows of both sides |
+| `semiLeftJoin()`, `semiRightJoin()`, `semiLeftJoinSub()`, `semiRightJoinSub()` | `semi left join`, `semi right join` | Left or right rows that have a match |
+| `antiLeftJoin()`, `antiRightJoin()`, `antiLeftJoinSub()`, `antiRightJoinSub()` | `anti left join`, `anti right join` | Left or right rows without a match |
+| `asofJoin()`, `asofLeftJoin()`, `asofJoinSub()`, `asofLeftJoinSub()` | `asof join`, `asof left join` | Each left row with its closest match |
 
 ```php
-DB::connection('clickhouse')->table($a->unionAll($b))->intersect($c);
-// SELECT * FROM (<a> UNION ALL <b>) INTERSECT <c>
+$query->select('my_table.id', 'users.name')->anyLeftJoin('users', 'my_table.user_id', '=', 'users.id');
+// select "my_table"."id", "users"."name" from "my_table" any left join "users" on "my_table"."user_id" = "users"."id"
+
+$query->anyLeftJoinSub(DB::connection('clickhouse')->table('users')->select('id', 'name'), 'u', 'my_table.user_id', '=', 'u.id');
+// select * from "my_table" any left join (select "id", "name" from "users") as "u" on "my_table"."user_id" = "u"."id"
 ```
 
-A builder with its own set operations is one operand in parentheses:
+Laravel's join methods have no `USING` clause. Write the condition with `on`.
+
+### Join closures
+
+A closure gets Laravel's `JoinClause`. Each `on()` adds a condition:
 
 ```php
-$a->except($b->unionAll($c));
-// <a> EXCEPT (<b> UNION ALL <c>)
-
-$a->unionAll($b->unionAll($c));
-// <a> UNION ALL <b> UNION ALL <c>
+$query->allInnerJoin('users', fn ($join) => $join
+    ->on('my_table.user_id', '=', 'users.id')
+    ->on('my_table.tenant', '=', 'users.tenant'));
+// select * from "my_table" all inner join "users"
+//   on "my_table"."user_id" = "users"."id" and "my_table"."tenant" = "users"."tenant"
 ```
 
-### Settings, limits and pages
-
-- Call `settings()` on the outer query. A query that ends with an operand in parentheses cannot have `settings()` as a sub-query. ClickHouse refuses it with a syntax error.
-- `limit()` applies to the first query only. `count()` counts the full query in a sub-query and keeps that limit.
-- `paginate()`, `chunk()`, `first()` and `value()` read the full operation as a sub-query.
-  ClickHouse runs the queries at the same time, so the row order can change. For pages in a fixed order, order the sub-query:
-
-  ```php
-  DB::connection('clickhouse')->table($query)->orderBy('user_id')->paginate();
-  // SELECT * FROM (<query>) ORDER BY `user_id` ASC LIMIT 0, 15
-  ```
-
-### INTERSECT and EXCEPT on ClickHouse 24.8
-
-On 24.8, a query that reads only some columns of an `INTERSECT` or `EXCEPT` sub-query gets incorrect rows. 25.8 and later are correct.
-`exists()`, `count()` and `paginate()` read all columns with `WHERE NOT ignore(*)` for such a query.
-For your own query that selects some columns, add the same condition:
+An ASOF join matches one condition by the closest value. It needs one inequality in its conditions:
 
 ```php
-DB::connection('clickhouse')->table($query)->select('user_id')->whereRaw('NOT ignore(*)');
-// SELECT `user_id` FROM (<query>) WHERE NOT ignore(*)
+DB::connection('clickhouse')->table('events', 'e')
+    ->select('e.id', 'p.price')
+    ->asofLeftJoin('prices as p', fn ($join) => $join
+        ->on('e.user_id', '=', 'p.user_id')
+        ->on('e.created_at', '>=', 'p.ts'));
+// select "e"."id", "p"."price" from "events" as "e" asof left join "prices" as "p"
+//   on "e"."user_id" = "p"."user_id" and "e"."created_at" >= "p"."ts"
 ```
 
-The package does not examine raw SQL. Add `->whereRaw('NOT ignore(*)')` to a query that reads an `INTERSECT` or `EXCEPT` in raw SQL.
+### GLOBAL joins
+
+On a `Distributed` table, a `GLOBAL` join reads the right table one time and sends it to all shards.
+Give the keywords as the `$type` argument of Laravel's `join()`:
+
+```php
+$query->join('users', 'my_table.user_id', '=', 'users.id', 'global any left');
+// select * from "my_table" global any left join "users" on "my_table"."user_id" = "users"."id"
+```
+
+The type is written as given. Do not take it from user input.
+
+## LIMIT BY
+
+`LIMIT n BY columns` keeps the first `n` rows of each group of the columns:
+
+```php
+$query->orderByDesc('ts')->limitBy(3, 'user_id')->limit(100);
+// select * from "my_table" order by "ts" desc limit 3 by "user_id" limit 100
+
+$query->limitBy(2, 'user_id', 'event');
+// select * from "my_table" limit 2 by "user_id", "event"
+
+$query->limitByWithOffset(1, 2, ['user_id', 'day']);
+// select * from "my_table" limit 1 offset 2 by "user_id", "day"
+```
+
+`count()` counts such a query in a sub-query.
 
 ## WITH
 
@@ -103,142 +136,89 @@ The package does not examine raw SQL. Add `->whereRaw('NOT ignore(*)')` to a que
 DB::connection('clickhouse')->table('recent')
     ->withExpression('recent', fn ($query) => $query
         ->from('events')
-        ->where('created_at', '>=', raw('now() - INTERVAL 1 DAY')))
-    ->withAlias('total', fn ($query) => $query->select(raw('count()'))->from('events'))
+        ->where('created_at', '>=', DB::raw('now() - INTERVAL 1 DAY')))
+    ->withAlias('total', fn ($query) => $query->selectRaw('count()')->from('events'))
     ->select('user_id', 'total');
-// WITH `recent` AS (SELECT * FROM `events` WHERE `created_at` >= now() - INTERVAL 1 DAY),
-//      (SELECT count() FROM `events`) AS `total`
-// SELECT `user_id`, `total` FROM `recent`
+// with "recent" as (select * from "events" where "created_at" >= now() - INTERVAL 1 DAY),
+//   (select count() from "events") as "total" select "user_id", "total" from "recent"
+
+$query->withAlias('ids', [1, 2])->whereRaw('has(ids, id)');
+// with [1, 2] as "ids" select * from "my_table" where has(ids, id)
 ```
 
 | Method | Adds |
 | --- | --- |
-| `withExpression('name', $query)` | `` `name` AS (<query>) ``. `$query` is a builder, a closure, `raw()` or SQL. |
-| `withRecursiveExpression('name', $query)` | The same, with `WITH RECURSIVE` |
-| `withAlias('alias', $value)` | `` <value> AS `alias` ``. A builder or closure is a scalar sub-query. An array is an array literal. |
+| `withExpression('name', $query)` | `"name" as (<query>)`. `$query` is a builder, a closure, `DB::raw()` or SQL. |
+| `withRecursiveExpression('name', $query)` | The same, with `with recursive` |
+| `withAlias('alias', $value)` | `<value> as "alias"`. A builder or a closure is a scalar sub-query, `DB::raw()` is SQL, and another value is a literal. |
 
 ```php
 DB::connection('clickhouse')->table('r')
     ->withRecursiveExpression('r', fn ($query) => $query
-        ->select(raw('1 AS n'))
-        ->unionAll(fn ($query) => $query->select(raw('n + 1'))->from('r')->where('n', '<', 10)));
-// WITH RECURSIVE `r` AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM `r` WHERE `n` < 10) SELECT * FROM `r`
+        ->selectRaw('1 as n')
+        ->unionAll(fn ($query) => $query->selectRaw('n + 1')->from('r')->where('n', '<', 10)));
+// with recursive "r" as ((select 1 as n) union all (select n + 1 from "r" where "n" < 10)) select * from "r"
 ```
 
 - `WITH RECURSIVE` needs the analyzer, which is on by default from 24.8. With `enable_analyzer = 0`, the query fails.
-- A name stays one identifier, also with a dot: `withAlias('a.b', 1)` adds `` 1 AS `a.b` ``. Refer to it with ``raw('`a.b`')``.
-- In a set operation, a query with its own `WITH` clause does not see the `withExpression()` names of the outer query. It fails with `UNKNOWN_TABLE`.
-  Select such a query from a sub-query: `->unionAll(fn ($query) => $query->from($queryWithItsOwnWith))`.
+- ClickHouse runs the expression of a `withAlias()` only when the select list, a condition or the order reads its name. So `count()` counts a query with `withAlias()` in a sub-query.
 
-## Joins
+## Set operations
 
 ```php
-$query->select('id')->anyLeftJoin('users', ['user_id']);
-// SELECT `id` FROM `my_table` ANY LEFT JOIN `users` USING `user_id`
-
-$query->select('id')->leftJoin('users', 'any', ['user_id']);
-// SELECT `id` FROM `my_table` ANY LEFT JOIN `users` USING `user_id`
-
-$query->select('id')->join(fn (JoinClause $join) => $join
-    ->table('users')->as('u')->type('inner')->strict('all')
-    ->on('my_table.user_id', '=', 'u.id'));
-// SELECT `id` FROM `my_table` ALL INNER JOIN `users` AS `u` ON `my_table`.`user_id` = `u`.`id`
+DB::connection('clickhouse')->table('my_table')->select('user_id')->where('event', 'signup')
+    ->except(DB::connection('clickhouse')->table('my_table')->select('user_id')->where('event', 'purchase'));
+// (select "user_id" from "my_table" where "event" = 'signup')
+//   except (select "user_id" from "my_table" where "event" = 'purchase')
 ```
 
-`join($table, $strict = null, $type = null, $using = null, $global = false, $alias = null)` takes all parts of a join.
-`leftJoin()`, `innerJoin()`, `rightJoin()` and `fullJoin()` take `($table, $strict = null, $using = null, $global = false, $alias = null)`. The default strictness is `ALL`:
-
-```php
-$query->innerJoin('users', 'any', ['user_id']);
-// SELECT * FROM `my_table` ANY INNER JOIN `users` USING `user_id`
-
-$query->leftJoin('users', 'all', ['user_id'], true, 'u');
-// SELECT * FROM `my_table` GLOBAL ALL LEFT JOIN `users` AS `u` USING `user_id`
-```
-
-- `$global = true` adds `GLOBAL`. On a `Distributed` table, ClickHouse then reads the right table one time and sends it to all shards.
-- `$table` can be a builder. The package writes it as a sub-query: `anyLeftJoin($usersQuery, ['user_id'], false, 'u')` gives ``ANY LEFT JOIN (SELECT ...) AS `u` USING `user_id` ``.
-
-These methods take `($table, $using = null, $global = false, $alias = null)`:
-
-| Method | SQL | Returns |
-| --- | --- | --- |
-| `anyLeftJoin()`, `allLeftJoin()` | `ANY LEFT JOIN`, `ALL LEFT JOIN` | Left rows, with one match or all matches |
-| `anyInnerJoin()`, `allInnerJoin()` | `ANY INNER JOIN`, `ALL INNER JOIN` | Rows that have a match, one or all |
-| `semiLeftJoin()` | `SEMI LEFT JOIN` | Left rows that have a match |
-| `semiRightJoin()` | `SEMI RIGHT JOIN` | Right rows that have a match |
-| `antiLeftJoin()` | `ANTI LEFT JOIN` | Left rows without a match |
-| `antiRightJoin()` | `ANTI RIGHT JOIN` | Right rows without a match |
-| `asofJoin()` | `ASOF JOIN` | Each left row with its closest match |
-| `asofLeftJoin()` | `ASOF LEFT JOIN` | The same, and left rows without a match |
-| `anyRightJoin()`, `allRightJoin()` | `ANY RIGHT JOIN`, `ALL RIGHT JOIN` | |
-
-### Join closures
-
-A closure in `join()` or a join method gets an `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\JoinClause`:
-
-```php
-$query->join(fn (JoinClause $join) => $join
-    ->table('users')->as('u')->all()->inner()
-    ->on('my_table.user_id', '=', 'u.id')
-    ->on('my_table.tenant', '=', 'u.tenant'));
-// SELECT * FROM `my_table` ALL INNER JOIN `users` AS `u`
-//   ON `my_table`.`user_id` = `u`.`id` AND `my_table`.`tenant` = `u`.`tenant`
-
-$query->join(fn (JoinClause $join) => $join
-    ->any()->left()
-    ->query(fn ($query) => $query->select('user_id', 'name')->from('users'))->as('u')
-    ->using('user_id'));
-// SELECT * FROM `my_table` ANY LEFT JOIN (SELECT `user_id`, `name` FROM `users`) AS `u` USING `user_id`
-```
-
-| `JoinClause` method | Sets |
+| Method | Keyword |
 | --- | --- |
-| `table($table)` | The right table. A string is a name. `raw()` is SQL. |
-| `as($alias)` | The alias of the right table |
-| `query($query)` | A sub-query from a builder or a closure as the right table |
-| `subQuery($alias = null)` | A sub-query as the right table. It returns a new builder for the sub-query. |
-| `using(...$columns)`, `addUsing(...$columns)` | The `USING` columns. `using()` replaces them, and `addUsing()` adds to them. |
-| `on($first, $operator, $second, $concatOperator = 'AND')` | An `ON` condition. Each call adds one. |
-| `strict($strict)` | The strictness: `all`, `any`, `semi`, `anti` or `asof` |
-| `all()`, `any()`, `semi()`, `anti()`, `asof()` | The same strictness |
-| `type($type)` | The type: `inner`, `left`, `right`, `full` or `cross` |
-| `inner()`, `left()`, `right()`, `full()`, `cross()` | The same type |
-| `distributed(true)` | `GLOBAL` |
+| `unionAll()` | `union all` |
+| `union()`, `unionDistinct()` | `union distinct`. With `union_default_mode` in the connection `settings`, `union()` writes a bare `union`. |
+| `intersect()`, `intersectDistinct()` | `intersect`, `intersect distinct` |
+| `except()`, `exceptDistinct()` | `except`, `except distinct` |
 
-A join with both `USING` and `ON` throws a `GrammarException`.
-The getters `getTable()`, `getAlias()`, `getStrict()`, `getType()`, `getUsing()`, `getOnClauses()`, `isDistributed()`, `getSubQuery()` and `getQueryBuilder()` return the parts of a join.
+- Each method takes a builder, or a closure that gets a new builder. Each operand is in parentheses.
+- `intersect()` and `except()` keep the duplicate rows of the first query. The `Distinct` forms return each row one time.
+- `orderBy()`, `limit()` and `offset()` after a set operation apply to the whole operation. The grammar selects from the operation:
+  `$a->unionAll($b)->orderBy('x')->limit(10)` gives `select * from ((...) union all (...)) order by "x" asc limit 10`.
+  Call them before the set operation for the first query only.
+- `settings()` goes on the outer query in the same way: `select * from ((...) union all (...)) settings max_threads=1`.
 
-An ASOF join matches one condition by the closest value: the last `USING` column, or the inequality in `ON`:
+### Order of the operations
 
-```php
-DB::connection('clickhouse')->table('events', 'e')
-    ->select('e.id', 'p.price')
-    ->asofLeftJoin(function (JoinClause $join) {
-        $join->table('prices')->as('p')
-            ->on('e.user_id', '=', 'p.user_id')
-            ->on('e.created_at', '>=', 'p.ts');
-    });
-// SELECT `e`.`id`, `p`.`price` FROM `events` AS `e` ASOF LEFT JOIN `prices` AS `p`
-//   ON `e`.`user_id` = `p`.`user_id` AND `e`.`created_at` >= `p`.`ts`
-```
+ClickHouse calculates `INTERSECT` first, then `UNION` and `EXCEPT` from left to right.
+`$a->unionAll($b)->intersect($c)` gives `(<a>) union all (<b>) intersect (<c>)`. It returns the rows of `$a` and the rows of `$b` that are also in `$c`.
 
-`crossJoin($table, $global = false, $alias = null)` adds a `CROSS JOIN` without keys.
-A cross join with keys or a strictness throws a `GrammarException`.
-In a join closure, `semi()`, `anti()`, `asof()`, `right()`, `full()` and `cross()` set the same keywords.
-
-## ARRAY JOIN
+To intersect all of the union, select from it as a sub-query:
 
 ```php
-$query->select(['id', 'tags'])->arrayJoin('tags');
-// SELECT `id`, `tags` FROM `my_table` ARRAY JOIN `tags`
-
-MyTable::select(['id', 'tag', 'score'])
-    ->arrayJoin(['tag' => 'tags', 'score' => 'scores']);
-// SELECT `id`, `tag`, `score` FROM `my_table` ARRAY JOIN `tags` AS `tag`, `scores` AS `score`
+DB::connection('clickhouse')->query()->fromSub($a->unionAll($b), 'u')->intersect($c);
+// (select * from ((<a>) union all (<b>)) as "u") intersect (<c>)
 ```
 
-- A string key is the alias of its array. An array without a key keeps its name. The package does not add the aliases to the select list.
-- The arrays must have the same length in each row. If not, ClickHouse fails with `SIZES_OF_ARRAYS_DONT_MATCH`.
-  The `enable_unaligned_array_join` setting fills the shorter arrays with default values.
-- `leftArrayJoin()` takes the same argument and writes `LEFT ARRAY JOIN`.
+A builder with its own set operations is one operand in parentheses:
+
+```php
+$a->except($b->unionAll($c));
+// (<a>) except ((<b>) union all (<c>))
+```
+
+### INTERSECT and EXCEPT in sub-queries
+
+ClickHouse leaves out the columns of the queries that `INTERSECT` and `EXCEPT` compare when the outer query does not read them.
+Then a count or an existence check compares fewer columns than `get()`, and gets another answer. On ClickHouse 24.8, the count of an `EXCEPT` that returns two rows was `0`.
+
+`count()`, the other aggregates, `exists()` and `whereExists()` add `where not ignore(*)` to a query that holds `INTERSECT` or `EXCEPT`. Then ClickHouse reads all columns:
+
+```php
+DB::connection('clickhouse')->query()->fromSub($a->except($b), 's')->count();
+// select count(*) as "aggregate" from ((<a>) except (<b>)) as "s" where not ignore(*)
+```
+
+The grammar does not examine the SQL of your own select list. For a query that selects some columns of such a sub-query, add the condition:
+
+```php
+DB::connection('clickhouse')->query()->fromSub($a->except($b), 's')->select('user_id')->whereRaw('not ignore(*)');
+```

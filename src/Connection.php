@@ -15,9 +15,8 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\LazyCollection;
 use InvalidArgumentException;
 use LogicException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\DateTimePrecision;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
-use Oralunal\LaravelClickHouse\Enum\Enum;
+use Oralunal\LaravelClickHouse\Enums\DateTimePrecision;
+use Oralunal\LaravelClickHouse\Enums\Format;
 use Oralunal\LaravelClickHouse\Exceptions\ParallelQueryException;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use RuntimeException;
@@ -259,6 +258,37 @@ class Connection extends BaseConnection
     }
 
     /**
+     * Run a select statement on the active node and return the smi2 statement of its result, in the format that the
+     * query's FORMAT clause names, or in JSON when it names none.
+     *
+     * rawData() of the statement gives the result: the body of a text format, such as CSV, Pretty or XML, and the
+     * decoded document of a JSON format. totals(), extremes() and statistics() read a JSON result. The query and its
+     * bindings are logged as given, and the bindings are prepared as select() prepares them. An error that ClickHouse
+     * reports is thrown when the query runs, as select() throws it. While the connection pretends, nothing is sent
+     * and the statement is empty.
+     *
+     * @param string $query
+     * @param array<int|string, mixed> $bindings
+     * @return Statement
+     * @throws InvalidArgumentException When the bindings do not fit the query's placeholders (see
+     *                                  SubstitutesBindings::prepareQueryForClient())
+     */
+    public function selectStatement(string $query, array $bindings = []): Statement
+    {
+        return $this->run($query, $bindings, function (string $query, array $bindings): Statement {
+            if ($this->pretending()) {
+                return ClientRequests::pretendedStatement($query);
+            }
+
+            [$sql, $clientBindings] = $this->prepareQueryForClient($query, $bindings);
+            $statement = ClientRequests::select($this->getClient(), $sql, $clientBindings, $this->findFormatClause($sql));
+            $statement->error();
+
+            return $statement;
+        });
+    }
+
+    /**
      * Run SQL queries at the same time on the active node and return the rows of each, keyed and ordered as given.
      *
      * Each entry is the SQL of a SELECT, or an array with its SQL and bindings, which fill "?" placeholders, or
@@ -347,7 +377,7 @@ class Connection extends BaseConnection
                     'Cannot read the rows of a query whose FORMAT clause names %s with cursor(): cursor() asks for the'
                     . ' result in %s itself and yields its rows one by one. Leave the FORMAT clause out.',
                     $format,
-                    Format::JSON_EACH_ROW
+                    Format::JsonEachRow->value
                 ));
             }
 
@@ -559,8 +589,8 @@ class Connection extends BaseConnection
      *   safe for smi2's own :name and {name} substitution, and writes each "??" as "?" (see
      *   SubstitutesBindings::prepareQueryForClient()).
      *
-     * The deprecated "#@?" markers of 3.0.0's query grammar are no longer turned into :0, :1 and so on: Laravel's
-     * query builder writes "?", and a "#@?" that SQL holds, such as one in a string literal, is sent as it is.
+     * A "#@?", the marker of 3.0.0's query grammar, is sent as it is, such as one in a string literal: Laravel's query
+     * builder writes "?".
      *
      * @param string $query
      * @param array<int|string, mixed> $bindings
@@ -618,7 +648,7 @@ class Connection extends BaseConnection
      * without a FORMAT clause, or with FORMAT in a string literal, a comment or a sub-query, is not refused (see
      * findFormatClause()).
      *
-     * The message names only the ways that read a result in that format (see describeWaysToReadFormat()).
+     * The message names selectStatement(), which reads a result in any format.
      *
      * @param string $sql
      * @return void
@@ -639,47 +669,10 @@ class Connection extends BaseConnection
 
         throw new QueryException(sprintf(
             'Cannot read rows from a query whose FORMAT clause names %s: select() and parallel queries read the rows'
-            . ' of a JSON result (%s). %s',
+            . ' of a JSON result (%s). Leave the FORMAT clause out, or read the result with selectStatement($sql)->rawData().',
             $format,
-            implode(', ', static::SELECT_ROW_FORMATS),
-            $this->describeWaysToReadFormat($sql, $format)
+            implode(', ', static::SELECT_ROW_FORMATS)
         ));
-    }
-
-    /**
-     * Describe the ways to read the result of a SELECT in the format that its FORMAT clause names, for the message
-     * of verifySelectFormat(). It names each way only when it reads that format:
-     * - the package query builder, format('<name>')->get()->rawData(), for a format of the Format enum, in any
-     *   letter case;
-     * - the smi2 client, getClient()->select($sql)->rawData(), when smi2 sends the SQL as it is and reads the
-     *   result in the format that it names (see ClientRequests::clientSelectsAsIntended()). smi2 adds a second FORMAT
-     *   to a format that it does not know, such as XML or Pretty, and decodes a format with one JSON value per line,
-     *   such as JSONCompactEachRow, as one JSON document, which gives null.
-     * When neither does, the message says that the package cannot read a result in that format.
-     *
-     * @param string $sql The SQL as it would be sent
-     * @param string $format The format as the FORMAT clause names it
-     * @return string
-     */
-    protected function describeWaysToReadFormat(string $sql, string $format): string
-    {
-        $ways = [];
-        foreach (Format::toArray() as $name) {
-            if (strcasecmp($name, $format) === 0) {
-                $ways[] = "with the package query builder, format('{$name}')->get()->rawData()";
-                break;
-            }
-        }
-
-        if (ClientRequests::clientSelectsAsIntended($sql, $format)) {
-            $ways[] = 'with the smi2 client, getClient()->select($sql)->rawData()';
-        }
-
-        if ($ways === []) {
-            return sprintf('Leave the FORMAT clause out: the package cannot read a result in %s.', $format);
-        }
-
-        return sprintf('Leave the FORMAT clause out, or read the result in %s %s.', $format, implode(', or ', $ways));
     }
 
     /**
@@ -936,7 +929,7 @@ class Connection extends BaseConnection
         $grammar = null;
         $prepare = function (mixed $value) use (&$grammar, &$prepare): mixed {
             if ($value instanceof DateTimeInterface) {
-                $grammar ??= $this->newBuilderGrammar();
+                $grammar ??= $this->newLiteralGrammar();
 
                 return $grammar->formatDateTime($value);
             }
@@ -1042,7 +1035,7 @@ class Connection extends BaseConnection
      */
     protected function escapeString($value)
     {
-        return $this->newBuilderGrammar()->compileStringLiteral((string) $value);
+        return $this->newLiteralGrammar()->compileStringLiteral((string) $value);
     }
 
     /**
@@ -1121,47 +1114,51 @@ class Connection extends BaseConnection
 
     /**
      * Get the precision with which the connection writes DateTimeInterface values, from its datetime_precision
-     * option: DateTimePrecision::SECOND, also when the option is left out, null or blank (as an empty environment
-     * variable gives), or DateTimePrecision::MICROSECOND.
+     * option: DateTimePrecision::Second, also when the option is left out, null or blank (as an empty environment
+     * variable gives), or DateTimePrecision::Microsecond.
      *
      * The option takes 'second' or 'microsecond' in any letter case and with surrounding spaces, or a
-     * DateTimePrecision instance. A config file should hold the string: Laravel's config:cache cannot write an
-     * instance into the cached config. An instance works in a config that is set at runtime, such as one given to
+     * DateTimePrecision case. A config file should hold the string: Laravel's config:cache cannot write an enum case
+     * into the cached config. A case works in a config that is set at runtime, such as one given to
      * DB::connectUsing().
      *
-     * @return string
+     * @return DateTimePrecision
      * @throws InvalidArgumentException For any other value
      */
-    public function getDateTimePrecision(): string
+    public function getDateTimePrecision(): DateTimePrecision
     {
         $value = $this->getConfig('datetime_precision');
         if ($value instanceof DateTimePrecision) {
-            return $value->getValue();
+            return $value;
         }
 
         if ($value === null || (is_string($value) && trim($value) === '')) {
-            return DateTimePrecision::SECOND;
+            return DateTimePrecision::Second;
         }
 
-        $precision = is_string($value) ? strtolower(trim($value)) : null;
-        if ($precision !== null && DateTimePrecision::isValid($precision)) {
+        $precision = is_string($value) ? DateTimePrecision::tryFrom(strtolower(trim($value))) : null;
+        if ($precision !== null) {
             return $precision;
         }
 
-        throw $this->invalidOption('datetime_precision', $value, array_values(DateTimePrecision::toArray()));
+        throw $this->invalidOption(
+            'datetime_precision',
+            $value,
+            array_map(fn (DateTimePrecision $case): string => $case->value, DateTimePrecision::cases())
+        );
     }
 
     /**
-     * Create a grammar of the package builder that writes values as this connection does: dates at the connection's
-     * datetime_precision, and a Laravel database expression, such as DB::raw(), through the connection's query
-     * grammar.
+     * Create the literal grammar of the connection: it writes values as the connection writes them, dates at the
+     * connection's datetime_precision, and a Laravel database expression, such as DB::raw(), through the connection's
+     * query grammar.
      *
-     * @return Grammar
+     * @return LiteralGrammar
      * @throws InvalidArgumentException When the connection's datetime_precision is invalid
      */
-    public function newBuilderGrammar(): Grammar
+    public function newLiteralGrammar(): LiteralGrammar
     {
-        return (new Grammar())
+        return (new LiteralGrammar())
             ->setDateTimePrecision($this->getDateTimePrecision())
             ->setLaravelGrammarResolver(fn (): \Illuminate\Database\Grammar => $this->getQueryGrammar());
     }
@@ -1176,37 +1173,33 @@ class Connection extends BaseConnection
      */
     public function formatDateTime(DateTimeInterface $value): string
     {
-        return $this->newBuilderGrammar()->formatDateTime($value);
+        return $this->newLiteralGrammar()->formatDateTime($value);
     }
 
     /**
-     * Get the input format of the package's inserts, from the insert_format option: Format::VALUES, also when the
-     * option is left out, null or blank, or Format::JSON_EACH_ROW.
+     * Get the input format of the inserts, from the insert_format option: Format::Values, also when the option is left
+     * out, null or blank, or Format::JsonEachRow.
      *
-     * The option takes 'Values' or 'JSONEachRow' in any letter case and with surrounding spaces, or a Format instance
-     * of one of them. A config file should hold the string: Laravel's config:cache cannot write an instance into the
-     * cached config. An instance works in a config that is set at runtime, such as one given to DB::connectUsing().
+     * The option takes 'Values' or 'JSONEachRow' in any letter case and with surrounding spaces, or one of the two
+     * Format cases. A config file should hold the string: Laravel's config:cache cannot write an enum case into the
+     * cached config. A case works in a config that is set at runtime, such as one given to DB::connectUsing().
      *
-     * @return string
+     * @return Format
      * @throws InvalidArgumentException For any other value
      */
-    public function getInsertFormat(): string
+    public function getInsertFormat(): Format
     {
         $value = $this->getConfig('insert_format');
         if ($value === null || (is_string($value) && trim($value) === '')) {
-            return Format::VALUES;
+            return Format::Values;
         }
 
-        $name = $value instanceof Format ? $value->getValue() : $value;
-        if (is_string($name)) {
-            foreach ([Format::VALUES, Format::JSON_EACH_ROW] as $format) {
-                if (strcasecmp(trim($name), $format) === 0) {
-                    return $format;
-                }
-            }
+        $format = $value instanceof Format ? $value : (is_string($value) ? Format::tryNamed($value) : null);
+        if ($format === Format::Values || $format === Format::JsonEachRow) {
+            return $format;
         }
 
-        throw $this->invalidOption('insert_format', $value, [Format::VALUES, Format::JSON_EACH_ROW]);
+        throw $this->invalidOption('insert_format', $value, [Format::Values->value, Format::JsonEachRow->value]);
     }
 
     /**
@@ -1229,8 +1222,8 @@ class Connection extends BaseConnection
     }
 
     /**
-     * Determine if the connection lists its nodes in the cluster option, as Migration::createMergeTree() checks
-     * before it makes a table replicated. An empty list counts as none.
+     * Determine if the connection lists its nodes in the cluster option, as the schema builder checks before it makes
+     * a table replicated (see SchemaGrammar). An empty list counts as none.
      *
      * @return bool
      */
@@ -1458,15 +1451,14 @@ class Connection extends BaseConnection
             return false;
         }
 
-        $exists = $this->scalar('EXISTS TEMPORARY TABLE ' . (new Grammar())->quoteIdentifier($table));
+        $exists = $this->scalar('EXISTS TEMPORARY TABLE ' . (new LiteralGrammar())->quoteIdentifier($table));
 
         return (int) $exists === 1;
     }
 
     /**
      * Get an exception for an option of the connection config that has an invalid value. The message shows a string
-     * as it is, a number or a bool as PHP writes it, an instance of the package's Enum by its value, and any other
-     * value by its type.
+     * as it is, a number or a bool as PHP writes it, a backed enum case by its value, and any other value by its type.
      *
      * @param string $option
      * @param mixed $value
@@ -1491,7 +1483,7 @@ class Connection extends BaseConnection
 
     /**
      * Describe the value of a connection option for an exception message: a string as it is, a number or a bool as
-     * PHP writes it, an instance of the package's Enum by its value, and any other value by its type.
+     * PHP writes it, a backed enum case by its value, and any other value by its type.
      *
      * @param mixed $value
      * @return string
@@ -1501,38 +1493,33 @@ class Connection extends BaseConnection
         return match (true) {
             is_string($value) => $value,
             is_int($value), is_float($value), is_bool($value) => var_export($value, true),
-            $value instanceof Enum => (string) $value,
+            $value instanceof \BackedEnum => (string) $value->value,
             default => get_debug_type($value),
         };
     }
 
     /**
-     * Get a new query builder: the package Builder, following this connection's options (see
-     * Builder::followConnectionOptions()), when the fix_default_query_builder option is on, as the packaged config
-     * sets it; Laravel's query builder, as the package's QueryBuilder subclass, otherwise.
+     * Get a new query builder: Laravel's query builder, as the package's QueryBuilder subclass, with the ClickHouse
+     * clauses.
      *
-     * @return Builder|QueryBuilder
+     * @return QueryBuilder
      */
     public function query()
     {
-        if ($this->getConfig('fix_default_query_builder')) {
-            return (new Builder($this->getClient(), $this->getName()))->followConnectionOptions($this);
-        }
-
         return new QueryBuilder($this, $this->getQueryGrammar(), $this->getPostProcessor());
     }
 
     /**
-     * Begin a query of a table, with the query builder of query(). $final adds FINAL after the table:
-     * table('events', null, true) selects from "events" final, or `events` FINAL with the package's builder.
+     * Begin a query of a table. $final adds FINAL after the table: table('events', null, true) selects from
+     * "events" final.
      *
      * @param \Closure|\Illuminate\Database\Query\Builder|\Illuminate\Contracts\Database\Query\Expression|string $table
      * @param string|null $as
      * @param bool|null $final True adds FINAL; null leaves it out
-     * @return Builder|QueryBuilder
+     * @return QueryBuilder
      */
     public function table($table, $as = null, ?bool $final = null)
     {
-        return $final === null ? $this->query()->from($table, $as) : $this->query()->from($table, $as, $final);
+        return $this->query()->from($table, $as, $final);
     }
 }

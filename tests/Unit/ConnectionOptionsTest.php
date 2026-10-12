@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use ClickHouseDB\Client;
+use ClickHouseDB\Exception\DatabaseException;
 use ClickHouseDB\Exception\QueryException as ClientQueryException;
 use ClickHouseDB\Transport\CurlerRequest;
 use ClickHouseDB\Transport\CurlerResponse;
@@ -15,23 +16,21 @@ use Illuminate\Database\Query\Expression as LaravelExpression;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use LogicException;
-use Oralunal\LaravelClickHouse\Builder;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\DateTimePrecision;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
 use Oralunal\LaravelClickHouse\Cluster;
 use Oralunal\LaravelClickHouse\Connection;
+use Oralunal\LaravelClickHouse\Enums\DateTimePrecision;
+use Oralunal\LaravelClickHouse\Enums\Format;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
-use Oralunal\LaravelClickHouse\Grammar;
+use Oralunal\LaravelClickHouse\LiteralGrammar;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
-use Tests\Unit\ClickhouseBuilder\IntBackedEnumFixture;
+use Tests\Fixtures\IntBackedEnumFixture;
 
 /**
  * The connection without a server: its package options (datetime_precision, insert_format, use_on_cluster,
- * cluster_name, cluster and default_index_type), the API that the package's builders and schema code call, and the way it hands a query
- * to the smi2 client, which a canned client on port 1 answers without sending anything.
+ * cluster_name, cluster and default_index_type), the API that the package's builders and schema code call, and the
+ * way it hands a query to the smi2 client, which a canned client on port 1 answers without sending anything.
  */
 class ConnectionOptionsTest extends TestCase
 {
@@ -175,8 +174,8 @@ class ConnectionOptionsTest extends TestCase
 
     public function test_datetime_precision_is_second_when_the_option_is_left_out_or_null(): void
     {
-        $this->assertSame(DateTimePrecision::SECOND, $this->connection()->getDateTimePrecision());
-        $this->assertSame(DateTimePrecision::SECOND, $this->connection(['datetime_precision' => null])->getDateTimePrecision());
+        $this->assertSame(DateTimePrecision::Second, $this->connection()->getDateTimePrecision());
+        $this->assertSame(DateTimePrecision::Second, $this->connection(['datetime_precision' => null])->getDateTimePrecision());
     }
 
     /**
@@ -194,23 +193,22 @@ class ConnectionOptionsTest extends TestCase
             'upper case' => ['SECOND', 'second'],
             'another letter case' => ['Microsecond', 'microsecond'],
             'surrounding spaces' => [' microsecond ', 'microsecond'],
-            'an enum instance' => [new DateTimePrecision(DateTimePrecision::MICROSECOND), 'microsecond'],
+            'a case' => [DateTimePrecision::Microsecond, 'microsecond'],
         ];
     }
 
     /**
-     * The normalised value is what the connection's builder grammar gets, whose own rule takes only the lowercase
-     * values.
+     * The case is what the connection's literal grammar gets.
      */
     #[DataProvider('validDateTimePrecisions')]
-    public function test_datetime_precision_takes_second_or_microsecond_in_any_letter_case_or_an_enum_instance(
+    public function test_datetime_precision_takes_second_or_microsecond_in_any_letter_case_or_a_case(
         mixed $value,
         string $expected
     ): void {
         $connection = $this->connection(['datetime_precision' => $value]);
 
-        $this->assertSame($expected, $connection->getDateTimePrecision());
-        $this->assertSame($expected, $connection->newBuilderGrammar()->getDateTimePrecision());
+        $this->assertSame(DateTimePrecision::from($expected), $connection->getDateTimePrecision());
+        $this->assertSame(DateTimePrecision::from($expected), $connection->newLiteralGrammar()->getDateTimePrecision());
     }
 
     /**
@@ -253,19 +251,19 @@ class ConnectionOptionsTest extends TestCase
             'values' => ['values', 'Values'],
             'JSONEachRow' => ['JSONEachRow', 'JSONEachRow'],
             'jsoneachrow with spaces' => [' jsoneachrow ', 'JSONEachRow'],
-            'a Format instance' => [new Format(Format::JSON_EACH_ROW), 'JSONEachRow'],
+            'a case' => [Format::JsonEachRow, 'JSONEachRow'],
         ];
     }
 
     #[DataProvider('validInsertFormats')]
     public function test_insert_format_takes_values_or_json_each_row_in_any_letter_case(mixed $value, string $expected): void
     {
-        $this->assertSame($expected, $this->connection(['insert_format' => $value])->getInsertFormat());
+        $this->assertSame(Format::from($expected), $this->connection(['insert_format' => $value])->getInsertFormat());
     }
 
     public function test_insert_format_is_values_when_the_option_is_left_out(): void
     {
-        $this->assertSame(Format::VALUES, $this->connection()->getInsertFormat());
+        $this->assertSame(Format::Values, $this->connection()->getInsertFormat());
     }
 
     /**
@@ -275,7 +273,7 @@ class ConnectionOptionsTest extends TestCase
     {
         return [
             'CSV' => ['CSV', 'CSV'],
-            'a Format instance of another format' => [new Format(Format::CSV), 'CSV'],
+            'another case' => [Format::Csv, 'CSV'],
             'an int' => [1, '1'],
         ];
     }
@@ -349,27 +347,22 @@ class ConnectionOptionsTest extends TestCase
     }
 
     /**
-     * A cluster_name with surrounding whitespace, as an environment variable can give it, is written without it, on
-     * Laravel's query builder and on the package builder: ClickHouse refuses ON CLUSTER ' company_cluster ' with
-     * CLUSTER_DOESNT_EXIST.
+     * A cluster_name with surrounding whitespace, as an environment variable can give it, is written without it:
+     * ClickHouse refuses ON CLUSTER ' company_cluster ' with CLUSTER_DOESNT_EXIST.
      */
     public function test_a_cluster_name_with_surrounding_spaces_is_written_without_them(): void
     {
-        [$connection, $curler, $client] = $this->connectionWithCannedClient([
+        [$connection, $curler] = $this->connectionWithCannedClient([
             'cluster_name' => ' company_cluster ',
             'use_on_cluster' => true,
-            'fix_default_query_builder' => false,
         ]);
 
-        $log = $connection->pretend(function (Connection $connection) use ($client): void {
+        $log = $connection->pretend(function (Connection $connection): void {
             $connection->table('t')->where('id', 1)->delete();
-            (new Builder($client))->followConnectionOptions($connection)->from('t')->where('id', 1)->delete();
         });
 
-        $this->assertCount(2, $log);
-        foreach ($log as $entry) {
-            $this->assertMatchesRegularExpression("/ on cluster 'company_cluster' delete /i", $entry['query']);
-        }
+        $this->assertCount(1, $log);
+        $this->assertMatchesRegularExpression("/ on cluster 'company_cluster' delete /i", $log[0]['query']);
         $this->assertSame([], $curler->requests);
     }
 
@@ -493,22 +486,22 @@ class ConnectionOptionsTest extends TestCase
         ]);
     }
 
-    // newBuilderGrammar(), formatDateTime() and prepareBindings()
+    // newLiteralGrammar(), formatDateTime() and prepareBindings()
 
-    public function test_new_builder_grammar_writes_values_as_the_connection_does(): void
+    public function test_new_literal_grammar_writes_values_as_the_connection_does(): void
     {
         $connection = $this->connection(['datetime_precision' => 'microsecond']);
-        $grammar = $connection->newBuilderGrammar();
+        $grammar = $connection->newLiteralGrammar();
 
-        $this->assertInstanceOf(Grammar::class, $grammar);
-        $this->assertNotSame($grammar, $connection->newBuilderGrammar());
-        $this->assertSame(DateTimePrecision::MICROSECOND, $grammar->getDateTimePrecision());
+        $this->assertInstanceOf(LiteralGrammar::class, $grammar);
+        $this->assertNotSame($grammar, $connection->newLiteralGrammar());
+        $this->assertSame(DateTimePrecision::Microsecond, $grammar->getDateTimePrecision());
         $this->assertSame(
             "'2024-01-02 03:04:05.123456'",
             $grammar->compileLiteral(new DateTimeImmutable('2024-01-02 03:04:05.123456'))
         );
         $this->assertSame('now()', $grammar->compileLiteral(new LaravelExpression('now()')));
-        $this->assertSame(DateTimePrecision::SECOND, $this->connection()->newBuilderGrammar()->getDateTimePrecision());
+        $this->assertSame(DateTimePrecision::Second, $this->connection()->newLiteralGrammar()->getDateTimePrecision());
     }
 
     public function test_format_date_time_follows_the_precision_in_the_dates_own_time_zone(): void
@@ -548,16 +541,15 @@ class ConnectionOptionsTest extends TestCase
      */
     public function test_prepare_bindings_leaves_every_other_value_as_it_is(): void
     {
-        $expression = new Expression('now()');
         $laravelExpression = new LaravelExpression('now()');
         $stringable = Str::of('a');
-        $bindings = [null, 1, 1.5, NAN, 'x', IntBackedEnumFixture::High, $stringable, $expression, $laravelExpression];
+        $bindings = [null, 1, 1.5, NAN, 'x', IntBackedEnumFixture::High, $stringable, $laravelExpression];
 
         $prepared = $this->connection()->prepareBindings($bindings);
 
         $this->assertSame([null, 1, 1.5], array_slice($prepared, 0, 3));
         $this->assertNan($prepared[3]);
-        $this->assertSame(['x', IntBackedEnumFixture::High, $stringable, $expression, $laravelExpression], array_slice($prepared, 4));
+        $this->assertSame(['x', IntBackedEnumFixture::High, $stringable, $laravelExpression], array_slice($prepared, 4));
     }
 
     // runBeforeExecutingCallbacks() and transactions
@@ -688,10 +680,9 @@ class ConnectionOptionsTest extends TestCase
     }
 
     /**
-     * Laravel's query grammar writes "?", so the deprecated "#@?" markers of 3.0.0 are no longer turned into :0, :1:
-     * a "#@?" in a string literal is sent as it is, where QueryGrammar::prepareParameters() made it ':0'.
+     * A "#@?" in a string literal, the marker of 3.0.0's query grammar, is sent as it is.
      */
-    public function test_select_sends_the_deprecated_parameter_marker_as_it_is(): void
+    public function test_select_sends_the_parameter_marker_of_3_0_0_as_it_is(): void
     {
         [$connection, $curler] = $this->connectionWithCannedClient(
             [],
@@ -711,74 +702,67 @@ class ConnectionOptionsTest extends TestCase
      * second FORMAT (SYNTAX_ERROR), a text format threw 'Can`t find meta' after the query ran, and
      * JSONCompactEachRow returned no rows.
      *
-     * The message names only the ways that read the format (ClickHouse 24.8 checked): the package query builder's
-     * format() for a format of the Format enum, and smi2's getClient()->select()->rawData() for a format that smi2
-     * finds in the SQL and reads. smi2 adds a second FORMAT to XML, Pretty, Values and Null, and returns null for
-     * JSONCompactEachRow and JSONStringsEachRow; JSONStringsEachRow and TSVRaw are not in the Format enum.
+     * The message names selectStatement(), which reads a result in any format.
      *
      * @return array<string, array{string, array<int, mixed>, string, string}>
      */
     public static function formatClausesThatSelectCannotRead(): array
     {
-        $both = "Leave the FORMAT clause out, or read the result in %s with the package query builder, format('%s')"
-            . '->get()->rawData(), or with the smi2 client, getClient()->select($sql)->rawData().';
-        $builder = "Leave the FORMAT clause out, or read the result in %s with the package query builder,"
-            . " format('%s')->get()->rawData().";
+        $advice = 'Leave the FORMAT clause out, or read the result with selectStatement($sql)->rawData().';
 
         return [
-            'CSV' => ['SELECT 1 FORMAT CSV', [], 'CSV', sprintf($both, 'CSV', 'CSV')],
-            'XML, which smi2 does not know' => ['SELECT 1 FORMAT XML', [], 'XML', sprintf($builder, 'XML', 'XML')],
-            'Null in lower case with a semicolon' => ['select 1 format Null;', [], 'Null', sprintf($builder, 'Null', 'Null')],
+            'CSV' => ['SELECT 1 FORMAT CSV', [], 'CSV', $advice],
+            'XML, which smi2 does not know' => ['SELECT 1 FORMAT XML', [], 'XML', $advice],
+            'Null in lower case with a semicolon' => ['select 1 format Null;', [], 'Null', $advice],
             'JSONEachRow before SETTINGS' => [
                 'SELECT 1 FORMAT JSONEachRow SETTINGS max_threads = 1',
                 [],
                 'JSONEachRow',
-                sprintf($both, 'JSONEachRow', 'JSONEachRow'),
+                $advice,
             ],
             'TSV after SETTINGS' => [
                 "SELECT 1 SETTINGS max_threads = 1, format_csv_delimiter = ';' FORMAT TSV",
                 [],
                 'TSV',
-                sprintf($both, 'TSV', 'TSV'),
+                $advice,
             ],
             'JSONCompactEachRow, which smi2 reads as null' => [
                 'SELECT 1 FORMAT JSONCompactEachRow',
                 [],
                 'JSONCompactEachRow',
-                sprintf($builder, 'JSONCompactEachRow', 'JSONCompactEachRow'),
+                $advice,
             ],
             'after a sub-query and a string' => [
                 "SELECT (SELECT 'FORMAT JSON') FORMAT Pretty",
                 [],
                 'Pretty',
-                sprintf($builder, 'Pretty', 'Pretty'),
+                $advice,
             ],
-            'with a binding' => ['SELECT ? FORMAT CSV', [1], 'CSV', sprintf($both, 'CSV', 'CSV')],
-            'after a comment' => ["SELECT 1 -- FORMAT JSON\nFORMAT Values", [], 'Values', sprintf($builder, 'Values', 'Values')],
-            'in lower case, with the name of the Format enum' => ['SELECT 1 FORMAT csv', [], 'csv', sprintf($both, 'csv', 'CSV')],
-            'TSVRaw, which only smi2 reads' => [
+            'with a binding' => ['SELECT ? FORMAT CSV', [1], 'CSV', $advice],
+            'after a comment' => ["SELECT 1 -- FORMAT JSON\nFORMAT Values", [], 'Values', $advice],
+            'in lower case, with the name of the Format enum' => ['SELECT 1 FORMAT csv', [], 'csv', $advice],
+            'TSVRaw, which is no case of the Format enum' => [
                 'SELECT 1 FORMAT TSVRaw',
                 [],
                 'TSVRaw',
-                'Leave the FORMAT clause out, or read the result in TSVRaw with the smi2 client,'
-                . ' getClient()->select($sql)->rawData().',
+                $advice,
             ],
-            'JSONStringsEachRow, which neither reads' => [
+            'JSONStringsEachRow, with one JSON value per line' => [
                 'SELECT 1 FORMAT JSONStringsEachRow',
                 [],
                 'JSONStringsEachRow',
-                'Leave the FORMAT clause out: the package cannot read a result in JSONStringsEachRow.',
+                $advice,
             ],
-            'after an IN list' => ['SELECT * FROM t WHERE x IN (1, 2) FORMAT XML', [], 'XML', sprintf($builder, 'XML', 'XML')],
-            'after an alias named format' => ['SELECT 1 AS format FORMAT CSV', [], 'CSV', sprintf($both, 'CSV', 'CSV')],
+            'after an IN list' => ['SELECT * FROM t WHERE x IN (1, 2) FORMAT XML', [], 'XML', $advice],
+            'after an alias named format' => ['SELECT 1 AS format FORMAT CSV', [], 'CSV', $advice],
             'after ORDER BY a column named format' => [
                 'SELECT * FROM t ORDER BY format FORMAT Pretty',
                 [],
                 'Pretty',
-                sprintf($builder, 'Pretty', 'Pretty'),
+                $advice,
             ],
-            'after DESC' => ['SELECT * FROM t ORDER BY x DESC FORMAT CSV', [], 'CSV', sprintf($both, 'CSV', 'CSV')],
-            'after a table function' => ['SELECT * FROM numbers(2) FORMAT CSV', [], 'CSV', sprintf($both, 'CSV', 'CSV')],
+            'after DESC' => ['SELECT * FROM t ORDER BY x DESC FORMAT CSV', [], 'CSV', $advice],
+            'after a table function' => ['SELECT * FROM numbers(2) FORMAT CSV', [], 'CSV', $advice],
         ];
     }
 
@@ -810,6 +794,55 @@ class ConnectionOptionsTest extends TestCase
 
         $this->assertSame([], $curler->requests);
         $this->assertSame([], $connection->getQueryLog());
+    }
+
+    /**
+     * selectStatement() sends a query with any FORMAT clause as it is, and reads the result in that format, with the
+     * bindings written into the SQL. It is logged once, with its bindings as given.
+     */
+    public function test_select_statement_reads_the_result_in_the_format_that_the_query_names(): void
+    {
+        [$connection, $curler] = $this->connectionWithCannedClient(
+            [],
+            self::response(200, "<?xml version='1.0'?><result/>", ['X-ClickHouse-Format' => 'XML'])
+        );
+        $connection->enableQueryLog();
+
+        $statement = $connection->selectStatement('SELECT ? AS a FORMAT XML', ["it's"]);
+
+        $this->assertSame("<?xml version='1.0'?><result/>", $statement->rawData());
+        $this->assertSame("SELECT 'it\\'s' AS a FORMAT XML", self::sentSql($curler->requests[0]));
+        $this->assertSame([['SELECT ? AS a FORMAT XML', ["it's"]]], array_map(
+            fn (array $entry): array => [$entry['query'], $entry['bindings']],
+            $connection->getQueryLog()
+        ));
+    }
+
+    public function test_select_statement_throws_the_error_of_clickhouse_when_the_query_runs(): void
+    {
+        [$connection] = $this->connectionWithCannedClient(
+            [],
+            self::response(404, "Code: 60. DB::Exception: Unknown table expression identifier 'missing'. (UNKNOWN_TABLE) (version 24.8.14.39 (official build))\n", ['X-ClickHouse-Exception-Code' => '60'])
+        );
+
+        $this->expectException(DatabaseException::class);
+        $this->expectExceptionCode(60);
+
+        $connection->selectStatement('SELECT * FROM missing FORMAT CSV');
+    }
+
+    public function test_select_statement_while_pretending_sends_nothing_and_returns_an_empty_statement(): void
+    {
+        [$connection, $curler] = $this->connectionWithCannedClient();
+
+        $log = $connection->pretend(function (Connection $connection): void {
+            $statement = $connection->selectStatement('SELECT 1 FORMAT CSV');
+            $this->assertFalse($statement->isError());
+            $this->assertSame('SELECT 1 FORMAT CSV', $statement->sql());
+        });
+
+        $this->assertSame(['SELECT 1 FORMAT CSV'], array_column($log, 'query'));
+        $this->assertSame([], $curler->requests);
     }
 
     /**
@@ -1133,62 +1166,11 @@ class ConnectionOptionsTest extends TestCase
         $this->assertSame('EXISTS TEMPORARY TABLE `tmp` FORMAT JSON', self::sentSql($curler->requests[1]));
     }
 
-    // query() and Builder::followConnectionOptions()
+    // query() and table()
 
-    public function test_query_returns_the_package_builder_that_follows_the_connection(): void
+    public function test_query_returns_the_query_builder_of_the_package(): void
     {
-        [$connection] = $this->connectionWithCannedClient([
-            'fix_default_query_builder' => true,
-            'datetime_precision' => 'microsecond',
-        ]);
-        $date = new DateTimeImmutable('2024-01-02 03:04:05.123456');
-
-        $query = $connection->query();
-
-        $this->assertInstanceOf(Builder::class, $query);
-        $this->assertSame(
-            "SELECT * FROM `t` WHERE `d` = '2024-01-02 03:04:05.123456'",
-            $query->from('t')->where('d', $date)->toSql()
-        );
-        $this->assertSame(
-            "SELECT * FROM `t` WHERE (`d` = '2024-01-02 03:04:05.123456') AND `id` IN (SELECT `id` FROM `r` WHERE `d` < '2024-01-02 03:04:05.123456')",
-            $connection->table('t')
-                ->where(fn (Builder $nested) => $nested->where('d', $date))
-                ->whereIn('id', fn (Builder $sub) => $sub->select('id')->from('r')->where('d', '<', $date))
-                ->toSql()
-        );
-        $this->assertSame(
-            "SELECT * FROM `r` WHERE `d` = '2024-01-02 03:04:05.123456'",
-            $query->newQuery()->from('r')->where('d', $date)->toSql()
-        );
-    }
-
-    public function test_a_builder_that_follows_no_connection_writes_seconds(): void
-    {
-        [, , $client] = $this->connectionWithCannedClient();
-
-        $query = (new Builder($client))->from('t')->where('d', new DateTimeImmutable('2024-01-02 03:04:05.123456'));
-
-        $this->assertSame("SELECT * FROM `t` WHERE `d` = '2024-01-02 03:04:05'", $query->toSql());
-        $this->assertSame(
-            "SELECT * FROM `r` WHERE `d` = '2024-01-02 03:04:05'",
-            $query->newQuery()->from('r')->where('d', new DateTimeImmutable('2024-01-02 03:04:05.123456'))->toSql()
-        );
-    }
-
-    public function test_follow_connection_options_refuses_an_invalid_precision(): void
-    {
-        [, , $client] = $this->connectionWithCannedClient();
-
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('[datetime_precision]');
-
-        (new Builder($client))->followConnectionOptions($this->connection(['datetime_precision' => 'nanosecond']));
-    }
-
-    public function test_query_returns_laravels_builder_subclass_without_fix_default_query_builder(): void
-    {
-        $connection = $this->connection(['fix_default_query_builder' => false]);
+        $connection = $this->connection();
 
         $query = $connection->query();
 
@@ -1196,5 +1178,28 @@ class ConnectionOptionsTest extends TestCase
         $this->assertSame($connection, $query->getConnection());
         $this->assertSame($connection->getQueryGrammar(), $query->getGrammar());
         $this->assertSame($connection->getPostProcessor(), $query->getProcessor());
+    }
+
+    /**
+     * A date with a sub-second part is compared as a DateTime64(6), which ClickHouse also compares with a DateTime
+     * column.
+     */
+    public function test_the_query_builder_writes_dates_at_the_precision_of_the_connection(): void
+    {
+        $date = new DateTimeImmutable('2024-01-02 03:04:05.123456');
+
+        $this->assertSame(
+            "select * from \"t\" where \"d\" = toDateTime64('2024-01-02 03:04:05.123456', 6)",
+            $this->connection(['datetime_precision' => 'microsecond'])->table('t')->where('d', $date)->toRawSql()
+        );
+        $this->assertSame(
+            "select * from \"t\" where \"d\" = '2024-01-02 03:04:05'",
+            $this->connection()->table('t')->where('d', $date)->toRawSql()
+        );
+    }
+
+    public function test_table_takes_an_alias_and_final(): void
+    {
+        $this->assertSame('select * from "t" as "a" final', $this->connection()->table('t', 'a', true)->toSql());
     }
 }

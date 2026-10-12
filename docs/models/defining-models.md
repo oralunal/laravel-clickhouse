@@ -1,238 +1,144 @@
-# Define a model
+# Define an Eloquent model
 
-A model extends `Oralunal\LaravelClickHouse\BaseModel`. It is not an Eloquent model.
-It has no primary key, timestamps or relationships. For an Eloquent model with relations, see [Eloquent models](/models/eloquent).
+A model of a ClickHouse table extends `Oralunal\LaravelClickHouse\Eloquent\Model`. It is an Eloquent model.
+It has Eloquent's casts, accessors, mutators, events, observers, relations, timestamps and `find()`.
 
 ```php
-namespace App\Models\Clickhouse;
+namespace App\Models;
 
-use Oralunal\LaravelClickHouse\BaseModel;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 
-class MyTable extends BaseModel
+class Event extends Model
 {
-    // Optional. Without it, the class name gives the table: MyTable => my_tables.
-    protected $table = 'my_table';
+    // Optional. Without it, the class name gives the table: Event => events.
+    protected $table = 'events';
+
+    protected $guarded = [];
+
+    protected $casts = [
+        'payload' => 'array',
+        'happened_at' => 'datetime',
+    ];
 }
 ```
 
-## Tables of a model
+## Define a model
 
-A model can use other tables for inserts and for mutations:
+The model sets these defaults:
 
-| Property | Getter | Used by |
+| Property | Default | Description |
 | --- | --- | --- |
-| `$table` | `getTable()` | Queries |
-| `$tableForInserts` | `getTableForInserts()` | Inserts. See [Buffer engine tables](/models/inserting-rows#buffer-engine-tables). |
-| `$tableSources` | `getTableSources()` | `delete()`, `update()`, `truncate()` and `optimize()` |
+| `$connection` | `clickhouse` | A ClickHouse connection. A model on another connection throws a `LogicException` when it starts a query. |
+| `$incrementing` | `false` | ClickHouse has no auto-increment. Give the key before `create()`, for example with `Str::uuid()`. |
+| `$keyType` | `string` | Set `int` for an integer key. |
+| `$primaryKey` | `id` | The column that `find()`, `save()` and `delete()` of one model use |
+| `$timestamps` | `true` | `created_at` and `updated_at`, as in Eloquent. Set `false` when the table has no such columns. |
 
-Each getter returns `$table` when its property is not set.
+A model on another connection, such as `sqlite`, throws:
+
+```text
+The model [App\Models\Event] extends Oralunal\LaravelClickHouse\Eloquent\Model, which needs a ClickHouse connection,
+but its connection [sqlite] is a Illuminate\Database\SQLiteConnection.
+```
+
+For a second ClickHouse connection, set `$connection` to its name. See [Multiple connections](/advanced/multiple-connections).
 
 ## Start a query
 
-`select()`, `where()` and `query()` start a query on the table of the model:
+`query()`, `where()`, `select()` and the other static calls start a query on the table of the model:
 
 ```php
-use Oralunal\LaravelClickHouse\RawColumn;
+Event::query()->where('type', 'click')->latest('happened_at')->first();
+// select * from "events" where "type" = 'click' order by "happened_at" desc limit 1
 
-$rows = MyTable::select(['field_one', new RawColumn('sum(field_two)', 'field_two_sum')])
-    ->where('created_at', '>', '2020-09-14 12:47:29')
-    ->groupBy('field_one')
-    ->settings(['max_threads' => 3])
-    ->getRows();
-
-MyTable::query()->whereDate('created_at', '2024-01-05')->first();
-// SELECT * FROM `my_table` WHERE toDate32(`created_at`) = '2024-01-05' LIMIT 1
+Event::query()->final()->preWhere('user_id', 1)->settings('max_threads', 2)->get();
+// select * from "events" final prewhere "user_id" = 1 settings max_threads=2
 ```
 
-`query()` starts a query without a condition, so any method of the query builder can come first.
-See [Query builder basics](/query-builder/basics).
+The queries use the [query builder](/query-builder/basics), so its ClickHouse clauses work on the model.
+See [Queries and mutations](/models/eloquent#queries).
 
 ## Create one row
 
 ```php
-$model = MyTable::create(['model_name' => 'model 1', 'some_param' => 1]);
+use Illuminate\Support\Str;
 
-$model = MyTable::make(['model_name' => 'model 1']);
-$model->some_param = 1;
-$model->save();
+$event = Event::create(['id' => (string) Str::uuid(), 'type' => 'click', 'payload' => ['a' => 1]]);
 
-$model = new MyTable();
-$model->fill(['model_name' => 'model 1', 'some_param' => 1])->save();
+$event = new Event(['id' => (string) Str::uuid()]);
+$event->type = 'view';
+$event->save();
 ```
 
-`save()` inserts a new row. It throws on a model that it saved before. To insert many rows, see [Insert rows](/models/inserting-rows).
+`create()` and the first `save()` of a model send one `INSERT`. The casts, mutators and timestamps apply.
+`save()` of a model that exists sends an `ALTER TABLE ... UPDATE`. See [Queries and mutations](/models/eloquent#updates-and-deletions).
+
+To insert many rows in one request, see [Insert rows](/models/inserting-rows).
+
+Mass assignment leaves out a key with a dot, as in Laravel. For a column of a `Nested` structure, such as `n.a`,
+use `forceCreate()`, `forceFill()` or `insert()`.
 
 ## Casts
 
-A model applies all Laravel cast types in `$casts` when you read an attribute:
-`$model->column`, `getAttribute()` and `toArray()`.
+The casts of `$casts` work as in Eloquent: `array`, `json`, `collection`, `datetime`, enum casts, `encrypted`,
+cast classes and the others. They apply when you set and read an attribute, and on `create()` and `save()`.
 
-When you set an attribute, only these casts change the stored value, which `create()` and `save()` insert:
-
-| Cast | Stored value |
-| --- | --- |
-| `array`, `json`, `json:unicode`, `object`, `collection` | A JSON string |
-| Enum cast | The value of a backed enum, or the name of a unit enum |
-| `date`, `datetime`, `immutable_date`, `immutable_datetime` | A date string in `$dateFormat` |
-| `encrypted`, `encrypted:*`, `hashed` | The encrypted or hashed string |
-| Cast class | The return value of its `set()` method |
-
-The other casts, such as `int`, `float`, `decimal:2`, `string`, `bool`, `boolean`, `timestamp` and
-`datetime:Y-m-d`, store the value as you set it.
-
-Row inserts change only `boolean` columns, to `0` or `1`. A `bool` cast is not changed.
-`insertAssoc()` and `buffer()` find these columns by name. `insertBulk()` finds them in its `$columns` list:
-
-```php
-class MyTable extends BaseModel
-{
-    /** @var array<string, string> */
-    protected $casts = ['some_bool_column' => 'boolean'];
-}
-
-MyTable::insertAssoc([
-    ['some_param' => 1, 'some_bool_column' => false],
-]);
-```
-
-A cast column that a row does not have stays out of the insert, so ClickHouse writes the column default.
-The rows of `select()` are arrays, so no cast applies to them.
-
-## Accessors, mutators and serialization
-
-Models handle their attributes as Eloquent models do:
-
-- Accessors and mutators: `getFooAttribute()` and `setFooAttribute()`, or a `foo(): Attribute` method.
-- `$appends` adds accessors to the array of the model. `$hidden` and `$visible` remove attributes from it.
-  `makeHidden()` and `makeVisible()` change them for one instance.
-- `toArray()` and `attributesToArray()` apply the casts, accessors, `$appends`, `$hidden` and `$visible`.
-  `getAttributes()` returns the stored values.
-- `getOriginal()`, `syncOriginal()`, `isDirty()` and `getDirty()` compare the attributes with the original values.
-  `wasChanged()` and `getChanges()` show the changes that `syncChanges()` records.
-
-```php
-use Illuminate\Database\Eloquent\Casts\Attribute;
-use Oralunal\LaravelClickHouse\BaseModel;
-
-class Visit extends BaseModel
-{
-    protected $casts = ['payload' => 'array'];
-
-    protected $hidden = ['ip'];
-
-    protected $appends = ['host'];
-
-    public function setUrlAttribute($value)
-    {
-        $this->attributes['url'] = strtolower($value);
-    }
-
-    protected function host(): Attribute
-    {
-        return Attribute::get(fn ($value, array $attributes) => parse_url($attributes['url'], PHP_URL_HOST));
-    }
-}
-
-$visit = Visit::make(['url' => 'https://Example.com/a', 'ip' => '10.0.0.1', 'payload' => ['a' => 1]]);
-
-$visit->host;            // 'example.com'
-$visit->payload;         // ['a' => 1]
-$visit->getAttributes(); // ['url' => 'https://example.com/a', 'ip' => '10.0.0.1', 'payload' => '{"a":1}']
-$visit->toArray();       // ['url' => 'https://example.com/a', 'payload' => ['a' => 1], 'host' => 'example.com']
-```
-
-### Attribute methods
-
-A model has the attribute methods of Eloquent. They work as the [Eloquent documentation](https://laravel.com/docs/eloquent-mutators) tells:
-
-| Area | Methods |
-| --- | --- |
-| Read | `getAttribute()`, `getAttributeValue()`, `getAttributes()`, `hasAttribute()`, `only()` |
-| Write | `setAttribute()`, `fill()`, `setRawAttributes()`, `fillJsonAttribute()` |
-| Original values | `getOriginal()`, `getRawOriginal()`, `syncOriginal()`, `syncOriginalAttribute()`, `syncOriginalAttributes()`, `originalIsEquivalent()`, `discardChanges()` |
-| Changes | `isDirty()`, `isClean()`, `getDirty()`, `wasChanged()`, `getChanges()`, `syncChanges()` |
-| Casts | `getCasts()`, `hasCast()`, `mergeCasts()`, `getDates()`, `fromDateTime()`, `fromJson()`, `fromFloat()`, `fromEncryptedString()` |
-| Date format | `getDateFormat()`, `setDateFormat()` |
-| Appended accessors | `append()`, `setAppends()`, `mergeAppends()`, `withoutAppends()`, `getAppends()`, `hasAppended()` |
-| Accessors and mutators | `hasGetMutator()`, `hasSetMutator()`, `hasAttributeMutator()`, `hasAttributeGetMutator()`, `hasAttributeSetMutator()`, `hasAnyGetMutator()`, `getMutatedAttributes()`, `cacheMutatedAttributes()` |
-| Visibility | `makeHidden()`, `makeVisible()` |
-
-```php
-$visit->fillJsonAttribute('payload->b', 2); // payload: '{"a":1,"b":2}'
-$visit->only('url', 'host');                // ['url' => 'https://example.com/a', 'host' => 'example.com']
-$visit->discardChanges();                   // Sets the attributes back to getOriginal().
-```
-
-The `encrypted` casts use the encrypter of the application. `BaseModel::encryptUsing($encrypter)` sets another encrypter, and `currentEncrypter()` returns the encrypter in use.
+`insert()`, `buffer()` and the query builder send the rows as given. No cast applies to them.
+See [Insert rows](/models/inserting-rows).
 
 ## Date format
 
-The date casts store a date in `$dateFormat`. Without `$dateFormat`, they store `Y-m-d H:i:s`.
-When the `datetime_precision` option is `microsecond`, a date with a sub-second part is stored as `Y-m-d H:i:s.u`.
+The date casts and the timestamps write a date as the connection writes dates. The `datetime_precision` option decides:
 
-- To keep the microseconds of a `DateTime64` column at each precision, set `$dateFormat` to `Y-m-d H:i:s.u`.
-- For a `DateTime` column on a connection at `microsecond`, set `protected $dateFormat = 'Y-m-d H:i:s';`.
-  ClickHouse 24.8 and 26.3 refuse microseconds in a `DateTime` column. 26.8 removes them.
-- To change how `toArray()` writes dates, override `serializeDate()`.
+| `datetime_precision` | `2024-01-02 03:04:05.123456` | `2024-01-02 03:04:05` |
+| --- | --- | --- |
+| `second` (default) | `2024-01-02 03:04:05` | `2024-01-02 03:04:05` |
+| `microsecond` | `2024-01-02 03:04:05.123456` | `2024-01-02 03:04:05` |
+
+`fromDateTime()` of the model converts the date. It uses `Connection::formatDateTime()`.
+A model with `$dateFormat` uses that format, as in Eloquent.
+
+- At `microsecond`, `created_at` and `updated_at` get the microseconds of `now()`. A `DateTime` column refuses them on
+  ClickHouse 24.8 and 26.3. Create the columns as `DateTime64(6)` with `$table->timestamps(6)`, or set
+  `protected $dateFormat = 'Y-m-d H:i:s';`.
+- To keep the microseconds of a `DateTime64` column at `second` precision, set `$dateFormat` to `Y-m-d H:i:s.u`.
+- An attribute with a date cast reads back as a Carbon instance.
 
 See [Dates and times](/query-builder/dates).
 
-## Differences from Eloquent
+## Relations
 
-- `isset($model->column)` is `true` for a column that holds `null`.
-- `save()` and `create()` do not call `syncOriginal()` or `syncChanges()`, so `isDirty()` stays `true` after them.
-- A missing attribute reads as `null`, also when it has the name of a method of the model.
-- The `casts()` method, the `#[Hidden]`, `#[Visible]`, `#[Appends]` and `#[DateFormat]` attributes,
-  and `Model::preventAccessingMissingAttributes()` are not supported. Use the properties.
-- To throw a `MissingAttributeException` for a missing attribute after `save()`, override
-  `public static function preventsAccessingMissingAttributes()` and return `true`.
-- A cast class gets the `BaseModel`. Declare the `$model` parameter of its `get()` and `set()` without a type.
-  The class of `php artisan make:cast` declares `Model`, which causes a `TypeError`.
-- `json_encode($model)` does not encode the attributes. Use `json_encode($model->toArray())`.
-
-## PHPStan and Larastan
-
-Larastan analyses a model that extends `BaseModel` without the `class.missingExtends` error. Two items are different from Eloquent:
-
-- Larastan reads the columns of Eloquent models only. Declare the columns of a ClickHouse model with `@property` tags.
-- From level 6, PHPStan reports `missingType.iterableValue` on `$casts` and `$appends` without a type. Declare their types.
+A model has Eloquent's relations. A relation can join a ClickHouse model and a model of another connection:
 
 ```php
-/**
- * @property string $url
- * @property array<string, mixed> $payload
- * @property-read string $host
- */
-class Visit extends BaseModel
-{
-    /** @var array<string, string> */
-    protected $casts = ['payload' => 'array'];
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 
-    /** @var list<string> */
-    protected $appends = ['host'];
+class Event extends Model
+{
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class); // A model of another connection, such as MySQL
+    }
+}
+
+// In App\Models\User, a MySQL model:
+public function events(): HasMany
+{
+    return $this->hasMany(Event::class);
 }
 ```
 
+The limits of relations on ClickHouse are in [Queries and mutations](/models/eloquent#relations).
+
 ## Events
 
-A model fires some [Eloquent model events](https://laravel.com/docs/eloquent#events):
+The model fires Eloquent's [model events](https://laravel.com/docs/eloquent#events), such as `creating`, `created`,
+`updating`, `updated`, `deleting` and `deleted`. Observers and `$dispatchesEvents` work as in Eloquent.
 
-| Call | Events |
-| --- | --- |
-| `MyTable::create([...])` | `creating`, `saved`, `created` |
-| `MyTable::make([...])->save()` | `saved` |
+A query that updates or deletes many rows, such as `Event::where('type', 'click')->delete()`, fires no model event, as in Eloquent.
 
-A `creating` listener that returns `false` stops `create()`. `save()` does not fire `creating`.
-Observers and the `$dispatchesEvents` map are not supported.
+## Next steps
 
-Listen to an event with its Eloquent name:
-
-```php
-use Illuminate\Support\Facades\Event;
-
-Event::listen('eloquent.creating: ' . MyTable::class, fn (MyTable $model) => $model->some_param > 0);
-```
-
-- `MyTable::withoutEvents(fn () => MyTable::create([...]))` runs the callback without events. It returns the value of the callback.
-- The models use the event dispatcher of the application. `setEventDispatcher()`, `getEventDispatcher()` and `unsetEventDispatcher()` change and read it.
-  All ClickHouse models share one dispatcher, so these methods and `withoutEvents()` apply to all models.
+- [Insert rows](/models/inserting-rows).
+- [Queries, updates and deletions of a model](/models/eloquent).

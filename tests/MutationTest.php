@@ -5,28 +5,28 @@ namespace Tests;
 use ClickHouseDB\Client;
 use ClickHouseDB\Exception\DatabaseException;
 use Closure;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder as LaravelBuilder;
 use Illuminate\Database\Query\Expression as LaravelExpression;
 use Illuminate\Support\Facades\DB;
-use Oralunal\LaravelClickHouse\BaseModel;
-use Oralunal\LaravelClickHouse\Builder;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Column;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
 use Oralunal\LaravelClickHouse\Connection;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
-use Oralunal\LaravelClickHouse\RawColumn;
+use Oralunal\LaravelClickHouse\QueryBuilder as Builder;
 use PHPUnit\Framework\Attributes\DataProvider;
 
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
-
-class MutationRow extends BaseModel
+class MutationRow extends Model
 {
     protected $table = 'mutation_rows';
+
+    public $timestamps = false;
 }
 
-class MutationOrderAliasRow extends BaseModel
+class MutationOrderAliasRow extends Model
 {
     protected $table = 'mutation_order_aliases';
+
+    public $timestamps = false;
 }
 
 class MutationTest extends TestCase
@@ -116,7 +116,7 @@ class MutationTest extends TestCase
 
     public function testLightweightDeleteHidesTheRowsBeforeItReturns(): void
     {
-        $this->table()->where('id', 1)->delete(true);
+        $this->table()->where('id', 1)->delete(lightweight: true);
 
         $this->assertSame([2, 3, 4], $this->ids(), 'rows must be gone without waiting for a mutation');
         $this->assertStringStartsWith('UPDATE _row_exists = 0', $this->lastMutationCommand());
@@ -131,7 +131,7 @@ class MutationTest extends TestCase
 
     public function testAlterDeleteIsAMutation(): void
     {
-        $this->table()->where('id', 1)->delete(false);
+        $this->table()->where('id', 1)->delete(lightweight: false);
         $this->waitForMutations();
 
         $this->assertSame([2, 3, 4], $this->ids());
@@ -139,25 +139,25 @@ class MutationTest extends TestCase
     }
 
     /**
-     * @return array<string, array{int|string|Expression, int[]}>
+     * @return array<string, array{int|string|LaravelExpression, int[]}>
      */
     public static function partitionProvider(): array
     {
         return [
             'int' => [202401, [3, 4]],
             'string' => ['202402', [1, 2]],
-            'partition ID' => [new RawColumn("ID '202401'"), [3, 4]],
+            'partition ID' => [new LaravelExpression("ID '202401'"), [3, 4]],
         ];
     }
 
     /**
-     * @param int|string|Expression $partition
+     * @param int|string|LaravelExpression $partition
      * @param int[] $expectedIds
      */
     #[DataProvider('partitionProvider')]
-    public function testAlterDeleteInPartitionOnlyTouchesThatPartition(int|string|Expression $partition, array $expectedIds): void
+    public function testAlterDeleteInPartitionOnlyTouchesThatPartition(int|string|LaravelExpression $partition, array $expectedIds): void
     {
-        $this->table()->where('id', '>', 0)->delete(false, $partition);
+        $this->table()->where('id', '>', 0)->delete(lightweight: false, partition: $partition);
         $this->waitForMutations();
 
         $this->assertSame($expectedIds, $this->ids());
@@ -173,7 +173,7 @@ class MutationTest extends TestCase
 
     public function testModelUpdateInPartition(): void
     {
-        MutationRow::where('v', '!=', 'b')->update(['v' => new RawColumn("concat(v, '!')")], 202401);
+        MutationRow::where('v', '!=', 'b')->update(['v' => DB::raw("concat(v, '!')")], 202401);
         $this->waitForMutations();
 
         $this->assertSame([[1, 'a!'], [2, 'b'], [3, 'c'], [4, 'd']], $this->rows());
@@ -203,8 +203,8 @@ class MutationTest extends TestCase
     public static function preWhereMutationProvider(): array
     {
         return [
-            'alter delete' => [fn (Builder $query) => $query->delete(false), [[1, 'a'], [3, 'c'], [4, 'd']]],
-            'lightweight delete' => [fn (Builder $query) => $query->delete(true), [[1, 'a'], [3, 'c'], [4, 'd']]],
+            'alter delete' => [fn (Builder $query) => $query->delete(lightweight: false), [[1, 'a'], [3, 'c'], [4, 'd']]],
+            'lightweight delete' => [fn (Builder $query) => $query->delete(lightweight: true), [[1, 'a'], [3, 'c'], [4, 'd']]],
             'update' => [fn (Builder $query) => $query->update(['v' => 'x']), [[1, 'a'], [2, 'x'], [3, 'c'], [4, 'd']]],
         ];
     }
@@ -217,7 +217,7 @@ class MutationTest extends TestCase
     public function testMutationTouchesOnlyTheRowsThePrewhereAndWhereSelect(Closure $mutation, array $expectedRows): void
     {
         $query = fn (): Builder => $this->table()->preWhere('d', '<', '2024-02-01')->where('v', '!=', 'a');
-        $this->assertSame([2], array_map('intval', array_column($query()->select('id')->getRows(), 'id')), 'the query selects id 2');
+        $this->assertSame([2], $this->selectedIds($query()->select('id')), 'the query selects id 2');
 
         $mutation($query());
         $this->waitForMutations();
@@ -227,7 +227,7 @@ class MutationTest extends TestCase
 
     public function testMutationWithOnlyAPrewhere(): void
     {
-        $this->table()->preWhere('d', '<', '2024-02-01')->delete(false);
+        $this->table()->preWhere('d', '<', '2024-02-01')->delete(lightweight: false);
         $this->waitForMutations();
 
         $this->assertSame([3, 4], $this->ids());
@@ -240,34 +240,31 @@ class MutationTest extends TestCase
      * whose alias v is 'c'. An ORDER BY that calls arrayJoin() drops id 2, whose
      * tags are empty, and repeats id 3, which has two.
      *
-     * @return array<string, array{Closure(Builder): Builder, int[], string}>
+     * @return array<string, array{Closure(Builder): (Builder|EloquentBuilder), int[], string}>
      */
     public static function queryWithIgnoredClausesProvider(): array
     {
+        $joined = fn (Builder $query, string $join): Builder => $query
+            ->select(self::TABLE . '.id')
+            ->{$join}(self::KEYS_TABLE, self::TABLE . '.id', '=', self::KEYS_TABLE . '.id')
+            ->where(self::TABLE . '.id', '>', 0);
+
         return [
             'select alias that shadows a column' => [
-                fn (Builder $query): Builder => $query->select('id', new RawColumn("if(id > 2, 'c', 'z')", 'v'))->where('v', 'c'),
+                fn (Builder $query): Builder => $query->select('id', DB::raw("if(id > 2, 'c', 'z') as v"))->where('v', 'c'),
                 [3, 4],
                 'SELECT aliases or expressions',
             ],
             'raw select column that defines an alias without as' => [
-                fn (Builder $query): Builder => $query->select('id', new RawColumn("if(id > 2, 'c', 'z') v"))->where('v', 'c'),
+                fn (Builder $query): Builder => $query->select('id', DB::raw("if(id > 2, 'c', 'z') v"))->where('v', 'c'),
                 [3, 4],
                 'SELECT aliases or expressions',
-            ],
-            'from sub-query' => [
-                fn (Builder $query): Builder => $query
-                    ->setSourcesTable(self::TABLE)
-                    ->from($query->newQuery()->from(self::TABLE)->where('id', '<', 4))
-                    ->where('id', '>', 2),
-                [3],
-                'a FROM sub-query',
             ],
             'setting that filters the rows' => [
                 fn (Builder $query): Builder => $query
                     ->select('id')
                     ->where('id', '>', 0)
-                    ->settings(['additional_table_filters' => new RawColumn("{'" . self::TABLE . "': 'id > 2'}")]),
+                    ->settings(['additional_table_filters' => DB::raw("{'" . self::TABLE . "': 'id > 2'}")]),
                 [3, 4],
                 'SETTINGS',
             ],
@@ -276,33 +273,21 @@ class MutationTest extends TestCase
                 [1],
                 'SETTINGS',
             ],
-            'inner join' => [
-                fn (Builder $query): Builder => $query->select('id')->allInnerJoin(self::KEYS_TABLE, ['id'])->where('id', '>', 0),
-                [2, 4],
-                'JOIN',
-            ],
-            'semi join' => [
-                fn (Builder $query): Builder => $query->select('id')->semiLeftJoin(self::KEYS_TABLE, ['id'])->where('id', '>', 0),
-                [2, 4],
-                'JOIN',
-            ],
-            'anti join' => [
-                fn (Builder $query): Builder => $query->select('id')->antiLeftJoin(self::KEYS_TABLE, ['id'])->where('id', '>', 0),
-                [1, 3],
-                'JOIN',
-            ],
+            'inner join' => [fn (Builder $query): Builder => $joined($query, 'allInnerJoin'), [2, 4], 'JOIN'],
+            'semi join' => [fn (Builder $query): Builder => $joined($query, 'semiLeftJoin'), [2, 4], 'JOIN'],
+            'anti join' => [fn (Builder $query): Builder => $joined($query, 'antiLeftJoin'), [1, 3], 'JOIN'],
             'order by arrayJoin()' => [
                 fn (Builder $query): Builder => $query->select('id')->where('id', '>', 0)->orderByRaw('arrayJoin(tags)'),
                 [1, 3, 3, 4],
                 'ORDER BY',
             ],
             'order by an expression that calls arrayJoin()' => [
-                fn (Builder $query): Builder => $query->select('id')->where('id', '>', 0)->orderBy(new RawColumn('arrayJoin(tags)'), 'desc'),
+                fn (Builder $query): Builder => $query->select('id')->where('id', '>', 0)->orderBy(DB::raw('arrayJoin(tags)'), 'desc'),
                 [1, 3, 3, 4],
                 'ORDER BY',
             ],
             'model query ordered by arrayJoin()' => [
-                fn (Builder $query): Builder => MutationRow::where('id', '>', 0)->orderByRaw('arrayJoin(tags)'),
+                fn (Builder $query): EloquentBuilder => MutationRow::where('id', '>', 0)->orderByRaw('arrayJoin(tags)'),
                 [1, 3, 3, 4],
                 'ORDER BY',
             ],
@@ -312,7 +297,7 @@ class MutationTest extends TestCase
                 'LIMIT',
             ],
             'with alias that shadows a column' => [
-                fn (Builder $query): Builder => $query->select('id')->withAlias('v', new RawColumn("if(id > 2, 'c', 'z')"))->where('v', 'c'),
+                fn (Builder $query): Builder => $query->select('id')->withAlias('v', DB::raw("if(id > 2, 'c', 'z')"))->where('v', 'c'),
                 [3, 4],
                 'WITH',
             ],
@@ -320,19 +305,21 @@ class MutationTest extends TestCase
     }
 
     /**
-     * @return array<string, array{Closure(Builder): mixed, string}>
+     * The mutations, on a query of the query builder or of a model.
+     *
+     * @return array<string, array{Closure(Builder|EloquentBuilder): mixed, string}>
      */
     public static function mutationProvider(): array
     {
         return [
-            'alter delete' => [fn (Builder $query) => $query->delete(false), 'delete'],
-            'lightweight delete' => [fn (Builder $query) => $query->delete(true), 'delete'],
-            'update' => [fn (Builder $query) => $query->update(['v' => 'x']), 'update'],
+            'alter delete' => [fn (Builder|EloquentBuilder $query) => $query->delete(lightweight: false), 'delete'],
+            'lightweight delete' => [fn (Builder|EloquentBuilder $query) => $query->delete(lightweight: true), 'delete'],
+            'update' => [fn (Builder|EloquentBuilder $query) => $query->update(['v' => 'x']), 'update'],
         ];
     }
 
     /**
-     * @return array<string, array{Closure(Builder): Builder, int[], string, Closure(Builder): mixed, string}>
+     * @return array<string, array{Closure(Builder): (Builder|EloquentBuilder), int[], string, Closure(Builder|EloquentBuilder): mixed, string}>
      */
     public static function mutationOfAQueryWithIgnoredClausesProvider(): array
     {
@@ -347,9 +334,9 @@ class MutationTest extends TestCase
     }
 
     /**
-     * @param Closure(Builder): Builder $query
+     * @param Closure(Builder): (Builder|EloquentBuilder) $query
      * @param int[] $selectedIds
-     * @param Closure(Builder): mixed $mutation
+     * @param Closure(Builder|EloquentBuilder): mixed $mutation
      */
     #[DataProvider('mutationOfAQueryWithIgnoredClausesProvider')]
     public function testAMutationOfAQueryWithClausesItWouldIgnoreThrowsAndChangesNothing(
@@ -379,7 +366,7 @@ class MutationTest extends TestCase
      * and 3, while a mutation, which only takes the condition, would read the column b
      * and change the row (10, 1) instead.
      *
-     * @return array<string, array{Closure(Builder): Builder}>
+     * @return array<string, array{Closure(Builder): (Builder|EloquentBuilder)}>
      */
     public static function queryThatReadsAnOrderByAliasProvider(): array
     {
@@ -387,10 +374,10 @@ class MutationTest extends TestCase
             'order by a name with as' => [fn (Builder $query): Builder => $query->select('a')->where('b', '<', 5)->orderBy('a as b')],
             'raw order by with AS' => [fn (Builder $query): Builder => $query->select('a')->where('b', '<', 5)->orderByRaw('a AS b')],
             'model query ordered by a name with as' => [
-                fn (Builder $query): Builder => MutationOrderAliasRow::where('b', '<', 5)->orderBy('a as b'),
+                fn (Builder $query): EloquentBuilder => MutationOrderAliasRow::where('b', '<', 5)->orderBy('a as b'),
             ],
             'model query with a raw order by with AS' => [
-                fn (Builder $query): Builder => MutationOrderAliasRow::where('b', '<', 5)->orderByRaw('a AS b'),
+                fn (Builder $query): EloquentBuilder => MutationOrderAliasRow::where('b', '<', 5)->orderByRaw('a AS b'),
             ],
         ];
     }
@@ -398,19 +385,19 @@ class MutationTest extends TestCase
     /**
      * The mutations of ORDER_ALIAS_TABLE: the update sets the column b.
      *
-     * @return array<string, array{Closure(Builder): mixed, string}>
+     * @return array<string, array{Closure(Builder|EloquentBuilder): mixed, string}>
      */
     public static function orderAliasMutationProvider(): array
     {
         return [
-            'alter delete' => [fn (Builder $query) => $query->delete(false), 'delete'],
-            'lightweight delete' => [fn (Builder $query) => $query->delete(true), 'delete'],
-            'update' => [fn (Builder $query) => $query->update(['b' => 99]), 'update'],
+            'alter delete' => [fn (Builder|EloquentBuilder $query) => $query->delete(lightweight: false), 'delete'],
+            'lightweight delete' => [fn (Builder|EloquentBuilder $query) => $query->delete(lightweight: true), 'delete'],
+            'update' => [fn (Builder|EloquentBuilder $query) => $query->update(['b' => 99]), 'update'],
         ];
     }
 
     /**
-     * @return array<string, array{Closure(Builder): Builder, Closure(Builder): mixed, string}>
+     * @return array<string, array{Closure(Builder): (Builder|EloquentBuilder), Closure(Builder|EloquentBuilder): mixed, string}>
      */
     public static function mutationOfAQueryThatReadsAnOrderByAliasProvider(): array
     {
@@ -425,8 +412,8 @@ class MutationTest extends TestCase
     }
 
     /**
-     * @param Closure(Builder): Builder $query
-     * @param Closure(Builder): mixed $mutation
+     * @param Closure(Builder): (Builder|EloquentBuilder) $query
+     * @param Closure(Builder|EloquentBuilder): mixed $mutation
      */
     #[DataProvider('mutationOfAQueryThatReadsAnOrderByAliasProvider')]
     public function testAMutationOfAQueryWhoseConditionReadsAnOrderByAliasThrowsAndChangesNothing(
@@ -493,8 +480,8 @@ class MutationTest extends TestCase
     public static function mutationOfAQueryOrderedWithFillProvider(): array
     {
         return [
-            'alter delete' => [fn (Builder $query) => $query->delete(false), [[1, 'a'], [2, 'b']]],
-            'lightweight delete' => [fn (Builder $query) => $query->delete(true), [[1, 'a'], [2, 'b']]],
+            'alter delete' => [fn (Builder $query) => $query->delete(lightweight: false), [[1, 'a'], [2, 'b']]],
+            'lightweight delete' => [fn (Builder $query) => $query->delete(lightweight: true), [[1, 'a'], [2, 'b']]],
             'update' => [fn (Builder $query) => $query->update(['v' => 'x']), [[1, 'a'], [2, 'b'], [3, 'x'], [4, 'x']]],
         ];
     }
@@ -532,11 +519,11 @@ class MutationTest extends TestCase
 
         return [
             'alter delete' => [
-                fn (Builder $table, Builder $selection) => $table->whereIn('id', $keys($selection))->delete(false),
+                fn (Builder $table, Builder $selection) => $table->whereIn('id', $keys($selection))->delete(lightweight: false),
                 [[1, 'a'], [2, 'b'], [3, 'c']],
             ],
             'lightweight delete' => [
-                fn (Builder $table, Builder $selection) => $table->whereIn('id', $keys($selection))->delete(true),
+                fn (Builder $table, Builder $selection) => $table->whereIn('id', $keys($selection))->delete(lightweight: true),
                 [[1, 'a'], [2, 'b'], [3, 'c']],
             ],
             'update' => [
@@ -544,7 +531,7 @@ class MutationTest extends TestCase
                 [[1, 'a'], [2, 'b'], [3, 'c'], [4, 'x']],
             ],
             'model delete' => [
-                fn (Builder $table, Builder $selection) => MutationRow::where('id', $keys($selection))->delete(false),
+                fn (Builder $table, Builder $selection) => MutationRow::whereIn('id', $keys($selection))->delete(false),
                 [[1, 'a'], [2, 'b'], [3, 'c']],
             ],
         ];
@@ -558,7 +545,7 @@ class MutationTest extends TestCase
     public function testAMutationByTheSelectedKeysChangesExactlyTheSelectedRows(Closure $mutation, array $expectedRows): void
     {
         $this->createKeysTable();
-        $selection = fn (): Builder => $this->table()->select('id')->allInnerJoin(self::KEYS_TABLE, ['id'])->orderBy('id', 'desc')->limit(1);
+        $selection = fn (): Builder => $this->joinedToTheKeys()->orderBy(self::TABLE . '.id', 'desc')->limit(1);
         $this->assertSame([4], $this->selectedIds($selection()), 'the rows the query selects');
 
         $mutation($this->table(), $selection());
@@ -577,7 +564,7 @@ class MutationTest extends TestCase
     public function testAMutationByASubQueryWithAJoinChangesExactlyTheSelectedRows(Closure $mutation, string $statement): void
     {
         $this->createKeysTable();
-        $selection = fn (): Builder => $this->table()->select('id')->allInnerJoin(self::KEYS_TABLE, ['id']);
+        $selection = fn (): Builder => $this->joinedToTheKeys();
         $this->assertSame([2, 4], $this->selectedIds($selection()), 'the rows the query selects');
 
         $mutation($this->table()->whereIn('id', $selection()));
@@ -615,7 +602,7 @@ class MutationTest extends TestCase
         } catch (DatabaseException $exception) {
             $this->assertContains($exception->getClickHouseExceptionName(), ['THERE_IS_NO_COLUMN', 'NO_SUCH_COLUMN_IN_TABLE']);
             $this->assertStringEndsWith(
-                "\nIN:ALTER TABLE `mutation_rows` UPDATE `v`` = 'x', ``d`` = '2000-01-01' WHERE 1 -- ` = 'ignored' WHERE `id` = 1",
+                "\nIN:alter table \"mutation_rows\" update \"v` = 'x', `d` = '2000-01-01' WHERE 1 -- \" = 'ignored' where \"id\" = 1",
                 $exception->getMessage()
             );
         }
@@ -648,12 +635,12 @@ class MutationTest extends TestCase
         $table()->insert([['id' => 2, 'v' => 'b', 'tags' => ['x']], ['id' => 3, 'v' => 'c', 'tags' => []]]);
         $this->assertSame([[1, 'a', []], [2, 'b', ['x']], [3, 'c', []]], $rows());
 
-        $table()->where('id', 1)->delete(true);
+        $table()->where('id', 1)->delete(lightweight: true);
         $table()->where('id', 2)->update(['v' => 'x', 'tags' => ['y', 'z']]);
         $this->waitForMutations(self::QUOTED_TABLE);
         $this->assertSame([[2, 'x', ['y', 'z']], [3, 'c', []]], $rows());
 
-        $table()->where('id', 3)->delete(false);
+        $table()->where('id', 3)->delete(lightweight: false);
         $this->waitForMutations(self::QUOTED_TABLE);
         $this->assertSame([[2, 'x', ['y', 'z']]], $rows());
 
@@ -682,7 +669,7 @@ class MutationTest extends TestCase
     public function testLightweightDeleteInPartitionFollowsTheServerVersion(): void
     {
         if ($this->serverSupportsLightweightDeleteInPartition()) {
-            $this->table()->where('id', '>', 0)->delete(true, 202401);
+            $this->table()->where('id', '>', 0)->delete(lightweight: true, partition: 202401);
 
             $this->assertSame([3, 4], $this->ids());
 
@@ -690,7 +677,7 @@ class MutationTest extends TestCase
         }
 
         try {
-            $this->table()->where('id', '>', 0)->delete(true, 202401);
+            $this->table()->where('id', '>', 0)->delete(lightweight: true, partition: 202401);
             $this->fail('DELETE FROM ... IN PARTITION should be rejected by ClickHouse ' . $this->serverVersion());
         } catch (DatabaseException $e) {
             $this->assertSame('SYNTAX_ERROR', $e->getClickHouseExceptionName());
@@ -737,7 +724,7 @@ class MutationTest extends TestCase
             $this->assertSame([2, 3, 4], $this->ids());
             $this->assertStringStartsWith('UPDATE _row_exists = 0', $this->lastMutationCommand());
 
-            $this->table()->where('id', 2)->delete(false);
+            $this->table()->where('id', 2)->delete(lightweight: false);
             $this->waitForMutations();
 
             $this->assertStringStartsWith('DELETE WHERE', $this->lastMutationCommand(), 'an explicit false wins over the config');
@@ -1265,145 +1252,31 @@ class MutationTest extends TestCase
     }
 
     /**
-     * Column functions in ORDER BY whose raw SQL defines an alias or calls arrayJoin(): the query selects other rows
-     * than its conditions match, so a mutation of it throws and changes nothing, and count() counts the rows that
-     * get() returns.
+     * Raw SQL in from() that is not a table name: a raw sub-query, a table function or a table with FINAL. The
+     * mutation names it as its table, which ClickHouse rejects as a syntax error, so nothing changes.
      *
-     * The condition b < 5 matches the row (10, 1) when it reads the column b, and the rows 1, 2 and 3 when it reads
-     * an alias b of the column a; arrayJoin(arr) drops the row 2, whose array is empty, and repeats the row 3.
-     *
-     * @return array<string, array{Closure(Builder): Builder, int[]}>
-     */
-    public static function queryOrderedByAColumnFunctionProvider(): array
-    {
-        return [
-            'plus() of raw sql with AS' => [
-                fn (Builder $query): Builder => $query->select('a')->where('b', '<', 5)
-                    ->orderBy(fn (Column $column) => $column->name('a')->plus(raw('0 AS b'))),
-                [1, 2, 3],
-            ],
-            'plus() of raw sql that calls arrayJoin()' => [
-                fn (Builder $query): Builder => $query->select('a')->where('a', '>', 0)
-                    ->orderBy(fn (Column $column) => $column->name('a')->plus(raw('arrayJoin(arr)'))),
-                [1, 3, 3, 10],
-            ],
-            'multiple() of raw sql that calls arrayJoin()' => [
-                fn (Builder $query): Builder => $query->select('a')->where('a', '>', 0)
-                    ->orderBy(fn (Column $column) => $column->name('a')->multiple(raw('arrayJoin(arr)'))),
-                [1, 3, 3, 10],
-            ],
-        ];
-    }
-
-    /**
-     * @return array<string, array{Closure(Builder): Builder, int[], Closure(Builder): mixed, string}>
-     */
-    public static function mutationOfAQueryOrderedByAColumnFunctionProvider(): array
-    {
-        $dataSets = [];
-        foreach (self::queryOrderedByAColumnFunctionProvider() as $queryLabel => [$query, $selectedIds]) {
-            foreach (self::mutationProvider() as $mutationLabel => [$mutation, $statement]) {
-                $dataSets["{$queryLabel}, {$mutationLabel}"] = [$query, $selectedIds, $mutation, $statement];
-            }
-        }
-
-        return $dataSets;
-    }
-
-    /**
-     * @param Closure(Builder): Builder $query
-     * @param int[] $selectedIds
-     * @param Closure(Builder): mixed $mutation
-     */
-    #[DataProvider('mutationOfAQueryOrderedByAColumnFunctionProvider')]
-    public function testAMutationOfAQueryOrderedByAColumnFunctionThrowsAndChangesNothing(
-        Closure $query,
-        array $selectedIds,
-        Closure $mutation,
-        string $statement
-    ): void {
-        $this->createOrderFunctionTable();
-        $this->assertSame($selectedIds, $this->selectedIds($query($this->orderFunctionTable()), 'a'), 'the rows the query selects');
-        $this->assertSame(count($selectedIds), $query($this->orderFunctionTable())->count(), 'count() counts the rows of get()');
-
-        try {
-            $mutation($query($this->orderFunctionTable()));
-            $this->fail('A mutation of a query ordered by such a column function should throw');
-        } catch (QueryException $exception) {
-            $this->assertStringStartsWith("Cannot {$statement} with a query that uses ORDER BY: ", $exception->getMessage());
-        }
-
-        $this->assertSame(self::ORDER_FUNCTION_ROWS, $this->orderFunctionRows());
-        $this->assertSame([], $this->mutationCommands(self::ORDER_FUNCTION_TABLE), 'nothing is sent');
-    }
-
-    /**
-     * An aggregate or DISTINCT column function in ORDER BY makes the SELECT fail, so a mutation of the query, which
-     * would change every row its condition matches, throws and changes nothing.
-     *
-     * @return array<string, array{Closure(Column): Column}>
-     */
-    public static function aggregatingColumnFunctionProvider(): array
-    {
-        return [
-            'sum()' => [fn (Column $column): Column => $column->sum('a')],
-            'max()' => [fn (Column $column): Column => $column->max('a')],
-            'sumIf()' => [fn (Column $column): Column => $column->name('a')->sumIf('a > 1')],
-            'count()' => [fn (Column $column): Column => $column->name('a')->count()],
-            'distinct()' => [fn (Column $column): Column => $column->name('a')->distinct()],
-        ];
-    }
-
-    /**
-     * @param Closure(Column): Column $order
-     */
-    #[DataProvider('aggregatingColumnFunctionProvider')]
-    public function testAMutationOfAQueryOrderedByAnAggregateThrowsAndChangesNothing(Closure $order): void
-    {
-        $this->createOrderFunctionTable();
-
-        foreach (self::mutationProvider() as [$mutation, $statement]) {
-            try {
-                $mutation($this->orderFunctionTable()->where('a', '>', 1)->orderBy($order));
-                $this->fail("A {$statement} of a query ordered by an aggregate should throw");
-            } catch (QueryException $exception) {
-                $this->assertStringStartsWith("Cannot {$statement} with a query that uses ORDER BY: ", $exception->getMessage());
-            }
-        }
-
-        $this->assertSame(self::ORDER_FUNCTION_ROWS, $this->orderFunctionRows());
-        $this->assertSame([], $this->mutationCommands(self::ORDER_FUNCTION_TABLE), 'nothing is sent');
-    }
-
-    /**
-     * Raw SQL in from() that is not a table name: a model query writes to its sources table, which would ignore the
-     * raw sub-query, the table function or the FINAL, and change rows that the query does not select.
-     *
-     * @return array<string, array{Expression}>
+     * @return array<string, array{LaravelExpression}>
      */
     public static function rawFromProvider(): array
     {
         return [
-            'a raw sub-query' => [raw('(SELECT * FROM ' . self::ORDER_ALIAS_TABLE . ' WHERE a < 3)')],
-            'a table function' => [raw('numbers(3)')],
-            'raw sql with FINAL' => [raw(self::ORDER_ALIAS_TABLE . ' FINAL')],
+            'a raw sub-query' => [new LaravelExpression('(SELECT * FROM ' . self::ORDER_ALIAS_TABLE . ' WHERE a < 3)')],
+            'a table function' => [new LaravelExpression('numbers(3)')],
+            'raw sql with FINAL' => [new LaravelExpression(self::ORDER_ALIAS_TABLE . ' FINAL')],
         ];
     }
 
     #[DataProvider('rawFromProvider')]
-    public function testAModelMutationOfAQueryWithRawSqlInFromThrowsAndChangesNothing(Expression $from): void
+    public function testAModelMutationOfAQueryWithRawSqlInFromThrowsAndChangesNothing(LaravelExpression $from): void
     {
         $this->createOrderAliasTable();
 
-        foreach (self::mutationProvider() as [$mutation, $statement]) {
+        foreach (self::mutationProvider() as $label => [$mutation, $statement]) {
             try {
                 $mutation(MutationOrderAliasRow::where('b', '<', 25)->from($from));
                 $this->fail("A {$statement} of a query with raw sql in from() should throw");
-            } catch (QueryException $exception) {
-                $this->assertStringStartsWith(
-                    "Cannot {$statement} with a query that uses a FROM table function or raw SQL: ",
-                    $exception->getMessage()
-                );
+            } catch (DatabaseException $exception) {
+                $this->assertSame('SYNTAX_ERROR', $exception->getClickHouseExceptionName(), $label);
             }
         }
 
@@ -1415,8 +1288,8 @@ class MutationTest extends TestCase
     {
         $this->createOrderAliasTable();
 
-        MutationOrderAliasRow::where('a', 10)->from(raw(self::ORDER_ALIAS_TABLE))->delete(true);
-        DB::connection('clickhouse')->table(raw(self::ORDER_ALIAS_TABLE))->where('a', 1)->delete(true);
+        MutationOrderAliasRow::where('a', 10)->from(DB::raw(self::ORDER_ALIAS_TABLE))->delete(true);
+        DB::connection('clickhouse')->table(DB::raw(self::ORDER_ALIAS_TABLE))->where('a', 1)->delete(lightweight: true);
 
         $this->assertSame([[2, 20], [3, 30]], $this->orderAliasRows());
     }
@@ -1459,7 +1332,7 @@ class MutationTest extends TestCase
     public function testALightweightDeleteWithASetOperationIsRefusedAndAlterDeleteRuns(Closure $condition, array $rowsAfterAlterDelete): void
     {
         try {
-            $condition($this->table())->delete(true);
+            $condition($this->table())->delete(lightweight: true);
             $this->fail('A lightweight delete with a set operation should throw');
         } catch (QueryException $exception) {
             $this->assertStringStartsWith(
@@ -1471,7 +1344,7 @@ class MutationTest extends TestCase
         $this->assertSame([], $this->mutationCommands(), 'nothing is sent');
         $this->assertSame([[1, 'a'], [2, 'b'], [3, 'c'], [4, 'd']], $this->rows());
 
-        $condition($this->table())->delete(false);
+        $condition($this->table())->delete(lightweight: false);
         $this->waitForMutations();
 
         $this->assertSame($rowsAfterAlterDelete, $this->rows());
@@ -1532,7 +1405,7 @@ class MutationTest extends TestCase
             $this->assertTheServerRefusedACorrelatedMutation($exception);
         }
 
-        $this->table()->where('id', 1)->delete(false);
+        $this->table()->where('id', 1)->delete(lightweight: false);
         $this->waitForMutations();
         $this->assertNotContains(1, $this->ids(), 'a later mutation is not blocked');
     }
@@ -1567,7 +1440,7 @@ class MutationTest extends TestCase
     {
         $this->createKeysTable();
 
-        $this->table()->where('id', '>', 2)->whereExists(fn (Builder $sub) => $sub->from(self::KEYS_TABLE)->where('id', 4))->delete(false);
+        $this->table()->where('id', '>', 2)->whereExists(fn (Builder $sub) => $sub->from(self::KEYS_TABLE)->where('id', 4))->delete(lightweight: false);
         $this->waitForMutations();
         $this->table()->whereIn('id', fn (Builder $sub) => $sub->select('id')->from(self::KEYS_TABLE))->update(['v' => 'k']);
         $this->waitForMutations();
@@ -1588,7 +1461,7 @@ class MutationTest extends TestCase
             $connection->table(self::TABLE)->insert([['id' => 1, 'v' => 't1'], ['id' => 100, 'v' => 't100']]);
 
             foreach ([
-                'builder lightweight delete' => fn () => $connection->table(self::TABLE)->where('id', 1)->delete(true),
+                'builder lightweight delete' => fn () => $connection->table(self::TABLE)->where('id', 1)->delete(lightweight: true),
                 'model lightweight delete' => fn () => MutationRow::where('id', 1)->delete(true),
                 'builder truncate on a cluster' => fn () => $connection->table(self::TABLE)->onCluster('company_cluster')->truncate(),
                 'builder update on a cluster' => fn () => $connection->table(self::TABLE)->where('id', 1)->onCluster('company_cluster')->update(['v' => 'x']),
@@ -1601,10 +1474,10 @@ class MutationTest extends TestCase
                 }
             }
 
-            $connection->table(self::TABLE)->where('id', 100)->delete(false);
+            $connection->table(self::TABLE)->where('id', 100)->delete(lightweight: false);
             $deadline = microtime(true) + 10;
             do {
-                $rows = $connection->table(self::TABLE)->select('id')->orderBy('id')->getRows();
+                $rows = $connection->table(self::TABLE)->select('id')->orderBy('id')->get()->all();
             } while (count($rows) > 1 && microtime(true) < $deadline && usleep(10_000) === null);
 
             return array_map('intval', array_column($rows, 'id'));
@@ -1628,13 +1501,16 @@ class MutationTest extends TestCase
      * Inside a session, ClickHouse 24.8 runs a mutation of a table of the database in the background, outside the
      * session, where a temporary table of the session does not exist: a mutation whose condition reads one would fail
      * again and again and block every later mutation of the table. Its EXPLAIN runs outside the session too, so it
-     * is refused, on both builders and for a model. Selecting the keys first works, and so does a mutation of a
-     * temporary table, which runs in the session.
+     * is refused, for a query and for a model. Selecting the keys first works, and so does a mutation of a temporary
+     * table, which runs in the session.
      */
     public function testInASessionAMutationWhoseConditionReadsATemporaryTableIsRefused(): void
     {
         $keys = 'mutation_session_keys';
-        $byKeys = fn (Builder $query): Builder => $query->whereIn('id', fn (Builder $sub) => $sub->select('id')->from($keys));
+        $byKeys = fn (Builder|EloquentBuilder $query): Builder|EloquentBuilder => $query->whereIn(
+            'id',
+            fn (LaravelBuilder $sub) => $sub->select('id')->from($keys)
+        );
         $laravel = $this->laravelGrammarConnection(['use_lightweight_delete' => false]);
 
         $results = DB::connection('clickhouse')->session(function (Connection $connection) use ($keys, $byKeys): array {
@@ -1642,11 +1518,11 @@ class MutationTest extends TestCase
             $connection->statement("INSERT INTO {$keys} VALUES (2)");
             $results = [];
             foreach ([
-                'alter delete' => fn () => $byKeys($connection->table(self::TABLE))->delete(false),
-                'lightweight delete' => fn () => $byKeys($connection->table(self::TABLE))->delete(true),
+                'alter delete' => fn () => $byKeys($connection->table(self::TABLE))->delete(lightweight: false),
+                'lightweight delete' => fn () => $byKeys($connection->table(self::TABLE))->delete(lightweight: true),
                 'update' => fn () => $byKeys($connection->table(self::TABLE))->update(['v' => 'x']),
                 'model delete' => fn () => $byKeys(MutationRow::query())->delete(false),
-                'in the temporary table' => fn () => $connection->table(self::TABLE)->whereIn('id', raw($keys))->delete(false),
+                'in the temporary table' => fn () => $connection->table(self::TABLE)->whereRaw("id in {$keys}")->delete(lightweight: false),
             ] as $label => $mutation) {
                 try {
                     $mutation();
@@ -1658,13 +1534,13 @@ class MutationTest extends TestCase
 
             $connection->statement('CREATE TEMPORARY TABLE mutation_session_rows (id UInt32)');
             $connection->statement('INSERT INTO mutation_session_rows VALUES (1), (2), (3)');
-            $byKeys($connection->table('mutation_session_rows'))->delete(false);
+            $byKeys($connection->table('mutation_session_rows'))->delete(lightweight: false);
             $results['temporary rows'] = array_map('intval', array_column(
-                $connection->table('mutation_session_rows')->select('id')->orderBy('id')->getRows(),
+                $connection->table('mutation_session_rows')->select('id')->orderBy('id')->get()->all(),
                 'id'
             ));
 
-            $connection->table(self::TABLE)->whereIn('id', $connection->table($keys)->pluck('id'))->delete(false);
+            $connection->table(self::TABLE)->whereIn('id', $connection->table($keys)->pluck('id'))->delete(lightweight: false);
 
             return $results;
         });
@@ -1696,8 +1572,8 @@ class MutationTest extends TestCase
 
     /**
      * IN followed by a table names a table that ClickHouse resolves only when the mutation runs, as a sub-query does:
-     * a missing table would leave a mutation that fails again and again. The EXPLAIN refuses it, on both builders,
-     * and a mutation by IN a table that exists is sent.
+     * a missing table would leave a mutation that fails again and again. The EXPLAIN refuses it, whether the argument
+     * or the option decides the kind of delete, and a mutation by IN a table that exists is sent.
      */
     public function testAMutationByInATableIsRefusedForAMissingTableAndSentOtherwise(): void
     {
@@ -1705,7 +1581,7 @@ class MutationTest extends TestCase
         $laravel = $this->laravelGrammarConnection(['use_lightweight_delete' => false]);
 
         foreach ([
-            'builder' => fn () => $this->table()->whereIn('id', raw('mutation_missing_keys'))->delete(false),
+            'builder' => fn () => $this->table()->whereRaw('id in mutation_missing_keys')->delete(lightweight: false),
             'laravel' => fn () => $laravel->table(self::TABLE)->whereRaw('id in mutation_missing_keys')->delete(),
         ] as $label => $mutation) {
             try {
@@ -1720,7 +1596,7 @@ class MutationTest extends TestCase
         }
         $this->assertSame([], $this->mutationCommands(), 'nothing is sent');
 
-        $this->table()->whereIn('id', raw(self::KEYS_TABLE))->delete(false);
+        $this->table()->whereRaw('id in ' . self::KEYS_TABLE)->delete(lightweight: false);
         $this->waitForMutations();
 
         $this->assertSame([[1, 'a'], [3, 'c']], $this->rows());
@@ -1733,10 +1609,10 @@ class MutationTest extends TestCase
      */
     public function testAnInSubQueryOnAKeyColumnDoesNotDelayTheMutation(): void
     {
-        $slowKeys = raw('(SELECT sleepEachRow(0.5) + 100 FROM numbers(3) SETTINGS max_block_size = 1)');
+        $slowKeys = '(SELECT sleepEachRow(0.5) + 100 FROM numbers(3) SETTINGS max_block_size = 1)';
 
         $start = microtime(true);
-        $this->table()->whereIn('id', $slowKeys)->delete(false);
+        $this->table()->whereRaw("id in {$slowKeys}")->delete(lightweight: false);
         $elapsed = microtime(true) - $start;
 
         $this->assertLessThan(1.0, $elapsed, 'the call waited for the sub-query');
@@ -1747,7 +1623,7 @@ class MutationTest extends TestCase
 
     /**
      * UNION, INTERSECT or EXCEPT in the raw SQL of an order makes the query a set operation, whose rows a mutation of
-     * its conditions would not match: it is refused on both builders, and count() counts the rows that get() returns.
+     * its conditions would not match: it is refused, and count() counts the rows that get() returns.
      */
     public function testAMutationOfAQueryOrderedWithASetOperationThrowsAndCountMatchesGet(): void
     {
@@ -1762,8 +1638,8 @@ class MutationTest extends TestCase
         $this->assertSame(2, $laravelQuery()->count());
 
         foreach ([
-            'delete' => fn () => $query()->delete(false),
-            'lightweight delete' => fn () => $query()->delete(true),
+            'delete' => fn () => $query()->delete(lightweight: false),
+            'lightweight delete' => fn () => $query()->delete(lightweight: true),
             'update' => fn () => $query()->update(['b' => 0]),
             'laravel delete' => fn () => $laravelQuery()->delete(),
             'laravel update' => fn () => $laravelQuery()->update(['b' => 0]),
@@ -1778,22 +1654,6 @@ class MutationTest extends TestCase
 
         $this->assertSame(self::ORDER_ALIAS_ROWS, $this->orderAliasRows());
         $this->assertSame([], $this->mutationCommands(self::ORDER_ALIAS_TABLE));
-    }
-
-    /**
-     * A builder made with only a client whose connection the application does not configure writes as 3.0.0 did:
-     * straight to the client, with ALTER TABLE ... DELETE for delete() and Values for insert().
-     */
-    public function testABuilderWhoseConnectionIsNotConfiguredWritesWithoutOne(): void
-    {
-        $builder = fn (): Builder => (new Builder($this->client(), 'not_configured'))->from(self::TABLE);
-
-        $builder()->insert(['id' => 5, 'd' => '2024-03-01', 'v' => 'e', 'tags' => []]);
-        $builder()->where('id', 1)->delete();
-        $this->waitForMutations();
-
-        $this->assertSame([[2, 'b'], [3, 'c'], [4, 'd'], [5, 'e']], $this->rows());
-        $this->assertStringStartsWith('DELETE WHERE', $this->lastMutationCommand());
     }
 
     /**
@@ -1856,16 +1716,29 @@ class MutationTest extends TestCase
     }
 
     /**
-     * @param Builder $query A query that selects the id column, or the given column
+     * @param Builder|EloquentBuilder $query A query that selects the id column, or the given column
      * @param string $column
      * @return int[]
      */
-    private function selectedIds(Builder $query, string $column = 'id'): array
+    private function selectedIds(Builder|EloquentBuilder $query, string $column = 'id'): array
     {
-        $ids = array_map('intval', array_column($query->getRows(), $column));
+        $rows = ($query instanceof EloquentBuilder ? $query->toBase() : $query)->get()->all();
+        $ids = array_map('intval', array_column($rows, $column));
         sort($ids);
 
         return $ids;
+    }
+
+    /**
+     * The ids of TABLE that KEYS_TABLE also holds: 2 and 4.
+     *
+     * @return Builder
+     */
+    private function joinedToTheKeys(): Builder
+    {
+        return $this->table()
+            ->select(self::TABLE . '.id')
+            ->allInnerJoin(self::KEYS_TABLE, self::TABLE . '.id', '=', self::KEYS_TABLE . '.id');
     }
 
     /**
@@ -2027,7 +1900,8 @@ class MutationTest extends TestCase
     }
 
     /**
-     * A copy of the default connection that hands out Laravel's own query builder.
+     * A copy of the default connection with the given options, whose delete() with no argument follows its
+     * use_lightweight_delete option.
      *
      * @param array<string, mixed> $config
      * @return Connection
@@ -2036,7 +1910,6 @@ class MutationTest extends TestCase
     {
         config(['database.connections.' . self::LARAVEL_GRAMMAR_CONNECTION => array_merge(
             config('database.connections.clickhouse'),
-            ['fix_default_query_builder' => false],
             $config
         )]);
         DB::purge(self::LARAVEL_GRAMMAR_CONNECTION);

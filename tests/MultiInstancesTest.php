@@ -8,11 +8,11 @@ class MultiInstancesTest extends TestCase
 {
     public function testSecondConnection()
     {
-        Example2::truncate();
-        Example2::insertAssoc([['f_int' => 1, 'f_int2' => 2, 'f_string' => 'a']]);
-        $rows = Example2::where('f_int', 1)->getRows();
+        Example2::query()->truncate();
+        Example2::insert([['f_int' => 1, 'f_int2' => 2, 'f_string' => 'a']]);
+        $rows = Example2::where('f_int', 1)->get();
         $this->assertCount(1, $rows);
-        $this->assertEquals(2, $rows[0]['f_int2']);
+        $this->assertEquals(2, $rows[0]->f_int2);
         /** @var \ClickHouseDB\Client $db */
         $db = DB::connection('clickhouse2')->getClient();
         $rows = $db->select("SELECT * FROM examples2 LIMIT 1")->rows();

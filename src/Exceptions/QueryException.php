@@ -7,16 +7,22 @@ use Throwable;
 
 class QueryException extends \ClickHouseDB\Exception\QueryException
 {
-
+    /**
+     * An update without values would send an incomplete statement to ClickHouse.
+     *
+     * Thrown by QueryBuilder::update().
+     *
+     * @return self
+     */
     public static function cannotUpdateEmptyValues(): self
     {
-        return new self('Error updating empty values');
+        return new self('Cannot update the rows without values: the update has no column to set. Nothing was sent.');
     }
 
     /**
      * A DELETE without a where condition would send an incomplete statement to ClickHouse.
      *
-     * Thrown by Builder::delete() and, with fix_default_query_builder off, by QueryGrammar for Laravel's builder.
+     * Thrown by QueryGrammar::compileDelete().
      *
      * @return self
      */
@@ -30,7 +36,7 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
     /**
      * An UPDATE without a where condition would send an incomplete statement to ClickHouse.
      *
-     * Thrown by Builder::update() and, with fix_default_query_builder off, by QueryGrammar for Laravel's builder.
+     * Thrown by QueryGrammar::compileUpdate().
      *
      * @return self
      */
@@ -45,8 +51,7 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
      * A DELETE or UPDATE whose query uses clauses that a ClickHouse mutation does not take.
      *
      * A mutation only takes the where and prewhere conditions. It would ignore these clauses, so it could
-     * change rows that the query does not select. Thrown by Builder::delete() and Builder::update() and, with
-     * fix_default_query_builder off, by QueryGrammar for Laravel's builder.
+     * change rows that the query does not select. Thrown by QueryGrammar::compileDelete() and compileUpdate().
      *
      * The message suggests selecting the keys first and passing them as a list. A sub-query in the mutation's
      * WHERE clause is not equivalent: ClickHouse (24.8 checked) can run it again for data parts it mutates

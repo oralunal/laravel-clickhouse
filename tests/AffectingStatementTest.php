@@ -153,11 +153,7 @@ class AffectingStatementTest extends TestCase
 
     private function laravelBuilderConnection(array $config = []): Connection
     {
-        config(['database.connections.' . self::LARAVEL_CONNECTION => array_merge(
-            config('database.connections.clickhouse'),
-            ['fix_default_query_builder' => false],
-            $config
-        )]);
+        config(['database.connections.' . self::LARAVEL_CONNECTION => array_merge(config('database.connections.clickhouse'), $config)]);
         DB::purge(self::LARAVEL_CONNECTION);
 
         return DB::connection(self::LARAVEL_CONNECTION);

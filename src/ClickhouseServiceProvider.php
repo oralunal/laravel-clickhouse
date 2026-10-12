@@ -53,10 +53,9 @@ class ClickhouseServiceProvider extends ServiceProvider
             );
         }
 
-        // Laravel's migration repository reads the migrations table with get()->all(), which the package Builder
-        // of fix_default_query_builder cannot give; ClickhouseMigrationRepository reads it with Laravel's query
-        // builder on a ClickHouse connection, and is Laravel's repository on any other. A repository that the app
-        // or another package bound in its place is kept.
+        // ClickhouseMigrationRepository creates and changes the migrations table as ClickHouse needs it on a
+        // ClickHouse connection, and is Laravel's repository on any other. A repository that the app or another
+        // package bound in its place is kept.
         $this->app->extend(
             'migration.repository',
             function (MigrationRepositoryInterface $repository): MigrationRepositoryInterface {
@@ -106,8 +105,6 @@ class ClickhouseServiceProvider extends ServiceProvider
             return Connection::createWithClient($config);
         });
 
-        BaseModel::setEventDispatcher($this->app['events']);
-
         $this->app['events']->listen(
             SchemaDumped::class,
             fn (SchemaDumped $event) => $this->app->make(SecondaryConnections::class)->dump($event)
@@ -118,12 +115,12 @@ class ClickhouseServiceProvider extends ServiceProvider
         );
 
         $this->app->terminating(static function () {
-            BaseModel::flushAllBuffers(silent: true);
+            Eloquent\Model::flushAllBuffers(silent: true);
         });
 
         if (!$this->app->runningUnitTests()) {
             register_shutdown_function(static function () {
-                BaseModel::flushAllBuffers(silent: true);
+                Eloquent\Model::flushAllBuffers(silent: true);
             });
         }
     }

@@ -128,9 +128,9 @@ export default defineConfig({
       {
         text: 'Models',
         items: [
-          { text: 'Define a model', link: '/models/defining-models' },
+          { text: 'Define an Eloquent model', link: '/models/defining-models' },
           { text: 'Insert rows', link: '/models/inserting-rows' },
-          { text: 'Eloquent models', link: '/models/eloquent' },
+          { text: 'Queries and mutations', link: '/models/eloquent' },
         ],
       },
       {

@@ -282,7 +282,7 @@ class SchemaBlueprint extends Blueprint
     /**
      * Set table settings: SETTINGS <name>=<value>, ...
      *
-     * Names and values are checked and written as Builder::settings() writes
+     * Names and values are checked and written as QueryBuilder::settings() writes
      * them: a name must be a plain identifier, a bool becomes 1 or 0 and a
      * string a quoted literal. A later call for the same name wins. In
      * Schema::table() each call gives ALTER TABLE ... MODIFY SETTING <name>=<value>, ...

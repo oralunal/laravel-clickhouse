@@ -13,13 +13,8 @@ use Illuminate\Database\Schema\Blueprint;
  * connection, every method is Laravel's.
  *
  * On a ClickHouse connection:
- * - the migrations table is read with Laravel's query builder (the package's QueryBuilder), also when the
- *   connection sets fix_default_query_builder, whose package Builder returns smi2's Statement from get(), which has
- *   no all(), so that migrate:rollback, with or without --step, --batch or --pretend, failed with 'Call to undefined
- *   method ClickHouseDB\Statement::all()'. The migrations of a batch come back as objects, as Laravel's other
- *   connections give them;
  * - createRepository() creates the columns of 3.0.0 (id Int32, migration String, batch Int32) with an engine that
- *   keeps every row, whatever the connection's exact_integer_types and engine options say (see createRepository());
+ *   keeps every row, whatever the connection's engine option says (see createRepository());
  * - log() sends its INSERT synchronously, with async_insert = 0, so that the row is written when log() returns, and
  *   with an insert_deduplication_token of its own, so that a migrations table that deduplicates keeps a row that is
  *   identical to an earlier one (see log());
@@ -103,12 +98,11 @@ class ClickhouseMigrationRepository extends DatabaseMigrationRepository
      * replicated does not drop it: it gets replicated_deduplication_window = 0 and
      * replicated_deduplication_window_for_async_inserts = 0, and keeps every insert as a MergeTree table does (see
      * SchemaGrammar::getReplicatedTableSettings()). The token stays for a migrations table that the schema builder did
-     * not make replicated itself, such as one that 3.0.0 or Migration::createMergeTree() created, or one whose engine
+     * not make replicated itself, such as one that 3.0.0 created, or one whose engine
      * option names a replicated engine:
      * - a replicated table with the server's deduplication windows, such as one with the engine option
-     *   ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}') or one that
-     *   Migration::createMergeTree() made replicated, drops a synchronous insert identical to a recent one (24.8, 26.3
-     *   and 26.8 checked);
+     *   ReplicatedMergeTree('/clickhouse/tables/{shard}/{database}/{table}', '{replica}'), drops a synchronous insert
+     *   identical to a recent one (24.8, 26.3 and 26.8 checked);
      * - a MergeTree table, such as the MergeTree() table that 3.0.0 created, drops it when it has a
      *   non_replicated_deduplication_window, which is 0 unless the server's merge_tree config or the table's settings
      *   set one.
@@ -179,7 +173,7 @@ class ClickhouseMigrationRepository extends DatabaseMigrationRepository
      * Create the migrations table.
      *
      * On a ClickHouse connection, the table gets the columns that 3.0.0 gave it, id Int32, migration String and batch
-     * Int32, also with exact_integer_types, which would make Laravel's increments('id') a UInt32. Its engine is the
+     * Int32, where Laravel's increments('id') would give a UInt32. Its engine is the
      * connection's engine option when that is MergeTree, ReplicatedMergeTree or SharedMergeTree with its arguments
      * alone (see keepsEveryRow()), and MergeTree() otherwise: an engine such as ReplacingMergeTree would merge the
      * rows, which all have the id 0, into one, and Memory would lose them when the server restarts. The schema
@@ -233,25 +227,6 @@ class ClickhouseMigrationRepository extends DatabaseMigrationRepository
         }
 
         $schema->dropSync($this->table);
-    }
-
-    /**
-     * Get a query builder for the migrations table: Laravel's query builder, as the package's QueryBuilder, on a
-     * ClickHouse connection, whatever its fix_default_query_builder option says, and the connection's own query
-     * builder on any other.
-     *
-     * @return \Illuminate\Database\Query\Builder
-     */
-    protected function table()
-    {
-        $connection = $this->getConnection();
-        if (! $connection instanceof Connection) {
-            return parent::table();
-        }
-
-        return (new QueryBuilder($connection, $connection->getQueryGrammar(), $connection->getPostProcessor()))
-            ->from($this->table)
-            ->useWritePdo();
     }
 
     /**

@@ -8,7 +8,8 @@ use Closure;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\LazyCollection;
 use Oralunal\LaravelClickHouse\Connection;
-use Oralunal\LaravelClickHouse\Grammar;
+use Oralunal\LaravelClickHouse\Enums\Format;
+use Oralunal\LaravelClickHouse\LiteralGrammar;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 use Oralunal\LaravelClickHouse\QueryGrammar;
 use Oralunal\LaravelClickHouse\QueryProcessor;
@@ -347,7 +348,8 @@ class QueryProcessorTest extends TestCase
     {
         $connection = $this->createStub(Connection::class);
         $connection->method('getTablePrefix')->willReturn('');
-        $connection->method('newBuilderGrammar')->willReturnCallback(fn (): Grammar => new Grammar());
+        $connection->method('newLiteralGrammar')->willReturnCallback(fn (): LiteralGrammar => new LiteralGrammar());
+        $connection->method('getInsertFormat')->willReturn(Format::Values);
         $connection->method('insert')->willReturnCallback(function (string $sql, array $bindings = []) use (&$inserts): bool {
             $inserts[] = [$sql, $bindings];
 

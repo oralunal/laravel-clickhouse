@@ -8,12 +8,13 @@ use ClickHouseDB\Exception\DatabaseException;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\Builder;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
+use Oralunal\LaravelClickHouse\QueryBuilder as Builder;
 use Tests\Models\Example;
 
 /**
- * Builder::insertFiles(): each file is its own INSERT with quoted column names, in a format named in any letter case.
+ * QueryBuilder::insertFiles(): each file is its own INSERT with quoted column names, in a format named in any letter
+ * case.
  */
 class InsertFilesTest extends TestCase
 {
@@ -78,14 +79,14 @@ class InsertFilesTest extends TestCase
         $this->assertSame('1', $json[$this->path('rows.json')]->summary('written_rows'));
         $this->assertSame([[1, 'a'], [2, 'b'], [3, 'c']], $this->storedRows());
         $this->assertSame([
-            'INSERT INTO `if_rows` ( `k`,`we``ird` ) FORMAT CSVWithNames',
-            'INSERT INTO `if_rows` ( `k`,`we``ird` ) FORMAT JSONEachRow',
+            'INSERT INTO "if_rows" ( "k","we`ird" ) FORMAT CSVWithNames',
+            'INSERT INTO "if_rows" ( "k","we`ird" ) FORMAT JSONEachRow',
         ], array_column($connection->getQueryLog(), 'query'));
     }
 
     public function test_files_are_inserted_into_the_table_of_a_model(): void
     {
-        Example::truncate();
+        Example::query()->truncate();
         $this->files->put($this->path('examples.csv'), "f_int,f_string\n1,zz\n2,aa\n");
         $this->files->put($this->path('examples.json'), "{\"f_int\":3,\"f_string\":\"bb\"}\n");
         $connection = DB::connection('clickhouse');
@@ -96,11 +97,11 @@ class InsertFilesTest extends TestCase
 
         $this->assertSame(['2', '1'], array_values(array_map(fn ($statement) => $statement->summary('written_rows'), $statements)));
         $this->assertSame([
-            'INSERT INTO examples ( `f_int`,`f_string` ) FORMAT CSVWithNames',
-            'INSERT INTO examples ( `f_int`,`f_string` ) FORMAT JSONEachRow',
+            'INSERT INTO "examples" ( "f_int","f_string" ) FORMAT CSVWithNames',
+            'INSERT INTO "examples" ( "f_int","f_string" ) FORMAT JSONEachRow',
         ], array_column($connection->getQueryLog(), 'query'));
         $this->assertSame([1 => 'zz', 2 => 'aa', 3 => 'bb'], Example::query()->orderBy('f_int')->pluck('f_string', 'f_int')->all());
-        Example::truncate();
+        Example::query()->truncate();
     }
 
     /**
@@ -152,7 +153,7 @@ class InsertFilesTest extends TestCase
             $this->rows()->insertFiles($this->path('bad.csv'), 'CSVWithNames', ['k', 'we`ird']);
             $this->fail('insertFiles() did not throw.');
         } catch (DatabaseException $exception) {
-            $this->assertStringContainsString('IN:INSERT INTO `if_rows` ( `k`,`we``ird` ) FORMAT CSVWithNames', $exception->getMessage());
+            $this->assertStringContainsString('IN:INSERT INTO "if_rows" ( "k","we`ird" ) FORMAT CSVWithNames', $exception->getMessage());
         }
 
         $this->assertSame([], $this->storedRows());
@@ -164,7 +165,7 @@ class InsertFilesTest extends TestCase
 
         $log = $connection->pretend(fn () => $this->rows()->insertFiles($this->path('rows.csv'), 'CSVWithNames', ['k', 'we`ird']));
 
-        $this->assertSame(['INSERT INTO `if_rows` ( `k`,`we``ird` ) FORMAT CSVWithNames'], array_column($log, 'query'));
+        $this->assertSame(['INSERT INTO "if_rows" ( "k","we`ird" ) FORMAT CSVWithNames'], array_column($log, 'query'));
         $this->assertSame([], $this->storedRows());
     }
 

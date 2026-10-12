@@ -1,235 +1,162 @@
 # Query builder basics
 
-The package has its own query builder, `Oralunal\LaravelClickHouse\Builder`. It writes ClickHouse SQL.
-To use Laravel's query builder instead, see [Laravel's query builder](/query-builder/laravel-query-builder).
+The query builder of a ClickHouse connection is `Oralunal\LaravelClickHouse\QueryBuilder`.
+It is Laravel's query builder, a subclass of `Illuminate\Database\Query\Builder`, with the ClickHouse clauses of [ClickHouse SQL](/query-builder/clickhouse-sql).
+Laravel's methods and macros work on it. Its grammar writes ClickHouse SQL.
 
 ## Start a query
 
 ```php
 use Illuminate\Support\Facades\DB;
 
-MyTable::query();                                   // The table of the model
-MyTable::select(['id', 'field_one']);
-MyTable::where('id', 1);
-DB::connection('clickhouse')->table('my_table');    // A table of the connection
+DB::connection('clickhouse')->table('my_table');   // A table of the connection
+DB::connection('clickhouse')->query();             // A query without a table
+DB::table('my_table');                             // When clickhouse is the default connection
+MyTable::query();                                  // The Eloquent builder of a model
 ```
 
-`DB::connection('clickhouse')->table()` returns the package's query builder when `fix_default_query_builder` is `true`, which is the default.
+The Eloquent builder of a model uses this query builder. See [Eloquent models](/models/eloquent).
 
-A table name with a dot is a database and a table: `table('analytics.events')` gives ``FROM `analytics`.`events` ``.
-
-`new Builder()` makes a builder on the `clickhouse` connection. `new Builder($client)` uses an smi2 client and follows no connection.
-`followConnectionOptions($connection)` makes such a builder use the `datetime_precision` and the grammar of a connection.
-`newQuery()` returns an empty builder on the same client and connection.
+A table name with a dot is a database and a table: `table('analytics.events')` gives `select * from "analytics"."events"`.
 
 ### Table alias and FINAL
 
-`from()` and `table()` take the table, an alias and `FINAL`:
+`table()` and `from()` take the table, an alias and `FINAL`:
 
 ```php
-$query->from('events', 'e', true);
-// SELECT * FROM `events` AS `e` FINAL
+DB::connection('clickhouse')->table('events', 'e', true);
+// select * from "events" as "e" final
 
-DB::connection('clickhouse')->table('events')->as('e');
-// SELECT * FROM `events` AS `e`
+DB::connection('clickhouse')->query()->from('events', 'e', true);
+// select * from "events" as "e" final
+
+DB::connection('clickhouse')->table('events as e');
+// select * from "events" as "e"
 ```
 
-`alias()` is the same as `as()`. For `final()`, see [ClickHouse SQL](/query-builder/clickhouse-sql#prewhere-and-final).
+For `final()`, see [ClickHouse SQL](/query-builder/clickhouse-sql#prewhere-and-final).
 
 ### Sub-queries and table functions
 
-`from()` takes a query builder or a closure. The closure gets an `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\From`:
+`fromSub()` reads a sub-query. `fromRaw()` writes SQL, such as a table function. Its `?` bindings become literals:
 
 ```php
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\From;
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
+$clickhouse = DB::connection('clickhouse');
 
-DB::connection('clickhouse')->table(MyTable::select('user_id')->groupBy('user_id'), 'u')->select(raw('count()'));
-// SELECT count() FROM (SELECT `user_id` FROM `my_table` GROUP BY `user_id`) AS `u`
+$clickhouse->query()
+    ->fromSub($clickhouse->table('my_table')->select('user_id')->groupBy('user_id'), 'u')
+    ->selectRaw('count() as users');
+// select count() as users from (select "user_id" from "my_table" group by "user_id") as "u"
 
-$query->from(fn (From $from) => $from->query(fn ($query) => $query->select('user_id')->from('events'))->as('u'));
-// SELECT * FROM (SELECT `user_id` FROM `events`) AS `u`
+$clickhouse->query()->fromRaw('numbers(10)');
+// select * from numbers(10)
 
-$query->from(fn (From $from) => $from->merge('analytics', '^events_\d+$'));
-// SELECT * FROM merge(analytics, '^events_\\d+$')
+$clickhouse->query()->fromRaw('remote(?, ?, ?, ?, ?)', ['ch-2:9000', 'analytics', 'events', 'reader', 'secret']);
+// select * from remote('ch-2:9000', 'analytics', 'events', 'reader', 'secret')
 
-$query->from(fn (From $from) => $from->remote('ch-2:9000', 'analytics', 'events', 'reader', 'secret'));
-// SELECT * FROM remote('ch-2:9000', analytics, events, 'reader', 'secret')
-
-$query->from(raw('numbers(10)'));
-// SELECT * FROM numbers(10)
+$clickhouse->query()->fromRaw('merge(?, ?)', ['analytics', '^events_\d+$']);
+// select * from merge('analytics', '^events_\\d+$')
 ```
 
-| `From` method | Sets |
-| --- | --- |
-| `table($table)` | The table. A string is a name. `raw()` is SQL. |
-| `as($alias)` | The alias |
-| `final($isFinal = true)` | `FINAL` |
-| `query($query)` | A sub-query from a builder or a closure |
-| `subQuery()` | A sub-query. It returns a new builder for the sub-query. |
-| `merge($database, $regexp)` | The `merge()` table function: all tables of the database that match the regular expression |
-| `remote($addresses, $database, $table, $user = null, $password = null)` | The `remote()` table function: a table of other servers, without a `Distributed` table |
-
-- The package writes the regular expression, the addresses, the user and the password as escaped string literals.
-  It writes the database and the table of `merge()` and `remote()` as given.
 - `remote()` takes one address or a list, for example `'ch-1:9000,ch-2:9000'`.
-- For other table functions, give the SQL with `raw()`. Do not put user input into it.
+- Give the values of a table function as bindings, not in the SQL string. Do not put user input into the SQL of `fromRaw()`.
 
 ## Select columns
 
 ```php
-use Oralunal\LaravelClickHouse\RawColumn;
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
+$query = DB::connection('clickhouse')->table('my_table');
 
 $query->select(['id', 'field_one']);
-// SELECT `id`, `field_one` FROM `my_table`
+// select "id", "field_one" from "my_table"
 
 $query->select('field_one as name');
-// SELECT `field_one` AS `name` FROM `my_table`
+// select "field_one" as "name" from "my_table"
 
-$query->select(new RawColumn('count()', 'total'));
-// SELECT count() AS `total` FROM `my_table`
+$query->selectRaw('count() as total');
+// select count() as total from "my_table"
 
-$query->select(raw('uniqExact(user_id) AS users'));
-// SELECT uniqExact(user_id) AS users FROM `my_table`
+$query->select(DB::raw('uniqExact(user_id) as users'));
+// select uniqExact(user_id) as users from "my_table"
 ```
 
-The package quotes a string column as a name. Use `RawColumn`, `raw()` or `DB::raw()` for SQL.
+The grammar quotes a string column as a name. Use `selectRaw()` or `DB::raw()` for SQL.
 
-`addSelect()` adds columns to the select list. In an array, a string key is a column, and its value is the alias. For a builder value, the key is the alias of the sub-query:
+`addSelect()` adds columns to the select list. `selectSub()`, or a builder with a string key, selects a scalar sub-query:
 
 ```php
 $query->select('id')->addSelect('field_one', 'field_two');
-// SELECT `id`, `field_one`, `field_two` FROM `my_table`
+// select "id", "field_one", "field_two" from "my_table"
 
-$query->select(['id', 'field_one' => 'name']);
-// SELECT `id`, `field_one` AS `name` FROM `my_table`
-
-$query->select(['id', 'events' => DB::connection('clickhouse')->table('events')->select(raw('count()'))]);
-// SELECT `id`, (SELECT count() FROM `events`) AS `events` FROM `my_table`
+$query->select('id')->selectSub(DB::connection('clickhouse')->table('events')->selectRaw('count()'), 'events');
+// select "id", (select count() from "events") as "events" from "my_table"
 ```
-
-### Column expressions
-
-A closure in `select()` gets an `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Column`. A string key of the array is the column:
-
-```php
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Column;
-
-$query->select(fn (Column $column) => $column->sum('amount')->as('total'));
-// SELECT sum(`amount`) AS `total` FROM `my_table`
-
-$query->select(['price' => fn (Column $column) => $column->multiple(1.2)->plus(1)->round(2)->as('gross')]);
-// SELECT round(`price` * 1.2 + 1, 2) AS `gross` FROM `my_table`
-
-$query->select(fn (Column $column) => $column->name('amount')->sumIf("event = 'click'")->as('clicks'));
-// SELECT sumIf(`amount`, event = 'click') AS `clicks` FROM `my_table`
-```
-
-| `Column` method | SQL |
-| --- | --- |
-| `name($column)` | The column. A string is a name. `raw()` is SQL. |
-| `as($alias)`, `alias($alias)` | `` AS `alias` `` |
-| `sum($column = null)`, `max($column = null)` | `sum(<column>)`, `max(<column>)`. The argument sets the column. |
-| `plus($value)`, `multiple($value)` | `<column> + value`, `<column> * value` |
-| `round($decimals = 0)` | `round(<column>, decimals)` |
-| `runningDifference()` | `runningDifference(<column>)` |
-| `sumIf($condition)` | `sumIf(<column>, condition)`. The condition is SQL. The package joins an array with spaces. |
-| `distinct()` | `DISTINCT <column>` |
-| `count()` | `count()`. It replaces the functions before it. |
-| `query($query)`, `subQuery()` | `` (<sub-query>) AS `alias` ``. `subQuery()` returns a new builder for the sub-query. |
-
-The functions apply in the order of the calls. The values of `plus()`, `multiple()` and `sumIf()` are SQL. Do not put user input into them.
 
 ### Dictionaries
 
-`addSelectDict($dict, $attribute, $key, $as = null)` selects a `String` attribute of a [dictionary](https://clickhouse.com/docs/en/sql-reference/dictionaries) with `dictGetString()`:
+Read an attribute of a [dictionary](https://clickhouse.com/docs/en/sql-reference/dictionaries) with `dictGet()` in `selectRaw()`:
 
 ```php
-$query->select('id')->addSelectDict('users_dict', 'name', raw('user_id'), 'user_name');
-// SELECT `id`, dictGetString('users_dict', 'name', user_id) as `user_name` FROM `my_table`
-
-$query->whereDict('users_dict', 'country', raw('user_id'), 'DE');
-// SELECT dictGetString('users_dict', 'country', user_id) as `country` FROM `my_table` WHERE `country` = 'DE'
+$query->select('id')->selectRaw('dictGet(?, ?, user_id) as user_name', ['users_dict', 'name']);
+// select "id", dictGet('users_dict', 'name', user_id) as user_name from "my_table"
 ```
 
-- The key is a value. A string is a string literal: `'user_id'` finds the key `user_id`, not the value of the column. For a column, give `raw('user_id')`.
-- An array is a key of many parts: `[raw('country'), raw('zip')]` gives `tuple(country, zip)`.
-- The alias is the attribute name when you do not give one.
-- `whereDict()` and `orWhereDict()` select the attribute and add a condition on its alias. They take the operator and the value as `where()` does.
-- `dictGetString()` reads only `String` attributes. For another type, write the SQL: `select(raw("dictGet('users_dict', 'age', user_id) AS age"))`.
+The bindings are string literals. Write the key, here the column `user_id`, as SQL.
 
 ## Group, order and limit
 
 ```php
-$query->select(['field_one', new RawColumn('count()', 'c')])->groupBy('field_one')->having('c', '>', 1);
-// SELECT `field_one`, count() AS `c` FROM `my_table` GROUP BY `field_one` HAVING `c` > 1
+$query->select('field_one', DB::raw('count() as c'))->groupBy('field_one')->having('c', '>', 1);
+// select "field_one", count() as c from "my_table" group by "field_one" having "c" > 1
 
 $query->orderBy('created_at', 'desc');
-// SELECT * FROM `my_table` ORDER BY `created_at` DESC
+// select * from "my_table" order by "created_at" desc
 
 $query->orderByRaw('field_two DESC, id');
-// SELECT * FROM `my_table` ORDER BY field_two DESC, id
+// select * from "my_table" order by field_two DESC, id
 
-$query->latest('created_at');
-// SELECT * FROM `my_table` ORDER BY `created_at` DESC
+$query->latest();
+// select * from "my_table" order by "created_at" desc
 
 $query->inRandomOrder();
-// SELECT * FROM `my_table` ORDER BY rand()
+// select * from "my_table" order by rand()
 
-$query->limit(10);
-// SELECT * FROM `my_table` LIMIT 10
+$query->limit(10)->offset(20);
+// select * from "my_table" limit 10 offset 20
 
-$query->limit(10, 20); // limit, offset
-// SELECT * FROM `my_table` LIMIT 20, 10
+$query->orderBy('id')->forPage(3, 15);
+// select * from "my_table" order by "id" asc limit 15 offset 30
 
 $query->orderBy('id', 'desc')->limitBy(1, 'grp');
-// SELECT * FROM `my_table` ORDER BY `id` DESC LIMIT 1 BY `grp`
+// select * from "my_table" order by "id" desc limit 1 by "grp"
 ```
 
-- `addGroupBy()` adds columns to the `GROUP BY` clause.
-- `orderBy()`, `orderByAsc()` and `orderByDesc()` take a collation: `orderBy('name', 'asc', 'tr')` gives ``ORDER BY `name` ASC COLLATE 'tr'``.
-- `latest()` orders by `created_at` descending, and `oldest()` ascending. Both take another column.
-- `take()` is the same as `limit()`, and `takeBy()` as `limitBy()`. `limitBy(2, 'user_id', 'event')` gives ``LIMIT 2 BY `user_id`, `event` ``.
-- For `HAVING` conditions, see [Conditions](/query-builder/conditions#where-prewhere-and-having).
+- `latest()` and `oldest()` order by `created_at`. Both take another column.
+- `inRandomOrder()` takes no seed. See [Random order](/query-builder/conditions#random-order).
+- For `limitBy()`, see [LIMIT BY](/query-builder/clickhouse-sql#limit-by). For `HAVING` conditions, see [Conditions](/query-builder/conditions#where-prewhere-and-having).
 
-## Copy a query
+## Bindings and the SQL of a query
 
-`clone $query` copies a query. `cloneWithout()` copies it and replaces some of its parts:
+The grammar writes `?` for each value. The connection writes the values into the SQL as ClickHouse literals before it sends the query.
+`toSql()` shows the placeholders. `toRawSql()` shows the SQL that the package sends:
 
 ```php
-$page = MyTable::where('a', 1)->orderBy('id')->limit(5);
+$query = DB::connection('clickhouse')->table('my_table')->where('field_one', "it's")->where('ratio', 0.1 + 0.2);
 
-$page->cloneWithout(['orders' => [], 'limit' => null]);
-// SELECT * FROM `my_table` WHERE `a` = 1
+$query->toSql();    // select * from "my_table" where "field_one" = ? and "ratio" = ?
+$query->toRawSql(); // select * from "my_table" where "field_one" = 'it\'s' and "ratio" = 0.30000000000000004
 ```
 
-The keys are the names of the parts: `columns`, `from`, `joins`, `arrayJoin`, `prewheres`, `wheres`, `groups`, `havings`, `orders`, `limit`, `limitBy`, `unions`, `withs`, `sample` and `format`.
-
-## Examine a query
-
-These methods return the parts of a query: `getColumns()`, `getFrom()`, `getJoins()`, `getArrayJoin()`, `getPreWheres()`, `getWheres()`, `getGroups()`, `getHavings()`, `getOrders()`, `getLimit()`, `getLimitBy()`, `getUnions()`, `getUnionTypes()`, `getWiths()`, `getSample()`, `getSampleOffset()`, `getFormat()`, `getSettings()` and `getOnCluster()`.
-`getCountQuery()` returns the query with ``count() as `count` `` as its only column and without `LIMIT`. For the query that `count()` sends, use `getQueryForCount()`. `getGrammar()` returns the grammar that writes the SQL.
-
-The parts have their own getters:
-
-| Part | Getters |
-| --- | --- |
-| `getFrom()` | `getTable()`, `getAlias()`, `getFinal()`, `getSubQuery()`, `getQueryBuilder()` |
-| `getColumns()`, each a `Column` | `getColumnName()`, `getAlias()`, `getFunctions()`, `getSubQuery()` |
-| `getJoins()`, each a `JoinClause` | See [Join closures](/query-builder/clickhouse-sql#join-closures). |
-| `getArrayJoin()` | `getArrays()`, `getArrayIdentifier()`, `getType()` |
-| `getLimit()`, `getLimitBy()` | `getLimit()`, `getOffset()`, `getBy()` |
-
-`useWritePdo()` does nothing and returns the builder. It is there for code that calls it on Laravel's query builder.
+- The query log, `DB::listen()` and the `QueryExecuted` event get the SQL with `?` and the bindings. `QueryExecuted::toRawSql()` writes the literals.
+- `whereRaw()`, `selectRaw()`, `orderByRaw()`, `havingRaw()`, `groupByRaw()` and `fromRaw()` take `?` too.
+- For the literal of each PHP value, see [Values](/query-builder/conditions#values).
 
 ## Conditional clauses
 
-`when()` and `unless()` add clauses only when a value is true or false, as in Laravel:
+`when()` and `unless()` add clauses only when a value is true or false:
 
 ```php
 $query->when($onlyActive, fn ($query) => $query->where('a', 1));
-// SELECT * FROM `my_table` WHERE `a` = 1
+// select * from "my_table" where "a" = 1
 ```
 
 ## Settings
@@ -237,54 +164,44 @@ $query->when($onlyActive, fn ($query) => $query->where('a', 1));
 `settings()` adds a [`SETTINGS` clause](https://clickhouse.com/docs/en/sql-reference/statements/select#settings-in-select-query). Give an array, or a name and a value:
 
 ```php
-MyTable::select()
+DB::connection('clickhouse')->table('my_table')
     ->settings(['max_threads' => 3, 'optimize_move_to_prewhere' => false])
     ->settings('log_comment', "it's the monthly report")
-    ->getRows();
-// SELECT * FROM `my_table` FORMAT JSON
-//   SETTINGS max_threads=3, optimize_move_to_prewhere=0, log_comment='it\'s the monthly report'
+    ->get();
+// select * from "my_table" settings max_threads=3, optimize_move_to_prewhere=0, log_comment='it\'s the monthly report'
 ```
 
-- Each call adds to the settings of the calls before it. A later value replaces an earlier value. `null` removes a setting. An empty array changes nothing.
-- Booleans become `1` and `0`. Strings become escaped string literals. A backed enum becomes its value. A `Stringable` object, such as a Carbon date, becomes a string literal.
-- For a list, a map or other SQL, give an expression:
+- Each call adds to the settings of the calls before it. A later value of a name replaces the earlier value. `null` removes a setting.
+- Booleans become `1` and `0`. Strings become escaped string literals. A backed enum becomes its value. Another `Stringable` object, such as a Carbon date, becomes a string literal.
+- For a list, a map or other SQL, give `DB::raw()`:
 
   ```php
-  MyTable::select()
-      ->settings('additional_table_filters', new RawColumn("{'my_table': 'field_two > 0'}"))
-      ->getRows();
+  $query->settings('additional_table_filters', DB::raw("{'my_table': 'field_two > 0'}"));
+  // select * from "my_table" settings additional_table_filters={'my_table': 'field_two > 0'}
   ```
 
 - A setting name has letters, digits and underscores, and does not start with a digit. Another name throws an `InvalidArgumentException`.
-- Settings go with `SELECT` queries only, `exists()` and `count()` included. `delete()` and `update()` throw for a query with settings. Put the settings of a mutation in the connection `settings`.
-- A query with settings and without `format()` is sent with `FORMAT JSON` before `SETTINGS`. `toSql()` does not show `FORMAT JSON`.
+- The settings go on the outer query. A union is selected from as a sub-query first, because ClickHouse refuses `SETTINGS` after the last query of a union in parentheses.
+- `timeout($seconds)`, `forceIndex($index)` and `ignoreIndex($index)` add their settings before the others:
+  `timeout(5)` gives `settings max_execution_time = 5`, and `forceIndex('idx_url')` gives `settings force_data_skipping_indices = 'idx_url'`.
+- `delete()` and `update()` throw for a query with settings. Put the settings of a mutation in the connection `settings`.
 
-## Output format
+## Other output formats
 
-`format()` sets the `FORMAT` clause. `get()` returns the smi2 statement. Its `rawData()` holds the output:
-
-```php
-MyTable::select('id')->orderBy('id')->format('jsoneachrow')->get()->rawData();
-// SELECT `id` FROM `my_table` ORDER BY `id` ASC FORMAT JSONEachRow
-// Returns "{\"id\":1}\n{\"id\":2}\n"
-```
-
-- `format()` takes a format name in any letter case. A name that is not in `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format`, such as `'jsonl'`, throws an `UnexpectedValueException`.
-- `rows()` and `getRows()` need `JSON`, the format of a query without `format()`. `rows()` throws ``Can`t find meta`` for `CSV`, `XML`, `JSONEachRow` and `JSONCompactEachRow`.
-- `count()`, `exists()` and the aggregates ignore `format()`. `paginate()`, `chunk()`, `first()`, `value()` and `pluck()` read rows, so they need `JSON`.
-
-## Show the SQL
-
-`toSql()` returns the SQL of the query without sending it:
+`get()` reads the rows of a JSON result. For the output of another format, such as `CSV`, `XML` or `Pretty`, use `getStatement()`. It returns the smi2 `Statement`:
 
 ```php
-MyTable::where('field_two', '>', 0)->toSql();
-// SELECT * FROM `my_table` WHERE `field_two` > 0
+DB::connection('clickhouse')->table('my_table')->select('id')->orderBy('id')->getStatement('JSONEachRow')->rawData();
+// select "id" from "my_table" order by "id" asc format JSONEachRow
+// "{\"id\":1}\n{\"id\":2}\n"
 ```
+
+See [Other formats](/query-builder/reading-results#other-formats).
 
 ## Next steps
 
 - [Conditions](/query-builder/conditions)
-- [ClickHouse SQL](/query-builder/clickhouse-sql): `PREWHERE`, `SAMPLE`, `FINAL`, set operations, `WITH`, joins and `ARRAY JOIN`
+- [ClickHouse SQL](/query-builder/clickhouse-sql): `PREWHERE`, `SAMPLE`, `FINAL`, joins, `ARRAY JOIN`, `LIMIT BY`, `WITH` and set operations
 - [Read results](/query-builder/reading-results)
 - [Updates and deletions](/query-builder/writing-data)
+- [Laravel's query builder](/query-builder/laravel-query-builder): what works on ClickHouse, and what does not
