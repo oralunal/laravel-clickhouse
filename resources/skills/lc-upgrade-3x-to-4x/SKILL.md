@@ -30,8 +30,7 @@ stores, what a read returns, or which tables a migration creates.
 
 Work through the steps in order. Do not skip the checks. Once 4.x is
 installed, the complete list of changes is the `[4.0.0]` section of
-`vendor/oralunal/laravel-clickhouse/CHANGELOG.md` (the `[Unreleased]` section
-before the release), the human-readable guide is
+`vendor/oralunal/laravel-clickhouse/CHANGELOG.md`, the human-readable guide is
 `vendor/oralunal/laravel-clickhouse/UPGRADE.md`, and every public class and
 signature of 4.x is in
 `vendor/oralunal/laravel-clickhouse/docs/reference/api.md` and under
