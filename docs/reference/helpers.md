@@ -62,7 +62,7 @@ $grammar->compileSettings(['max_threads' => 2, 'log_comment' => "it's", 'use_unc
 | Method | Returns |
 | --- | --- |
 | `compileLiteral($value)` | The literal of a value: `null`, `1` or `0` for a bool, all digits of a float, `nan`, `inf` and `-inf`, an escaped string, an array literal, a date at the precision of the grammar, the value of a backed enum, the name of a pure enum, the SQL of `DB::raw()` |
-| `compileStringLiteral($string)` | A string literal. A backslash goes before each single quote, double quote, backslash and NUL byte. |
+| `compileStringLiteral($string)` | A string literal. A backslash goes before each single quote, double quote and backslash. A NUL byte becomes `\0`. |
 | `quoteString($string)` | A string literal. A backslash goes before each single quote and backslash only. |
 | `quoteIdentifier($name)` | One name in backticks, with each backtick and backslash doubled: ``` `we``ird` ```. The name is not split on dots. |
 | `escapeInsertColumns($columns)` | The column names with backticks and backslashes doubled, for a client that puts each name in backticks |
@@ -93,7 +93,7 @@ The static methods of `QueryException` make the exceptions that the package thro
 | `QueryException::cannotMutateWithClauses()` | A mutation with a clause that ClickHouse ignores. See [Refused clauses](/query-builder/writing-data#refused-clauses). |
 | `QueryException::insertKeysDiffer()` | A row of an insert has other keys than the first row, in `Values` and `JSONEachRow` |
 | `QueryException::cannotCreateTemporaryTableOutsideSession()`, `cannotReachTemporaryTable()` | A temporary table outside a session, or a statement that ClickHouse runs on a database table of the same name. See [Sessions](/advanced/sessions#temporary-tables). |
-| `QueryException::cannotRunAsynchronouslyInSession()` | An asynchronous request or `insertFiles()` in a session |
+| `QueryException::cannotRunAsynchronouslyInSession()` | An asynchronous request of the smi2 client, such as `selectAsync()` with `executeAsync()`, in a session. `insertFiles()` in a session throws a `QueryException` of its own: `Cannot insert files in a ClickHouse session: ...` |
 | `QueryException::sessionNotFound()`, `sessionIsLocked()` | The ClickHouse errors `SESSION_NOT_FOUND` and `SESSION_IS_LOCKED`. See [Sessions](/advanced/sessions#errors-in-a-session). |
 | `QueryException::cannotUpdateEmptyValues()` | `update([])`, before anything is sent |
 | `QueryException::cannotInsertIntoJsonPath()`, `cannotUpdateJsonPath()` | A JSON path as a column of an insert, or a path that `update()` cannot set. See [JSON paths](/query-builder/writing-data#json-paths). |

@@ -323,9 +323,10 @@ class QueryBuilderClickHouseSqlTest extends TestCase
 
         $this->expectException(QueryException::class);
         $this->expectExceptionMessage(
-            'A mutation ignores the settings limit and additional_table_filters, which change the rows that a SELECT'
-            . ' reads. It only takes the settings that change how it runs, such as mutations_sync and'
-            . ' lightweight_deletes_sync.'
+            'A mutation only takes the settings that change how it runs, such as mutations_sync and'
+            . ' lightweight_deletes_sync (see QueryGrammar::MUTATION_SETTINGS), and the package refuses the settings'
+            . ' limit and additional_table_filters. ClickHouse ignores a setting that changes which rows a SELECT'
+            . ' reads, such as limit, in a mutation, which then changes every row that the conditions match.'
         );
         $refused->getGrammar()->compileDelete($refused);
     }

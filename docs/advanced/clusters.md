@@ -26,7 +26,7 @@ Replace `host` and `port` with a `cluster` list of nodes:
 ```
 
 ::: warning
-- All nodes must have the same database name, user name and password.
+- Each node gets the options of the connection. A key in a node entry, such as `username` or `password`, overrides the connection's for that node. Keep the same `database` on all nodes.
 - Reads and writes go to the first node that answers.
 - Define the `{replica}` and `{shard}` macros on each server, in `config.xml` or `config.d/*.xml`.
 :::
@@ -141,7 +141,7 @@ Schema::dropIfExistsSync('events_old');
 
 | Connection | Statements | Engine |
 | --- | --- | --- |
-| No `cluster_name` | Active node only | As given |
+| No `cluster_name` | Active node only. `Schema::createDatabase()`, `Schema::dropDatabaseIfExists()`, `dropAllTables()` and `dropAllViews()` go to each node of `cluster`, one after the other. | As given |
 | `cluster_name`, no `cluster` nodes | `ON CLUSTER` | As given. The `migrations` table is not replicated, so each host keeps its own rows. |
 | `cluster_name` and `cluster` nodes | `ON CLUSTER` | MergeTree family becomes replicated |
 
@@ -157,7 +157,8 @@ So the schema builder gives its replicated tables `replicated_deduplication_wind
 Then the table keeps all inserts, synchronous or asynchronous, on 24.8, 26.3 and 26.8.
 
 - `settings()` with another value overrides each setting. `null` gives the setting to the server: `$table->settings(['replicated_deduplication_window' => null])`.
-- An engine that you name as replicated, and an `engine()` with its own `SETTINGS` clause, get no setting. Give such a table the two settings with `settings()` to keep identical inserts.
+- An engine that you name as replicated gets no setting. Give it the two settings with `settings()` to keep identical inserts.
+- Do not write a `SETTINGS` clause in `engine()` for the MergeTree family: the schema builder writes `ORDER BY` after the engine, and ClickHouse refuses `SETTINGS` before `ORDER BY` with `SYNTAX_ERROR`. Give all table settings with `settings()`.
 
 ### Blueprint options
 

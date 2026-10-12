@@ -39,8 +39,8 @@ $query->orderBy('id')->pluck('field_one', 'id');
 
 ### pluck() and the names of the columns
 
-ClickHouse names a column of a joined table with its table, such as `users.name`, and a column of the query's own table without it.
-`pluck()` reads a column by the name that ClickHouse gives it:
+ClickHouse names a column of a joined table with its table, such as `users.id`, when the query's own table has a column of the same name.
+Other columns keep their name, such as `name`. `pluck()` reads a column by the name that ClickHouse gives it:
 
 ```php
 $query->select('my_table.id', 'users.name')
@@ -61,7 +61,7 @@ $query->where('id', 99)->doesntExist(); // true
 
 - A query that holds `INTERSECT` or `EXCEPT` gets `where not ignore(*)`, so that ClickHouse compares all columns. See [INTERSECT and EXCEPT in sub-queries](/query-builder/clickhouse-sql#intersect-and-except-in-sub-queries).
 - A query that calls `arrayJoin()`, in `selectRaw()`, `withAlias()` or an order, is selected from, also in `whereExists()`:
-  `select exists(select * from (...) as "exists_table" where not ignore(*)) as "exists"`. ClickHouse 26.8 answers `true` for `exists(select arrayJoin(arr) ...)` over an empty array.
+  `select exists(select * from (...) as "exists_table" where not ignore(*)) as "exists"`. With the analyzer, ClickHouse 26.3 and 26.8 answer `true` for `exists(select arrayJoin(arr) ...)` over an empty array.
 - `exists()` reads the only column of the result, whatever its name. Without the analyzer (`enable_analyzer = 0`), ClickHouse names it `in(1, _subquery1)` for a query with a `withExpression()` or a join.
 
 ## Count and aggregates
@@ -122,7 +122,7 @@ Other notes:
 
 ### Other aggregates
 
-`count($column)`, `sum()`, `avg()`, `min()`, `max()` and `aggregate()` are Laravel's: they remove the select list and the order of the query.
+`count($column)`, `sum()`, `avg()`, `min()`, `max()` and `aggregate()` are Laravel's: they remove the select list, and the order of a query without `groupBy()`.
 A union keeps the order of its first query, because the order decides, with its limit, which rows that query returns.
 To aggregate the rows of a grouped query or of a select list, aggregate a sub-query:
 

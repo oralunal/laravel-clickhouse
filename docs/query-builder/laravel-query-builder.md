@@ -16,10 +16,10 @@ This page lists what works differently on ClickHouse, and what does not work.
 | --- | --- |
 | `count()`, `paginate()` | Count the rows that `get()` returns, in a sub-query when needed. See [Count and aggregates](/query-builder/reading-results#count-and-aggregates). |
 | `exists()` | `select exists(...) as "exists"`. A query with `INTERSECT` or `EXCEPT` reads all their columns. |
-| `pluck()` | Reads a joined column by the name that ClickHouse gives it, such as `users.name` |
+| `pluck()` | Reads a joined column by the name that ClickHouse gives it, such as `users.id` |
 | `sum()`, `avg()`, `min()`, `max()`, `aggregate()` | Laravel's. A union keeps the order of its first query. |
 | `inRandomOrder()` | `order by rand()`. A seed throws. Use `orderByRaw('cityHash64(?, id)', [$seed])`. |
-| `union()` | `union distinct`. With `union_default_mode` in the connection `settings`, a bare `union`. `unionAll()` sends `union all`. |
+| `union()` | `union distinct`. With `union_default_mode` in the connection `settings`, a bare `union`. `unionDistinct()` always sends `union distinct`, and `unionAll()` `union all`. |
 | `whereLike()`, `whereNotLike()` | `ilike`, `not ilike`. With `caseSensitive: true`, `like`, `not like`. |
 | JSON paths, such as `where('payload->name', 'x')`, `whereJsonContains()`, `whereJsonLength()` | ClickHouse's JSON functions on a `String` column. See [JSON paths](/query-builder/conditions#json-paths). |
 | `whereFullText()` | `hasAllTokens()`, or `hasAnyTokens()` with `['mode' => 'any']`. ClickHouse 26.3 and later. See [Full-text search](/query-builder/conditions#full-text-search). |
@@ -41,8 +41,8 @@ The ClickHouse clauses, such as `final()`, `preWhere()`, `sample()`, `arrayJoin(
 
 ## Dates and times
 
-The date methods call ClickHouse functions. Laravel prepares their values: it pads a time, and writes a day or a month as an integer.
-See [Date conditions](/query-builder/dates#date-conditions).
+The date methods call ClickHouse functions. The package's query builder writes a day, a month or a year as an integer, and pads a time to `HH:MM:SS`.
+Laravel's `JoinClause` does neither, so `whereDay()` and `whereMonth()` fail in a join closure. See [Date conditions](/query-builder/dates#date-conditions).
 
 ## Eloquent
 
@@ -55,7 +55,7 @@ These methods throw Laravel's `RuntimeException` before the package sends a requ
 
 | Method | Use instead |
 | --- | --- |
-| `upsert()` with columns to update | `insert()` into a `ReplacingMergeTree` table, or `update()`. `upsert()` without columns to update is an `insert()`. |
+| `upsert()` with columns to update | `insert()` into a `ReplacingMergeTree` table, or `update()`. `upsert($values, $uniqueBy, [])`, with an empty list of columns to update, is an `insert()`. Without the third argument, Laravel updates every column, and it throws. |
 | `insertOrIgnore()` | `insert()`. ClickHouse has no unique constraints. |
 
 Laravel's transactions are not supported either. See [Transactions](/advanced/raw-sql#transactions).

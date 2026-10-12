@@ -260,7 +260,7 @@ class SchemaChangeColumnTest extends TestCase
 
     /**
      * ClickHouse would change the type, fail to convert the NULL values in a
-     * mutation, and leave every later query of the table failing, so the
+     * mutation, and leave every later query that reads the column failing, so the
      * change throws before the blueprint sends anything, the column added
      * before it included.
      *
@@ -283,7 +283,7 @@ class SchemaChangeColumnTest extends TestCase
                 $exception->getMessage()
             );
             $this->assertStringEndsWith(
-                ': ClickHouse would fail to convert them in a mutation, and every later query of the table would fail'
+                ': ClickHouse would fail to convert them in a mutation, and every later query that reads the column would fail'
                 . ' until the mutation is killed. Replace the NULL values first, or keep the column nullable(). Rows'
                 . ' removed by a lightweight DELETE count too until a merge rewrites their parts; ALTER TABLE `visits`'
                 . ' APPLY DELETED MASK removes them.',

@@ -1118,9 +1118,7 @@ class Connection extends BaseConnection
      * variable gives), or DateTimePrecision::Microsecond.
      *
      * The option takes 'second' or 'microsecond' in any letter case and with surrounding spaces, or a
-     * DateTimePrecision case. A config file should hold the string: Laravel's config:cache cannot write an enum case
-     * into the cached config. A case works in a config that is set at runtime, such as one given to
-     * DB::connectUsing().
+     * DateTimePrecision case, which Laravel's config:cache writes into the cached config as the case.
      *
      * @return DateTimePrecision
      * @throws InvalidArgumentException For any other value
@@ -1181,8 +1179,7 @@ class Connection extends BaseConnection
      * out, null or blank, or Format::JsonEachRow.
      *
      * The option takes 'Values' or 'JSONEachRow' in any letter case and with surrounding spaces, or one of the two
-     * Format cases. A config file should hold the string: Laravel's config:cache cannot write an enum case into the
-     * cached config. A case works in a config that is set at runtime, such as one given to DB::connectUsing().
+     * Format cases, which Laravel's config:cache writes into the cached config as the case.
      *
      * @return Format
      * @throws InvalidArgumentException For any other value

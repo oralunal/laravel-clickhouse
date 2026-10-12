@@ -24,14 +24,16 @@ Or for one query: `->settings('output_format_json_quote_64bit_integers', 1)`. Th
 
 26.3 and 26.8 insert asynchronously by default (`async_insert = 1`, `wait_for_async_insert = 1`). Each `INSERT` waits until the server flushes its buffer.
 
-- The row count of `affectingStatement()` and `insertUsing()` changes. See [Raw SQL](/advanced/raw-sql#statements-and-counts).
+- The row count of `affectingStatement()` for an `INSERT ... VALUES` changes. See [Raw SQL](/advanced/raw-sql#statements-and-counts).
+  `insertUsing()` sends `INSERT ... SELECT`, which ClickHouse always runs synchronously, so its count is the same on all versions.
 - On 26.3, a replicated table checks an asynchronous insert against `replicated_deduplication_window_for_async_inserts`. The schema builder sets it to `0`. See [Identical inserts](/advanced/clusters#identical-inserts).
 - `'settings' => ['async_insert' => 0]` inserts synchronously, as 24.8 does.
 - The migration repository and the load of a schema dump always insert synchronously.
 
 ## Mutations on a server with little RAM
 
-When the server config does not set `background_pool_size`, 26.8 makes it equal to the RAM in GiB, for example 3 for 3.8 GiB. 24.8 and 26.3 keep 16.
+When the server config does not set `background_pool_size`, 26.8 makes it equal to the memory of the server in GiB, at least 1: 3 for 3.8 GiB.
+In a container with a memory limit, it uses the limit: 1 for a limit of 0.9 GiB. 24.8 and 26.3 keep 16.
 Then 26.8 delays a mutation while the pool has too few free threads.
 
 A statement that waits for its mutation on a small `MergeTree` table then takes a few hundred milliseconds, and sometimes more than 2 seconds.
@@ -77,12 +79,14 @@ Without a default, they fail with ``Please specify `DEFAULT` expression in ALTER
 They refuse a mutation with such a condition at once. See [Deletions](/query-builder/writing-data#conditions-that-clickhouse-cannot-run).
 
 `has()`, `whereHas()` and `doesntHave()` send an `IN` sub-query, which all versions run, also in a mutation.
-`withCount()` and the other `with` aggregates of relations select a correlated sub-query, which only 26.3 and 26.8 run. See [Relations](/models/eloquent#relations).
+`withCount()` and the other `with` aggregates of relations select a correlated sub-query, which only 26.3 and 26.8 run.
+There, `withCount()` gives `null`, not `0`, for a model without related rows. See [Relations](/models/eloquent#relations).
 
 ## Time, text indexes and vector indexes
 
-26.3 and 26.8 turn on the settings `enable_time_time64_type`, `enable_full_text_index` and `enable_vector_similarity_index`.
-On 24.8, the package refuses `time()`, `fullText()` and `vectorIndex()` before it sends anything: 24.8 reads `Time` as `Int64`, has no text index, and has the vector similarity index only as an experimental feature.
+26.3 and 26.8 turn on the settings `enable_time_time64_type`, `enable_full_text_index` and `enable_vector_similarity_index`. 25.8 turns on only the last one.
+On 24.8 with its default settings, the package refuses `time()`, `fullText()` and `vectorIndex()` before it sends anything: 24.8 reads `Time` as `Int64`, has no text index, and has the vector similarity index only as an experimental feature.
+When the connection's `settings` turn on `allow_experimental_full_text_index` or `allow_experimental_vector_similarity_index`, the package sends the statement, and 24.8 refuses it with `INCORRECT_QUERY`.
 `whereFullText()` calls `hasAllTokens()`, which 24.8 does not have. See [Text and vector indexes](/schema/schema-builder#text-and-vector-indexes).
 
 ## INTERSECT and EXCEPT
@@ -93,7 +97,7 @@ The package adds `where not ignore(*)` to `count()`, the other aggregates, `exis
 
 ## EXISTS with arrayJoin()
 
-With the analyzer, 26.8 answers `EXISTS` of a query that selects `arrayJoin()` of an empty array with `1`, although the query returns no row.
+With the analyzer, 26.3 and 26.8 answer `EXISTS` of a query that selects `arrayJoin()` of an empty array with `1`, although the query returns no row. 24.8 answers `0`.
 The package selects from such a query in `exists()` and `whereExists()`, with `where not ignore(*)`, which gives the correct answer on all versions.
 
 ## Lightweight delete with a set operation

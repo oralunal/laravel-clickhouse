@@ -22,8 +22,9 @@ $clickhouse->insert('INSERT INTO my_table (id, field_one, ratio) VALUES (?, ?, ?
 - Write a `?` that is not a placeholder, such as the ternary operator, as `??`:
   `$clickhouse->select('SELECT ? > 1 ?? 10 : 20 AS t', [5])` returns `[['t' => 10]]`.
   An `INSERT` without bindings is sent as written, so the rows after its `FORMAT` keep their `??`.
-- A different number of placeholders and bindings throws an `InvalidArgumentException` before the request:
+- A query with `?` placeholders and a different number of bindings throws an `InvalidArgumentException` before the request:
   `The query has 1 "?" placeholder, but 2 bindings were given. Write a literal "?" as "??".`
+  A query without `?` gives a list of bindings to the smi2 client, for `:0` and `{0}`. A binding without a placeholder is ignored.
 - The query log, `DB::listen()` and the `QueryExecuted` event get the SQL with `?` and the bindings.
 
 ### Named bindings
@@ -129,7 +130,7 @@ $clickhouse->escape("\xff\x00", true);  // x'ff00'
 ```
 
 A string with a NUL byte or invalid UTF-8 throws a `RuntimeException`, unless you escape it as binary.
-`toRawSql()`, `dumpRawSql()`, `DB::getRawQueryLog()` and `QueryExecuted::toRawSql()` use `escape()` for the bindings.
+`toRawSql()`, `dumpRawSql()`, `DB::getRawQueryLog()` and `QueryExecuted::toRawSql()` write the bindings as `escape()` writes them. They do not throw for a NUL byte or invalid UTF-8.
 
 ## Errors
 
@@ -185,5 +186,5 @@ $log = DB::connection('clickhouse')->pretend(function ($connection) {
 - A JSONEachRow insert is logged without its rows. The package still checks the rows, so an incorrect row throws.
 - The checks before a mutation, `EXPLAIN` and the lookup of temporary tables, are not sent.
 - `Schema::dropAllTables()` and `Schema::dropAllViews()` send no `DROP`, because the list of tables is empty.
-- `change()` and `dropIndex()` in `Schema::table()` read the server while they compile, also while the connection pretends.
+- Some schema commands read the server while they compile, also while the connection pretends: `change()`, `index()` and `dropIndex()` in `Schema::table()`, and `time()`, `fullText()` and `vectorIndex()`. See [Pretend](/schema/migrations#pretend).
 - The log writes each `??` as `?`.

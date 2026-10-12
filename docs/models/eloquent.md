@@ -75,7 +75,7 @@ Event::optimize();                // optimize table "events"
 Event::optimize(true);            // optimize table "events" final
 Event::optimize(false, '202401'); // optimize table "events" partition '202401'
 
-Event::where('type', 'click')->optimize(true); // The builder's optimize() works on the table of the model.
+Event::where('type', 'click')->optimize(true); // optimize table "events" final: the where conditions are left out
 ```
 
 It returns `true` when ClickHouse accepts the statement. With `use_on_cluster`, it goes `ON CLUSTER`.
@@ -115,10 +115,11 @@ $user->events()->where('type', 'click')->count();
   // alter table "users" delete where ("id" not in (select "posts"."user_id" from "posts") or "id" is null)
   ```
 
-  A relation query that reads the outer table, such as `whereColumn('posts.created_at', '>', 'users.created_at')`, or that has a `limit()`, keeps Laravel's correlated `EXISTS`.
+  A relation query that reads the outer table, such as `whereColumn('posts.created_at', '>', 'users.created_at')`, or that has a `limit()`, an `offset()`, a `groupBy()`, a `having()` or a union, keeps Laravel's correlated `EXISTS`.
   ClickHouse 26.3 and 26.8 run it in a select. 24.8 does not.
-- `withCount()`, `withExists()`, `withSum()` and the other `with` aggregates select a correlated sub-query. ClickHouse 24.8 cannot run it. 26.3 and 26.8 can.
-- `upsert()`, `insertOrIgnore()` and the locks are not supported.
+- `withCount()`, `withExists()`, `withSum()` and the other `with` aggregates select a correlated sub-query. ClickHouse 24.8 cannot run it.
+  26.3 and 26.8 run it, but `withCount()` gives `null`, not `0`, for a model without related rows. Write `$user->posts_count ?? 0`.
+- `upsert()` with columns to update and `insertOrIgnore()` throw a `RuntimeException`. `lockForUpdate()` and `sharedLock()` add nothing: ClickHouse has no row locks.
   See [Not supported](/query-builder/laravel-query-builder#not-supported).
 
 ## Parallel queries

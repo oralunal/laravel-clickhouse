@@ -22,7 +22,8 @@ DB::connection('clickhouse')->table('events')->insert(['id' => 'e3', 'type' => '
   Without this check, `[['id' => 'e1'], ['type' => 'view']]` would store `view` in the column `id`.
 - `insert([])` sends nothing and returns `true`, as in Laravel. A row without keys, such as `[[]]`, throws
   `Inserting empty values array is not supported in ClickHouse` before the package sends the request.
-- The package quotes each column name as one identifier. A column name cannot add SQL to the statement.
+- The package quotes each column name and doubles the quotes in it, so a name cannot close the column list. As in
+  Laravel, a dot in a name is a qualifier and the word `as` an alias. Do not take column names from user input.
 - `insertGetId()` needs the key in the row, because ClickHouse has no auto-increment.
 
 ### One row
@@ -143,7 +144,7 @@ DB::connection('clickhouse')->table('events')->insert($rows, Format::JsonEachRow
 - The second argument of `insert()` takes `Format::Values` or `Format::JsonEachRow`, or `'Values'` or `'JSONEachRow'`
   in any letter case. Another format throws `insert() takes the format 'Values' or 'JSONEachRow', [CSV] given.`
   Without it, the `insert_format` option of the connection applies.
-- `Model::insert()`, `create()`, `save()` and `flushBuffer()` use the `insert_format` option.
+- `create()`, `save()` and `flushBuffer()` use the `insert_format` option. `Model::insert()` uses it when you give no format.
 - `insert_format` takes `Values` or `JSONEachRow`, in any letter case, or a `Format` case. `null` and `''` are `Values`.
   Another value throws an `InvalidArgumentException`.
 - Each row must have the keys of the first row, as in `Values`. A row with other keys throws before the package sends
@@ -164,7 +165,7 @@ ClickHouse reads some values differently in the two formats (24.8 checked):
 | A string that is not valid UTF-8 | Stored | An `InvalidArgumentException` before the request |
 | Raw SQL, such as `DB::raw("upper('x')")` | The SQL runs | An `InvalidArgumentException` before the request |
 
-A whole float, such as `2.0`, is written as `2`. Keep binary strings, such as `md5($value, true)`, in `Values`.
+In `JSONEachRow`, a whole float, such as `2.0`, is written as `2`. In `Values` it is `2.0`. Keep binary strings, such as `md5($value, true)`, in `Values`.
 
 ## File inserts
 
@@ -194,5 +195,6 @@ Event::insertFiles('/data/part-3.json', Format::JsonEachRow, ['id', 'type']);
 ## Pretend
 
 While the connection [pretends](/advanced/raw-sql#pretend-mode), as `DB::pretend()` and `php artisan migrate --pretend`
-do, each insert is logged and not sent. The checks that run before the request still throw: a JSONEachRow row with
-other keys, raw SQL or a string that is not valid UTF-8.
+do, each insert is logged and not sent. The checks that run before the request still throw, in both formats: a row
+with other keys or without keys, a JSON path as a column, and, in `JSONEachRow`, raw SQL or a string that is not valid
+UTF-8.

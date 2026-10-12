@@ -64,21 +64,20 @@ migrations. It removes the parts of 3.x that did the same work, without a deprec
 
 | Removed | Use instead |
 | --- | --- |
-| `BaseModel` and its `insertAssoc()`, `insertBulk()`, `prepareAndInsert*()`, `getRows()`, `$insertFormat` and `$tableForInserts` | `Oralunal\LaravelClickHouse\Eloquent\Model` with `insert()`, `create()` and `buffer()`. See [Define an Eloquent model](/models/defining-models). |
+| `BaseModel` and its `insertAssoc()`, `insertBulk()`, `prepareAndInsert*()`, `getRows()` and `$tableForInserts` | `Oralunal\LaravelClickHouse\Eloquent\Model` with `insert()`, `create()` and `buffer()`. See [Define an Eloquent model](/models/defining-models). |
 | The package's own `Builder`, `ClickhouseBuilder\*`, `RawColumn`, `raw()` and `InsertArray` | The `QueryBuilder` that `DB::connection('clickhouse')->table()` returns, `DB::raw()` and PHP arrays. See [Query builder basics](/query-builder/basics). |
 | `format()` of the builder | `getStatement($format)->rawData()`, or `selectStatement($sql)` of the connection |
-| `getQueryForCount()`, `getQueryForExists()`, `getQueryForPage()`, `asyncWithQuery()` | `count()`, `exists()`, `forPage()` and [parallel queries](/advanced/parallel-queries) |
+| `getCountQuery()`, `asyncWithQuery()` | `count()`, `exists()`, `forPage()` and [parallel queries](/advanced/parallel-queries) |
 | `Oralunal\LaravelClickHouse\Migration` with `write()` and `createMergeTree()`, `ClickhouseSchemaBuilder\*` | Laravel migrations with `Schema::connection(...)->create()` or `DB::connection(...)->statementOnEveryNode($sql)`. See [Migrations](/schema/migrations). |
 | `Enum\Enum` and the enums of the old builder | The native enums `Enums\Format` and `Enums\DateTimePrecision` |
-| The package's `Grammar` and `newBuilderGrammar()` | `LiteralGrammar` and `newLiteralGrammar()` |
+| The package's `Grammar` | `LiteralGrammar` and `newLiteralGrammar()` |
 | The option `fix_default_query_builder` | Nothing. The query builder is always the package's `QueryBuilder`. |
 
 These changes make the same code do something else:
 
 - `tinyInteger()`, `smallInteger()`, `integer()` and `bigInteger()` create `Int8`, `Int16`, `Int32` and `Int64`, and
-  their unsigned forms `UInt8` to `UInt64`. `id()` creates a `UInt64` column. 3.x wrote wider signed types.
-- At the `microsecond` precision, a condition on a date with a sub-second part writes `toDateTime64('...', 6)`.
-  It compares the exact date. See [Dates and times](/query-builder/dates).
+  their unsigned forms `UInt8` to `UInt64`. `id()` creates a `UInt64` column. 3.x wrote `Int16` for `tinyInteger()`,
+  and signed types for the unsigned columns and `id()`.
 - The `delete()` of the query builder takes Laravel's `$id` first. Write `delete(lightweight: true)`. A `bool` as
   the first argument throws.
 - `min()`, `max()`, `sum()`, `avg()` and `aggregate()` are Laravel's: they drop the select list and the order.

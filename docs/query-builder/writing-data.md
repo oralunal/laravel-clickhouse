@@ -1,6 +1,7 @@
 # Inserts, updates and deletions
 
-The examples use `$query = DB::connection('clickhouse')->table('my_table')`. An Eloquent model has the same methods, see [Eloquent models](/models/eloquent).
+Each example starts from a new query: `$query = DB::connection('clickhouse')->table('my_table')`. A query keeps its conditions, so do not run two writes on the same `$query`.
+An Eloquent model has the same methods, see [Eloquent models](/models/eloquent).
 
 ## Inserts
 
@@ -15,7 +16,7 @@ $query->insert([['id' => 20, 'field_one' => 'p']], 'JSONEachRow');
 - `insert($values, $format = null)` takes one row or a list of rows. The format is `Values`, `JSONEachRow`, a case of `Oralunal\LaravelClickHouse\Enums\Format`, or `null` for the `insert_format` option of the connection.
 - `insert([])` returns `true` and sends nothing. A row without keys throws `Inserting empty values array is not supported in ClickHouse` before the request.
 - `insertGetId()` inserts the row and returns its key as you gave it. ClickHouse has no auto-increment.
-- `insertFiles()` inserts CSV, TSV or JSONEachRow files.
+- `insertFiles()` inserts files in formats such as `CSV`, `TabSeparated` or `JSONEachRow`.
 
 For the formats, buffered inserts and files, see [Insert rows](/models/inserting-rows).
 
@@ -82,7 +83,7 @@ It throws a `QueryException` and sends nothing, because the mutation could chang
 | `final()`, `sample()` | `->final()->delete()` |
 | A select alias or expression | `->select('id as x')` |
 | An order that defines an alias, calls `arrayJoin()`, or limits the rows with a raw `LIMIT`, `LIMIT ... BY`, `OFFSET` or `FETCH` | `->orderBy('a as b')` |
-| A setting that changes which rows a select reads, such as `limit`, `offset` or `additional_table_filters` | `->settings(['limit' => 1])->delete()` |
+| A setting that is not a [mutation setting](#mutation-settings), such as `limit`, `offset`, `additional_table_filters` or `max_threads` | `->settings(['limit' => 1])->delete()` |
 
 ```php
 $query->where('field_two', '<', 0)->orderBy('created_at')->limit(2)->delete(lightweight: false);
@@ -138,7 +139,7 @@ KILL MUTATION WHERE database = 'default' AND table = 'my_table';
 
 ### Projections
 
-ClickHouse refuses a lightweight delete on a table with projections, unless `lightweight_mutation_projection_mode` is `drop`. `delete(lightweight: false)` works on such tables.
+ClickHouse refuses a lightweight delete on a table with projections, unless `lightweight_mutation_projection_mode` is `drop`, or, from 24.9, `rebuild`. `delete(lightweight: false)` works on such tables.
 
 - On 24.8, it is a query setting: `->settings('lightweight_mutation_projection_mode', 'drop')->delete(lightweight: true)`, or the connection `settings`.
 - From 24.9, it is a table setting. Set it on the table:
@@ -201,13 +202,15 @@ $query->where('id', 123)->settings('lightweight_deletes_sync', 2)->delete(lightw
 ```
 
 - `mutations_sync = 2` makes the call return when the mutation is done on all replicas, and `1` when it is done on this server.
-- A mutation takes these settings: `mutations_sync`, `alter_sync`, `replication_alter_partitions_sync`, `lightweight_deletes_sync`, `lightweight_delete_mode`, `lightweight_mutation_projection_mode`, `enable_lightweight_delete`, `allow_experimental_lightweight_delete`, `allow_nondeterministic_mutations`, `mutations_execute_subqueries_on_initiator`, `mutations_execute_nondeterministic_on_initiator`, `mutations_max_literal_size_to_replace`, `distributed_ddl_task_timeout`, `distributed_ddl_output_mode`, `log_comment`, `max_query_size`, `max_ast_depth`, `max_ast_elements`, `max_expanded_ast_elements` and `max_parser_depth`. `QueryGrammar::MUTATION_SETTINGS` lists them.
-- ClickHouse ignores the other settings in a mutation, such as `limit`, `offset` or `additional_table_filters`, which change the rows that a select reads. The mutation would then change every row that the conditions match. The package refuses them and sends nothing:
+- A mutation takes these settings: `mutations_sync`, `alter_sync`, `replication_alter_partitions_sync`, `lightweight_deletes_sync`, `lightweight_delete_mode`, `lightweight_mutation_projection_mode`, `enable_lightweight_delete`, `allow_experimental_lightweight_delete`, `allow_nondeterministic_mutations`, `mutations_execute_subqueries_on_initiator`, `mutations_execute_nondeterministic_on_initiator`, `mutations_max_literal_size_to_replace`, `distributed_ddl_task_timeout`, `distributed_ddl_output_mode`, `log_comment`, `max_query_size`, `max_ast_depth`, `max_ast_elements`, `max_expanded_ast_elements` and `max_parser_depth`. `QueryGrammar::MUTATION_SETTINGS` lists them. ClickHouse refuses a setting that it does not have, such as `lightweight_delete_mode` on 24.8.
+- The package refuses every other setting, such as `limit`, `offset`, `additional_table_filters` or `max_threads`, and sends nothing.
+  ClickHouse ignores the settings that change which rows a select reads in a mutation, so the mutation would change every row that the conditions match:
 
   ```text
-  Cannot delete with a query that uses SETTINGS: ... A mutation ignores the settings limit, which change the rows
-  that a SELECT reads. It only takes the settings that change how it runs, such as mutations_sync and
-  lightweight_deletes_sync.
+  Cannot delete with a query that uses SETTINGS: ... A mutation only takes the settings that change how it runs,
+  such as mutations_sync and lightweight_deletes_sync (see QueryGrammar::MUTATION_SETTINGS), and the package refuses
+  the settings limit. ClickHouse ignores a setting that changes which rows a SELECT reads, such as limit, in a
+  mutation, which then changes every row that the conditions match.
   ```
 
 - The connection `settings` go with every query, mutations included.

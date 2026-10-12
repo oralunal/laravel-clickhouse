@@ -87,6 +87,10 @@ $query->where('created_at', '>=', now()->subDay())         // "created_at" >= '2
     ->whereIn('status', [Status::Active, Status::Paused]); // and "status" in ('active', 'paused')
 ```
 
+In a condition, Laravel flattens an array value: `where('tags', ['a', 'b'])` compares with `'a'`, and
+`whereRaw('tags = ?', [['a', 'b']])` throws, since it gives 2 bindings for 1 `?`. Write an array with `DB::raw()`:
+`where('tags', DB::raw("['a', 'b']"))`.
+
 A value that the grammar cannot write, such as a `stdClass` object, throws an `InvalidArgumentException` before the request:
 `Cannot render a value of type stdClass in a ClickHouse query. ...`. For an Eloquent model, give `$model->getKey()`.
 
@@ -223,7 +227,7 @@ $query->select('id')->whereExists(fn ($query) => $query->from('users')->where('b
 ```
 
 - `whereExists()`, `orWhereExists()`, `whereNotExists()` and `orWhereNotExists()` take a closure or a query builder.
-- ClickHouse leaves columns out of the queries that `INTERSECT` and `EXCEPT` compare when the outer query reads none of them.
+- ClickHouse 24.8 leaves columns out of the queries that `INTERSECT` and `EXCEPT` compare when the outer query does not read all of them.
   For a sub-query that holds `INTERSECT` or `EXCEPT`, or reads a `withExpression()` name of an outer query that holds them, the grammar adds `where not ignore(*)`, so that ClickHouse compares all columns.
   See [INTERSECT and EXCEPT](/query-builder/clickhouse-sql#intersect-and-except-in-sub-queries).
 - ClickHouse 24.8 has no correlated sub-queries. A sub-query cannot read a column of the outer query, as `whereColumn('orders.user_id', 'users.id')` does.
@@ -257,7 +261,7 @@ $query->whereNullSafeEquals('comment', null); // ["comment"] = [null]
 
 - The bitwise operators `&`, `|`, `^`, `<<` and `>>` call `bitAnd()`, `bitOr()`, `bitXor()`, `bitShiftLeft()` and `bitShiftRight()`, and compare the result with `0`.
   `&~` gives `bitAnd("field_two", 4) != "field_two"`.
-- `whereNullSafeEquals()` and the `<=>` operator compare in arrays, so that `NULL` equals `NULL`.
+- `whereNullSafeEquals()` and the `<=>` operator hold when both sides are equal or both are `NULL`. A `NULL` value or an expression is compared in arrays, `["comment"] = [null]`, so that `NULL` equals `NULL`. Another value is compared with `=`.
 
 ## JSON paths
 
@@ -279,12 +283,13 @@ $query->select('id', 'payload->user as user')->orderBy('payload->color');
   `null`, a missing key and a document that is no JSON give `''`.
 - A comparison with an int or a float reads the value as a `Float64`, also in `whereIn()` and `whereBetween()`.
   A value that is no number, such as `"large"`, is then `NULL`, so no comparison holds for it, `!=` and `whereNotIn()` included.
+  A string that holds a number, such as `"2"`, is read as that number. ClickHouse 26.3 and 26.8 read `true` and `false` as `1` and `0`; 24.8 reads them as `NULL`.
 - `true` and `false` read the value as a `Bool`. `whereNull()` holds for `null`, for a missing key and for a document that is no JSON.
 - An array index counts from `0`, as in Laravel: `[0]` is the first element and `[-1]` the last. A key can hold any character, such as a space or a dot.
 - A native `JSON` column of ClickHouse 26.x is no `String`. Read it with its own syntax, such as `whereRaw('payload.user.name = ?', ['Ann'])`.
 
 ```php
-$query->whereJsonContains('payload->tags', 'en');        // hasAll(JSONExtract("payload", 'tags', 'Array(String)'), JSONExtract('["en"]', 'Array(String)'))
+$query->whereJsonContains('payload->tags', 'en');        // hasAll(JSONExtract("payload", 'tags', 'Array(String)'), JSONExtract('[\"en\"]', 'Array(String)'))
 $query->whereJsonContains('payload->tags', ['en', 'de']); // the array holds every value
 $query->whereJsonOverlaps('payload->tags', ['fr', 'de']); // hasAny(...): the array holds one of the values
 $query->whereJsonContainsKey('payload->user->name');      // JSONHas("payload", 'user', 'name')
@@ -295,20 +300,23 @@ $query->whereJsonLength('payload->tags', '>', 1);         // JSONLength("payload
   Other values are compared as their JSON text.
   An array with keys, which is a JSON object, throws an `InvalidArgumentException`: ClickHouse cannot check that one object holds another.
 - `whereJsonContainsKey()` holds for a key whose value is `null`. `whereJsonLength()` counts the elements of an array or the keys of an object.
-- Each method has its `or` and `doesnt` forms, as in Laravel.
+- Each method has its `or` form, and each method but `whereJsonLength()` its `doesnt` form, as in Laravel.
 
 To set a JSON path, see [Updates](/query-builder/writing-data#json-paths).
 
 ## Full-text search
 
 `whereFullText()` checks the tokens of a column. A text index of the column speeds it up. See [Text indexes](/schema/schema-builder#text-and-vector-indexes).
+The tokenizer of the index then splits the value and the column: with `ngrams(3)`, `whereFullText('title', 'qui')` matches `quick`.
+The rules below hold for a column without a text index and for the default tokenizer, `splitByNonAlpha`.
 
 ```php
 $query->whereFullText('body', 'quick fox');                     // hasAllTokens("body", 'quick fox')
 $query->whereFullText(['title', 'body'], 'fox', ['mode' => 'any']); // (hasAnyTokens("title", 'fox') or hasAnyTokens("body", 'fox'))
 ```
 
-- The value is split into tokens at each character that is no ASCII letter or digit. Without a mode, every token must be in the column. With `['mode' => 'any']`, one of them.
+- The value is split into tokens at each ASCII character that is no letter or digit, such as a space, `-` or `_`. Other characters, such as `ü`, are part of a token: `Grüße` is one token.
+  Without a mode, every token must be in the column. With `['mode' => 'any']`, one of them.
   Tokens compare with their letter case: `Lazy` does not match `lazy`.
   Another mode, such as MySQL's `boolean`, throws an `InvalidArgumentException`.
 - ClickHouse 26.3 and 26.8 have `hasAllTokens()` and `hasAnyTokens()`. 24.8 does not, and the query fails with `UNKNOWN_FUNCTION`.
@@ -319,12 +327,13 @@ Laravel's vector methods use the cosine distance, `1 -` the cosine similarity, a
 
 ```php
 $query->whereVectorSimilarTo('embedding', $vector, 0.8);
-// where cosineDistance("embedding", CAST('[0.1,0.2,...]' AS Array(Float32))) <= 0.2
+// where cosineDistance("embedding", CAST('[0.1,0.2,...]' AS Array(Float32))) <= 0.19999999999999996
 //   order by cosineDistance("embedding", CAST('[0.1,0.2,...]' AS Array(Float32))) asc
 
 $query->select('id')->selectVectorDistance('embedding', $vector, 'distance')->orderByVectorDistance('embedding', $vector)->limit(10);
 ```
 
+- The maximum distance is `1 - 0.8`, a PHP float, which the grammar writes with all its digits.
 - The column is an `Array(Float32)`, as `vector()` creates it. ClickHouse 24.8, 26.3 and 26.8 have `cosineDistance()`.
 - A vector similarity index of the column speeds up an `orderByVectorDistance()` with a `limit()`. See [Vector indexes](/schema/schema-builder#text-and-vector-indexes).
 - A string as the vector calls Laravel's `toEmbeddings()`, as in Laravel.

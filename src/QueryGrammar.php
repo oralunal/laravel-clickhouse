@@ -429,8 +429,8 @@ class QueryGrammar extends Grammar
      * Compile the sub-query of exists() or of a where exists condition, so that ClickHouse reads the rows that the
      * sub-query returns:
      * - a sub-query that calls arrayJoin(), or a union that holds INTERSECT or EXCEPT, is selected from:
-     *   select * from (...) as "exists_table" where not ignore(*). ClickHouse 26.8, with the analyzer, answered
-     *   exists of a query that selects arrayJoin() of an empty array with 1, as if it had a row;
+     *   select * from (...) as "exists_table" where not ignore(*). ClickHouse 26.3 and 26.8, with the analyzer,
+     *   answered exists of a query that selects arrayJoin() of an empty array with 1, as if it had a row;
      * - any other sub-query that holds INTERSECT or EXCEPT, also one that reads a with expression of an outer query
      *   by its name, gets the condition not ignore(*) (see compileReadingEveryColumnOfIntersectOrExcept()).
      *   ClickHouse (24.8 checked) answered exists of (<a>) except (<b>) without comparing every column of the rows.
@@ -585,9 +585,10 @@ class QueryGrammar extends Grammar
     /**
      * Compile a union: union all for unionAll(), and union distinct for union(), which removes duplicate rows as
      * Laravel documents. ClickHouse rejects a bare union unless the union_default_mode setting is set, so when the
-     * connection's settings set it, union() keeps writing a bare union, which follows that mode.
+     * connection's settings set it, union() keeps writing a bare union, which follows that mode. unionDistinct()
+     * always writes union distinct.
      *
-     * @param array{query: Builder, all: bool} $union
+     * @param array{query: Builder, all: bool, distinct?: bool} $union
      * @return string
      */
     protected function compileUnion(array $union)
@@ -599,6 +600,7 @@ class QueryGrammar extends Grammar
 
         $conjunction = match (true) {
             (bool) $union['all'] => ' union all ',
+            !empty($union['distinct']) => ' union distinct ',
             $this->hasUnionDefaultMode() => ' union ',
             default => ' union distinct ',
         };
@@ -951,9 +953,10 @@ class QueryGrammar extends Grammar
      * Compile a whereFullText() clause with ClickHouse's token functions, which a text index of the column speeds up
      * (see SchemaGrammar::compileFulltext()): hasAllTokens(<column>, ?), which holds when the column has every token
      * of the value, or hasAnyTokens() with the option mode 'any' (see getFullTextFunction()). Several columns are
-     * joined with or, each with its own binding of the value (see QueryBuilder::whereFullText()). The functions split
-     * the value into tokens at each character that is no ASCII letter or digit, and compare tokens with their letter
-     * case. ClickHouse 26.3 and 26.8 have them, 24.8 does not (UNKNOWN_FUNCTION).
+     * joined with or, each with its own binding of the value (see QueryBuilder::whereFullText()). Without a text
+     * index, the functions split the value into tokens at each ASCII character that is no letter or digit, and
+     * compare tokens with their letter case; a text index splits the value with its own tokenizer. ClickHouse 26.3 and
+     * 26.8 have them, 24.8 does not (UNKNOWN_FUNCTION).
      *
      * @param Builder $query
      * @param array<string, mixed> $where

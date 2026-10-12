@@ -69,11 +69,11 @@ return [
         'default_index_type' => env('CLICKHOUSE_DEFAULT_INDEX_TYPE'),
         // 'microsecond' writes the sub-second part of the dates in conditions,
         // bindings and inserts, which DateTime64 columns keep; 'second' drops
-        // it, as 3.0.0 did. Keep it a string for config:cache
+        // it, as 3.0.0 did
         // (see https://laravel-clickhouse.oralunal.com/query-builder/dates).
         'datetime_precision' => env('CLICKHOUSE_DATETIME_PRECISION', 'second'),
         // The input format of the package's inserts: 'Values', as in 3.0.0,
-        // or 'JSONEachRow'. A model's $insertFormat wins
+        // or 'JSONEachRow'. The second argument of insert() wins
         // (see https://laravel-clickhouse.oralunal.com/models/inserting-rows#jsoneachrow-inserts).
         'insert_format' => env('CLICKHOUSE_INSERT_FORMAT', 'Values'),
         // When true, delete(), update(), truncate() and optimize() send

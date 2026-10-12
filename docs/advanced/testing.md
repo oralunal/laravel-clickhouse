@@ -56,7 +56,10 @@ Before the trait truncates a table, it reads one row from it. These tables make 
 | Table | Problem |
 | --- | --- |
 | `Kafka`, `Set`, a `File` table without a data file, or a table with an endpoint that does not answer (`URL`, `S3`, `MySQL`, `PostgreSQL`) | ClickHouse cannot read it, also when it is empty |
-| `Buffer`, `Merge`, `Null`, `URL`, `Kafka`, `GenerateRandom`, `MySQL`, `PostgreSQL`, an `S3` table with globs | ClickHouse refuses `TRUNCATE`: `Truncate is not supported by storage ...` |
+| `Buffer`, `Merge`, `URL`, `Kafka`, `GenerateRandom`, `MySQL`, `PostgreSQL` | ClickHouse refuses `TRUNCATE`: `Truncate is not supported by storage ...` |
+| An `S3` table with globs | ClickHouse refuses `TRUNCATE`: `S3 key ... contains globs, so the table is in readonly mode and cannot be truncated` |
+
+A `Null` table has no rows, so the trait does not truncate it.
 
 ::: danger
 `TRUNCATE` also deletes data outside ClickHouse. On an `S3` table, ClickHouse deletes the object from the bucket.

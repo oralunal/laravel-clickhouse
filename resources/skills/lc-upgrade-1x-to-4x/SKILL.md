@@ -241,9 +241,10 @@ In 1.x, `whereIn()` and its variants (`preWhereIn()`, `whereGlobalIn()`,
 `havingIn()`, the `or…` and `…NotIn` forms) treated a string as a table name
 only when that same builder had added a file with that name through
 `addFile()`. Every other string was quoted as one value:
-`whereIn('id', 'ids')` gave ``WHERE `id` IN 'ids'``. In 4.x these methods are
-Laravel's: they take a list, a collection or a sub-query, and a string throws
-a `TypeError`.
+`whereIn('id', 'ids')` gave ``WHERE `id` IN 'ids'``. In 4.x, `whereIn()`,
+`preWhereIn()` and `whereGlobalIn()` take a list, a collection or a sub-query,
+and a string throws a `TypeError`. `havingIn()` no longer exists: use
+`havingRaw()`, as the `lc-upgrade-3x-to-4x` skill shows.
 
 For each match from step 1 whose second argument is a string (a literal or a
 variable holding one) rather than an array or a closure:
@@ -264,9 +265,9 @@ variable holding one) rather than an array or a closure:
 Check `config/database.php` and `.env` (`DB_CONNECTION`). If the default
 connection is not a ClickHouse connection (`driver` is not `clickhouse`), but
 some migrations set `protected $connection` to a ClickHouse connection, then
-since 2.0 `migrate:fresh` and `db:wipe` also empty those ClickHouse
-databases. So does the `RefreshDatabase` test trait. In 1.x they were left
-untouched.
+since 2.0 `migrate:fresh` also empties those ClickHouse databases. So does
+the `RefreshDatabase` test trait. `db:wipe` empties only the connection it is
+given. In 1.x they were left untouched.
 
 Do not change code for this. Instead:
 

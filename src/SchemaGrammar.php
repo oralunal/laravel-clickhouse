@@ -811,8 +811,8 @@ class SchemaGrammar extends BaseGrammar
      * Array(String), the column is first checked for NULL values (see
      * compileLostNullCondition()), and a NULL value throws before anything is
      * sent: ClickHouse would change the column's type, then fail to convert
-     * the NULL values in a mutation, and every later query of the table would
-     * fail until the mutation is killed. The rows that a lightweight DELETE
+     * the NULL values in a mutation, and every later query that reads the
+     * column would fail until the mutation is killed. The rows that a lightweight DELETE
      * removed are checked too (see tableHasRowWhere()): the mutation converts
      * them as well until a merge rewrites their parts.
      *
@@ -853,7 +853,7 @@ class SchemaGrammar extends BaseGrammar
                 throw new RuntimeException(
                     "The column [{$column->name}] of the table [{$blueprint->getTable()}] holds NULL values, so its type"
                     . " cannot change from {$state['type']} to {$newType}: ClickHouse would fail to convert them in a"
-                    . ' mutation, and every later query of the table would fail until the mutation is killed.'
+                    . ' mutation, and every later query that reads the column would fail until the mutation is killed.'
                     . ' Replace the NULL values first, or keep the column nullable(). Rows removed by a lightweight'
                     . ' DELETE count too until a merge rewrites their parts; ALTER TABLE ' . $this->wrapTable($blueprint)
                     . ' APPLY DELETED MASK removes them.'
@@ -1584,7 +1584,7 @@ class SchemaGrammar extends BaseGrammar
      *   L2Distance.
      * - The dimensions are those of dimensions() on the command, or of vector('<column>', <dimensions>) in the same
      *   blueprint: ClickHouse needs them, and its column type, Array(Float32), does not hold them.
-     * - The index needs the setting enable_vector_similarity_index, which ClickHouse 26.3 and 26.8 turn on
+     * - The index needs the setting enable_vector_similarity_index, which ClickHouse 25.8, 26.3 and 26.8 turn on
      *   (checked); 24.8 has it only as an experimental feature, without the dimensions argument.
      *
      * @param Blueprint $blueprint
@@ -1601,7 +1601,7 @@ class SchemaGrammar extends BaseGrammar
         if (! $this->serverEnablesAnyOf('enable_vector_similarity_index', 'allow_experimental_vector_similarity_index')) {
             throw new RuntimeException(
                 "ClickHouse has no vector similarity index for {$description} on this server: it needs the setting"
-                . ' enable_vector_similarity_index, which ClickHouse 26.3 and later turn on.'
+                . ' enable_vector_similarity_index, which ClickHouse 25.8 and later turn on.'
             );
         }
 

@@ -11,8 +11,8 @@ The package sends queries over HTTP with [smi2/phpClickHouse](https://github.com
 
 ## Requirements
 
-- PHP 8.5 or later
-- Laravel 13 or later
+- PHP 8.5
+- Laravel 13
 - ClickHouse 24.8 or later. The tests run on 24.8, 26.3 and 26.8.
 
 ## Installation
@@ -107,13 +107,14 @@ The query builder of the connection is Laravel's, with the ClickHouse clauses:
 
 ```php
 DB::connection('clickhouse')->table('my_table')
-    ->final()
     ->preWhere('field_one', 'click')
     ->where('field_two', '>', 5)
     ->settings('max_threads', 2)
     ->get();
-// select * from "my_table" final prewhere "field_one" = 'click' where "field_two" > 5 settings max_threads=2
+// select * from "my_table" prewhere "field_one" = 'click' where "field_two" > 5 settings max_threads=2
 ```
+
+`final()` adds `FINAL` for a table whose engine merges rows, such as `ReplacingMergeTree`.
 
 ## Features
 
@@ -151,7 +152,7 @@ See [Contribute](https://laravel-clickhouse.oralunal.com/reference/contributing)
 ## Credits
 
 The package is a fork of [glushkovds/phpclickhouse-laravel](https://github.com/glushkovds/phpclickhouse-laravel).
-Versions 1.x to 3.x bundled code from MIT-licensed projects:
+Version 1.x required these MIT-licensed projects through Composer, and versions 2.x and 3.x bundled their code (2.0.0 only the query builder):
 [the-tinderbox/ClickhouseBuilder](https://github.com/the-tinderbox/ClickhouseBuilder),
 [glushkovds/php-clickhouse-schema-builder](https://github.com/glushkovds/php-clickhouse-schema-builder) and
 [myclabs/php-enum](https://github.com/myclabs/php-enum). Version 4 bundles none of them.

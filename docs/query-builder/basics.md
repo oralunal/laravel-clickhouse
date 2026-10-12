@@ -181,10 +181,10 @@ DB::connection('clickhouse')->table('my_table')
   ```
 
 - A setting name has letters, digits and underscores, and does not start with a digit. Another name throws an `InvalidArgumentException`.
-- The settings go on the outer query. A union is selected from as a sub-query first, because ClickHouse refuses `SETTINGS` after the last query of a union in parentheses.
+- The settings go on the outer query. A union is selected from as a sub-query first, because ClickHouse 24.8 refuses `SETTINGS` and `FORMAT` after the last query of a union in parentheses.
 - `timeout($seconds)`, `forceIndex($index)` and `ignoreIndex($index)` add their settings before the others:
   `timeout(5)` gives `settings max_execution_time = 5`, and `forceIndex('idx_url')` gives `settings force_data_skipping_indices = 'idx_url'`.
-- `delete()` and `update()` send only the settings that change how a mutation runs, such as `mutations_sync`. See [Mutation settings](/query-builder/writing-data#mutation-settings).
+- `delete()` and `update()` take only the settings that change how a mutation runs, such as `mutations_sync`. Another setting, such as `max_threads`, throws a `QueryException`, and nothing is sent. See [Mutation settings](/query-builder/writing-data#mutation-settings).
 
 ## Other output formats
 

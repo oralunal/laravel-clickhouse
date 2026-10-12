@@ -73,9 +73,14 @@ and it asks before it changes what a write does.
 To find the code that 4.0 breaks, run:
 
 ```sh
-grep -rnE 'BaseModel|LaravelClickHouse\\(Builder|Migration|RawColumn|Grammar|WithClient)\b|ClickhouseBuilder|ClickhouseSchemaBuilder|Enum\\Enum|InsertArray|insertAssoc|insertBulk|prepareAndInsert|getRows\(|getThisClient|createMergeTree|static::write\(|fix_default_query_builder|asyncWithQuery|getQueryFor|(^|[^\w>:$\\])(raw|tp|array_flatten)\(' \
+grep -rnE 'BaseModel|LaravelClickHouse\\(Builder|Migration|RawColumn|Grammar|WithClient)\b|ClickhouseBuilder|ClickhouseSchemaBuilder|Enum\\Enum|InsertArray|insertAssoc|insertBulk|prepareAndInsert|getRows\(|getThisClient|createMergeTree|static::write\(|fix_default_query_builder|asyncWithQuery|getCountQuery|(^|[^A-Za-z0-9_>:$\\])(raw|tp|array_flatten)\(' \
   app config database routes tests
 ```
+
+This finds the imports and the main method names. Also search for
+`resolveConnection(`, `tableForInserts`, `tableSources`, `getClient(`,
+`->get()->`, `takeBy(`, `whereDict(`, `->format(` and `->limit(` or `->take(`
+with two arguments: some of them change behavior without an error.
 
 #### 1. Update the dependency
 
@@ -135,7 +140,7 @@ class Event extends Model
 | `protected $tableForInserts` | `DB::connection('clickhouse')->table('events_buffer')->insert($rows)` |
 | `protected $tableSources` | Run the write on `DB::connection('clickhouse')->table('events_local')` |
 | `Event::optimize()` (a `Statement`) | `Event::optimize()` (a `bool`) |
-| `Event::truncate()` (a `Statement`) | `Event::truncate()` (returns nothing) |
+| `Event::truncate()` (a `Statement`) | `Event::truncate()` (returns the Eloquent builder) |
 | `Event::flushBuffer()` (a `Statement` or `null`) | `Event::flushBuffer()` (`true`, or `false` when nothing is buffered) |
 
 What changes for a model:
@@ -143,9 +148,10 @@ What changes for a model:
 - **Casts no longer apply to inserts.** `insertAssoc()`, `insertBulk()` and
   `buffer()` turned a value of a `boolean` cast into `1` or `0`. `insert()` and
   `buffer()` send the rows as given. A `bool` is still written as `1` or `0`.
-  Cast other values yourself, such as `(int) (bool) $value`. To apply the
-  casts and mutators of the model, build each row with
-  `(new Event())->forceFill($row)->getAttributes()`.
+  Cast other values yourself, such as `(int) (bool) $value`.
+  `(new Event())->forceFill($row)->getAttributes()` applies the mutators and
+  the date, JSON, enum and class casts of the model, but not the `boolean`,
+  `int` or `float` casts.
 - **`save()` of an existing model updates it.** BaseModel threw an exception.
   An Eloquent model loaded from a query sends `alter table ... update ...
   where "id" = ?` on `save()`, and `alter table ... delete where "id" = ?` on
@@ -161,7 +167,8 @@ What changes for a model:
 
 `buffer()`, `bufferCount()`, `getBufferedRows()`, `clearBuffer()` and
 `flushAllBuffers()` keep their names. Every buffered row must have the same
-keys, as in 3.x.
+keys. `buffer()` throws for a row with other keys, also within one call, where
+3.x filled a missing key with its position.
 
 #### 4. Queries
 
@@ -172,7 +179,7 @@ uses of the 3.x builder:
 | --- | --- |
 | `use Oralunal\LaravelClickHouse\Builder;` | `use Oralunal\LaravelClickHouse\QueryBuilder;` |
 | `->get()` (a `Statement`) | `->get()` (a collection of arrays) |
-| `->getRows()`, `->getCollection()` | `->get()->all()`, `->get()` |
+| `->getRows()` | `->get()->all()` |
 | `->get()->rows()`, `->get()->fetchOne()` | `->get()->all()`, `->first()` |
 | `->format('CSV')->get()->rawData()` | `->getStatement('CSV')->rawData()` |
 | `->get()->totals()`, `->get()->extremes()` | `->getStatement()->totals()`, `->getStatement()->extremes()` |
@@ -183,8 +190,8 @@ uses of the 3.x builder:
 | `->takeBy(1, 'user_id')` | `->limitBy(1, 'user_id')` |
 | `->orderBy('name', 'asc', 'tr')` | `->orderByRaw('name asc collate ?', ['tr'])` |
 | `->orderByAsc('name')` | `->orderBy('name')` |
-| `->anyLeftJoin('users', ['id'])` (a `USING` list) | `->anyLeftJoin('users', 'events.user_id', '=', 'users.id')` |
-| `->leftJoin('users', 'ALL', ['id'], true)` (`GLOBAL`) | `->join('users', 'events.user_id', '=', 'users.id', 'global all left')` |
+| `->anyLeftJoin('users', ['id'])` (a `USING` list) | `->anyLeftJoin('users', 'events.id', '=', 'users.id')` |
+| `->leftJoin('users', 'ALL', ['id'], true)` (`GLOBAL`) | `->join('users', 'events.id', '=', 'users.id', 'global all left')` |
 | `->from(fn (From $from) => $from->remote(...))` | `->fromRaw('remote(?, ?, ?, ?, ?)', [$host, $database, $table, $user, $password])` |
 | `->from($subQuery)->as('s')` | `->fromSub($subQuery, 's')` |
 | `->where('id', 'in', [1, 2])`, `Operator::IN` | `->whereIn('id', [1, 2])` |
@@ -209,9 +216,11 @@ What else changes:
   or `BaseBuilder`, as in `where(fn (Builder $q) => ...)`, fails with a
   `TypeError`. Type it with `Illuminate\Contracts\Database\Query\Builder`, or
   leave the type out.
-- **Lightweight deletes.** `QueryBuilder::delete()` takes Laravel's `$id` as its
-  first argument. Pass the option by name: `delete(lightweight: true)`.
-  `delete(true)` throws. On a model query, `delete(true)` works as before.
+- **Lightweight deletes.** 3.x had no lightweight deletes, and ignored an
+  argument of `delete()`. `QueryBuilder::delete()` takes Laravel's `$id` as its
+  first argument, so `delete(true)` throws: pass the option by name, as in
+  `delete(lightweight: true)`. On a model query, `delete(true)` now sends a
+  lightweight `DELETE FROM`. To keep the 3.x statement, call `delete()`.
 - **`whereIn()` takes a list or a sub-query.** A string or a raw expression
   fails with a `TypeError`.
 - **`settings()` calls add up.** A later call no longer replaces the earlier
@@ -255,8 +264,8 @@ return new class extends Migration
 };
 ```
 
-`statementOnEveryNode()` takes no bindings, and reads a `?` outside quotes as a
-placeholder: write `??` for a question mark. With bindings, use
+`statementOnEveryNode()` takes no bindings and sends a `?` as written. A `??`
+outside quotes is sent as `?`. With bindings, use
 `statement($sql, $bindings)`, which runs on the active node, or write each
 value with `DB::connection($this->connection)->escape($value)`.
 
@@ -299,9 +308,9 @@ Schema::connection('clickhouse')->create('events', function (SchemaBlueprint $ta
 | `bool()`, `uuid()`, `enum()`, `decimal()`, `date()`, `string()` | `boolean()`, `uuid()`, `enum()`, `decimal()`, `date()`, `string()` |
 | `column('tags', 'Array(String)')` | `array('tags', 'String')`, or `rawColumn('tags', 'Array(String)')` |
 | `engine(Engine::REPLACING_MERGE_TREE, 'v')` | `engine('ReplacingMergeTree(v)')` |
-| `partition()`, `ttl('d', 'INTERVAL 1 DAY')` | `partitionBy()`, `ttl('d + INTERVAL 1 DAY')` |
+| `partition()`, `ttl('d', '1 DAY')` | `partitionBy()`, `ttl('d + INTERVAL 1 DAY')` |
 | `ifNotExists()`, `settings()`, `orderBy()` | `ifNotExists()`, `settings()`, `orderBy()` |
-| `onCluster()`, `getEngine()->replicated()` | Automatic from `cluster_name` and `cluster`; `withoutOnCluster()`, `replicated(false)` to opt out |
+| `onCluster()`, `getEngine()->replicated()` | Automatic from `cluster_name` and `cluster`; `withoutOnCluster()`, `replicated(false)` to opt out. See the cluster note in step 9. |
 
 Run `php artisan migrate --pretend` to compare the new statements with the
 tables that exist.
@@ -329,13 +338,13 @@ find a case by its name in any letter case.
   `QueryGrammar`, `SchemaBuilder`, `SchemaGrammar` or `Cluster` may no longer
   match its parent. Load every class of your app to find the errors.
 - **`FORMAT` in `select()`.** `select()`, `selectOne()`, `scalar()`,
-  `cursor()` and the parallel queries refuse SQL whose `FORMAT` clause names a
-  format other than `JSON`, `JSONStrings`, `JSONCompact` and
-  `JSONCompactStrings`. Read such a result with
+  and the parallel queries refuse SQL whose `FORMAT` clause names a format
+  other than `JSON`, `JSONStrings`, `JSONCompact` and `JSONCompactStrings`.
+  `cursor()` refuses every `FORMAT` clause. Read such a result with
   `DB::connection('clickhouse')->selectStatement($sql)->rawData()`.
 - **Placeholders.** A query that mixes `?` with smi2's `:0` or `{0}`
   placeholders or with `{name:Type}` query parameters throws before it is
-  sent. Write the ternary operator as `??`.
+  sent. In a query with bindings, write the ternary operator as `??`.
 - **Quoted table names.** ``table('`my-table`')`` is quoted again and fails.
   Pass the name without backticks.
 - **Transactions.** `beginTransaction()`, `transaction()` and `commit()` throw
@@ -358,7 +367,9 @@ find a case by its name in any letter case.
 - **Floats** are written with every digit. A float computed in PHP is cut off
   at the scale of a `Decimal` or integer column: `4.35 * 100` stores `434.99`
   in a `Decimal(10, 2)` column. Round it, as in `round(4.35 * 100, 2)`, or pass
-  a numeric string or an int.
+  a numeric string or an int. In `update()`, a float with a fraction is cut
+  off even when it is rounded: `update(['price' => 19.99])` stores `19.98`.
+  Pass a numeric string, such as `'19.99'`, or an int.
 - **An empty row** is refused: `insert([[]])` throws `Inserting empty values
   array is not supported in ClickHouse`. `insert([])` returns `true` and sends
   nothing, as in Laravel.
@@ -401,6 +412,11 @@ touched.
   An `ON CLUSTER` statement waits for every host, so raise `timeout_query` for
   migration commands. Call `$table->withoutOnCluster()` to change a table of
   the active node only.
+- **Nodes without a `cluster_name`.** On a connection that lists its nodes in
+  `cluster` but has no `cluster_name`, `createMergeTree()` created a
+  replicated table on every node. `Schema::create()` creates a table that is
+  not replicated, on the active node only. Set `cluster_name`, or keep the
+  `CREATE TABLE` with `statementOnEveryNode()`.
 
 #### 10. Reads to check
 
@@ -421,6 +437,10 @@ deploy if you cache the config.
 ## Upgrading from 2.x to 4.0
 
 PHP (`^8.5`) and Laravel (`^13`) requirements are unchanged.
+
+From 2.0.0, follow [Upgrading from 1.x to 4.0](#upgrading-from-1x-to-40): 2.0.0
+still required `glushkovds/php-clickhouse-schema-builder` and
+`myclabs/php-enum`, which 2.0.1 bundled. This section is for 2.0.1 and 2.0.2.
 
 2.0.2 is the last release of `oralunal/phpclickhouse-laravel`, and the package
 is abandoned. 3.0 renamed the package and its namespace, and nothing else:

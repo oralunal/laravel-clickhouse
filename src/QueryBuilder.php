@@ -354,7 +354,8 @@ class QueryBuilder extends Builder
     }
 
     /**
-     * Add an ANY INNER JOIN: the rows that match, each left row with at most one right row.
+     * Add an ANY INNER JOIN: one row for each key that both sides have, so that the other left rows of a key are left
+     * out. semiLeftJoin() keeps each left row that has a match.
      *
      * @param ExpressionContract|string $table
      * @param \Closure|ExpressionContract|string $first
@@ -1269,7 +1270,8 @@ class QueryBuilder extends Builder
     }
 
     /**
-     * Add an INTERSECT: the rows of this query that the other query also returns, duplicates included.
+     * Add an INTERSECT: the rows of this query that the other query also returns, with duplicates. ClickHouse 24.8
+     * returns each copy of such a row; 26.3 and 26.8 return a row as often as both queries return it.
      *
      * @param \Closure|Builder $query
      * @return $this
@@ -1291,7 +1293,9 @@ class QueryBuilder extends Builder
     }
 
     /**
-     * Add an EXCEPT: the rows of this query that the other query does not return, duplicates included.
+     * Add an EXCEPT: the rows of this query that the other query does not return, with duplicates. ClickHouse 24.8
+     * returns each copy of a row that the other query does not return; 26.3 and 26.8 remove one copy for each copy
+     * that the other query returns.
      *
      * @param \Closure|Builder $query
      * @return $this
@@ -1313,14 +1317,18 @@ class QueryBuilder extends Builder
     }
 
     /**
-     * Add a UNION DISTINCT: Laravel's union(), which removes duplicate rows.
+     * Add a UNION DISTINCT: Laravel's union(), which removes duplicate rows, written as union distinct also when the
+     * connection's settings set union_default_mode (see QueryGrammar::compileUnion()).
      *
      * @param \Closure|Builder $query
      * @return $this
      */
     public function unionDistinct($query): static
     {
-        return $this->union($query);
+        $this->union($query);
+        $this->unions[array_key_last($this->unions)]['distinct'] = true;
+
+        return $this;
     }
 
     /**

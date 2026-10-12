@@ -37,7 +37,8 @@ All names are in backticks. A column name is one identifier: `n.a` is `` `n.a` `
 | --- | --- |
 | `Schema::drop('events')` | ``DROP TABLE `events` `` |
 | `Schema::dropIfExists('events')` | ``DROP TABLE IF EXISTS `events` `` |
-| `Schema::dropSync('events')`, `Schema::dropIfExistsSync('events')` | ``DROP TABLE `events` SYNC`` |
+| `Schema::dropSync('events')` | ``DROP TABLE `events` SYNC`` |
+| `Schema::dropIfExistsSync('events')` | ``DROP TABLE IF EXISTS `events` SYNC`` |
 | `Schema::rename('events', 'events_old')` | ``RENAME TABLE `events` TO `events_old` `` |
 
 `SYNC` waits until ClickHouse removes the data, and the replica of a replicated table. In a blueprint, use `drop()->sync()` or `dropIfExists()->sync()`.
@@ -115,7 +116,7 @@ ClickHouse has no auto-increment. `id()` and the `increments()` methods create a
 | `useCurrent()` | `DEFAULT now()`, `now64(<precision>)` with a precision, `today()` on `date()`, `toYear(now())` on `year()` |
 | `storedAs('domain(url)')` | `MATERIALIZED domain(url)` |
 | `virtualAs('upper(url)')` | `ALIAS upper(url)` |
-| `storedAsJson('payload->dims->size')`, `virtualAsJson('payload->color')` | `MATERIALIZED JSONExtract(payload, 'dims', 'size', 'Nullable(Int32)')`, `ALIAS JSONExtract(payload, 'color', 'String')`: the value of the [JSON path](/query-builder/conditions#json-paths) as the column's type |
+| `integer('size')->nullable()->storedAsJson('payload->dims->size')`, `string('color')->virtualAsJson('payload->color')` | ``MATERIALIZED JSONExtract(`payload`, 'dims', 'size', 'Nullable(Int32)')``, ``ALIAS JSONExtract(`payload`, 'color', 'String')``: the value of the [JSON path](/query-builder/conditions#json-paths) as the column's type |
 | `ephemeral()`, `ephemeral('')` | `EPHEMERAL`, `EPHEMERAL ''` |
 | `comment("it's")` | `COMMENT 'it\'s'` |
 | `lowCardinality()` | `LowCardinality(<type>)`. With `nullable()`, `LowCardinality(Nullable(<type>))`. |
@@ -180,11 +181,11 @@ Schema::create('visits', function (SchemaBlueprint $table) {
 | `primary($columns, $name)` | The sorting key, or with `orderBy()` the `PRIMARY KEY` |
 | `partitionBy('toYYYYMM(visited_at)')` | `PARTITION BY toYYYYMM(visited_at)` |
 | `sampleBy('intHash32(id)')` | `SAMPLE BY intHash32(id)`. It must be part of the primary key. |
-| `ttl('visited_at + INTERVAL 1 YEAR')` | `TTL visited_at + INTERVAL 1 YEAR`. It must give a `Date` or a `DateTime`. For `DateTime64`, use `toDateTime(visited_at)`. |
+| `ttl('visited_at + INTERVAL 1 YEAR')` | `TTL visited_at + INTERVAL 1 YEAR`. On 24.8 it must give a `Date` or a `DateTime`: for `DateTime64`, use `toDateTime(visited_at)`. 26.3 and 26.8 also accept `DateTime64`. |
 | `settings(['index_granularity' => 8192])` | `SETTINGS index_granularity=8192`. Another call adds its settings. `null` removes a setting. |
 | `comment('...')` | `COMMENT '...'` |
 | `ifNotExists()` | `CREATE TABLE IF NOT EXISTS` |
-| `replicated()`, `replicated(false)` | A replicated engine of the MergeTree family on any connection, or the engine as given. Without the call, a connection with a `cluster_name` and `cluster` nodes gives a replicated engine. |
+| `replicated()`, `replicated(false)` | A replicated engine of the MergeTree family also on a connection without `cluster` nodes, or the engine as given. ClickHouse accepts a replicated engine without a path only in `CREATE ... ON CLUSTER`, so the connection needs a `cluster_name`. Without the call, a connection with a `cluster_name` and `cluster` nodes gives a replicated engine. |
 | `withoutOnCluster()` | No `ON CLUSTER` on a connection with a `cluster_name`. The statements go to the active node. |
 
 - `primary()` with a `DB::raw()` column needs a name as the second argument.
@@ -270,8 +271,9 @@ Schema::create('documents', function (SchemaBlueprint $table) {
 //   ENGINE = MergeTree() ORDER BY (`id`)
 ```
 
-- They need the settings `enable_full_text_index` and `enable_vector_similarity_index`, which ClickHouse 26.3 and later turn on.
+- They need the settings `enable_full_text_index`, which ClickHouse 26.3 and later turn on, and `enable_vector_similarity_index`, which 25.8 and later turn on.
   The package reads them from `system.settings` once, and throws a `RuntimeException` before it sends anything on a server that does not turn them on, such as 24.8.
+  The package also accepts `allow_experimental_full_text_index` and `allow_experimental_vector_similarity_index`. On 24.8 with one of them on, it sends the statement, and ClickHouse refuses it with `INCORRECT_QUERY`: 24.8 has no text index, and its experimental vector index takes other arguments.
 - A text index takes one column. The third argument of `fullText()`, or `algorithm()`, is the tokenizer, such as `ngrams(3)`. The default is `splitByNonAlpha`.
 - A vector index needs the dimensions: those of `vector('embedding', 1536)` in the same blueprint, or `vectorIndex('embedding')->dimensions(1536)`.
   The distance is `cosineDistance`, which the vector queries use. `->operatorClass('vector_l2_ops')` gives `L2Distance`.
@@ -311,7 +313,7 @@ Schema::table('orders', function (SchemaBlueprint $table) {
 
 | Method in `Schema::table()` | Statement |
 | --- | --- |
-| `dropColumn('a', 'b')`, `dropTimestamps()`, `dropSoftDeletes()`, `dropMorphs()` | ``ALTER TABLE `t` DROP COLUMN `a`, DROP COLUMN `b` `` |
+| `dropColumn('a', 'b')`, `dropTimestamps()`, `dropSoftDeletes()`, `dropMorphs()` | ``ALTER TABLE `t` DROP COLUMN `a`, DROP COLUMN `b` ``. `dropMorphs()` first sends ``DROP INDEX IF EXISTS`` for the index of `morphs()`. |
 | `renameColumn('a', 'b')` | ``ALTER TABLE `t` RENAME COLUMN `a` TO `b` `` |
 | `comment('Page visits')` | ``ALTER TABLE `t` MODIFY COMMENT 'Page visits'`` |
 | `orderBy('id', 'shard')` | ``MODIFY ORDER BY (`id`, `shard`)``, in the statement that adds the columns |
@@ -351,7 +353,8 @@ Schema::table('visits', function (SchemaBlueprint $table) {
 - `change()` reads the column from `system.columns` when it compiles. So `toSql()` and `migrate --pretend` read the server.
 
 ::: danger
-A new type rewrites the column in a mutation. If ClickHouse cannot convert a value, the mutation stays, and all later queries of the table fail. Kill the mutation and change the type back:
+A new type rewrites the column in a mutation. If ClickHouse cannot convert a value, the `ALTER` fails, but the column keeps the new type and the mutation stays.
+Every later query that reads the column fails, such as `SELECT *`. Kill the mutation and change the type back:
 
 ```sql
 KILL MUTATION WHERE database = 'default' AND table = 'visits';
@@ -359,12 +362,13 @@ ALTER TABLE visits MODIFY COLUMN referrer Nullable(String);
 ```
 :::
 
-`change()` refuses the most frequent case before the request: a column with `NULL` values and a new type without `NULL`:
+`change()` refuses the most frequent case before the request, on all versions: a column with `NULL` values and a new type without `NULL`.
+On 24.8, ClickHouse would fail to convert the `NULL` values in a mutation. 26.3 and 26.8 refuse the change without a default, and with a default they write it in place of `NULL`, but `change()` still refuses it. Replace the `NULL` values first:
 
 ```text
 The column [referrer] of the table [visits] holds NULL values, so its type cannot change from
 Nullable(String) to String: ClickHouse would fail to convert them in a mutation, and every later
-query of the table would fail until the mutation is killed. Replace the NULL values first, or keep
+query that reads the column would fail until the mutation is killed. Replace the NULL values first, or keep
 the column nullable(). ...
 ```
 
@@ -383,7 +387,7 @@ These calls throw before the blueprint sends a statement:
 | `time()`, `timeTz()`, `fullText()`, `vectorIndex()` on a server without their settings, such as 24.8 | `RuntimeException`. See [Column types](#column-types) and [Text and vector indexes](#text-and-vector-indexes). |
 | `fullText()` of two columns, `vectorIndex()` without dimensions | `RuntimeException` |
 | `geometry()`, `geography()` without a subtype of the type table | `RuntimeException` |
-| In `Schema::table()`: `primary()`, `dropPrimary()`, `renameIndex()`, `partitionBy()` | `RuntimeException` |
+| In `Schema::table()`: `primary()`, `dropPrimary()`, `renameIndex()`, `partitionBy()`, and `orderBy()` when a `dropColumn()`, `renameColumn()` or `change()` comes between the added columns | `RuntimeException` |
 | An incorrect `enum()` array, a `default()` without a literal, an incorrect setting name | `InvalidArgumentException` |
 
 ClickHouse has no foreign keys, unique constraints or spatial indexes.
