@@ -90,6 +90,11 @@ migrations. It removes the parts of 3.x that did the same work, without a deprec
 | The package's `Grammar` | `LiteralGrammar` and `newLiteralGrammar()` |
 | The option `fix_default_query_builder` | Nothing. The query builder is always the package's `QueryBuilder`. |
 
+Each row is a `stdClass` object, as on Laravel's other connections: `get()`, `first()` and `cursor()` of the query
+builder, and `select()` and `cursor()` of the connection. 3.x returned associative arrays, so a read such as
+`$row['id']` fails. Read `$row->id`, or keep the arrays with `getStatement()->rows()` of a query and
+`selectStatement($sql)->rows()` of the connection.
+
 Some changes make the same code do something else, without an error. Among them:
 
 - `where('id', [1, 2])` compared with `IN (1, 2)` in 3.x. Laravel compares with the first value only, so a `delete()`

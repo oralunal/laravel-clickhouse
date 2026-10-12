@@ -6,6 +6,7 @@ namespace Tests;
 
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
+use stdClass;
 
 /**
  * schema:dump and migrate --schema-path on a connection with a cluster_name and both nodes of the test cluster. Its
@@ -205,15 +206,15 @@ class SchemaDumpClusterTest extends TestCase
         foreach (['things_view', 'things_mv'] as $view) {
             $this->assertSame(
                 [['id' => 1, 'name' => 'a']],
-                DB::connection('clickhouse2')->select("SELECT id, name FROM {$this->databaseName()}.{$view}"),
+                Rows::asArrays(DB::connection('clickhouse2')->select("SELECT id, name FROM {$this->databaseName()}.{$view}")),
                 "Rows of {$view} on clickhouse2"
             );
         }
         $this->assertSame(
             [['name' => 'a']],
-            DB::connection('clickhouse2')->select(
+            Rows::asArrays(DB::connection('clickhouse2')->select(
                 "SELECT dictGet('{$this->databaseName()}.things_dict', 'name', toUInt64(1)) AS name"
-            )
+            ))
         );
 
         // The second round logs each row again, identical to the insert of the first round, which the replicated
@@ -330,7 +331,7 @@ class SchemaDumpClusterTest extends TestCase
     private function tablesOn(string $node): array
     {
         return array_map(
-            fn (array $row): array => [$row['name'], $row['engine']],
+            fn (stdClass $row): array => [$row->name, $row->engine],
             DB::connection($node)->select(
                 "SELECT name, engine FROM system.tables WHERE database = '{$this->databaseName()}'"
                 . " AND NOT startsWith(name, '.inner') ORDER BY name"
@@ -350,7 +351,7 @@ class SchemaDumpClusterTest extends TestCase
         );
 
         foreach ($innerTables as $innerTable) {
-            DB::connection($node)->statement("SYSTEM SYNC REPLICA {$this->databaseName()}.`{$innerTable['name']}`");
+            DB::connection($node)->statement("SYSTEM SYNC REPLICA {$this->databaseName()}.`{$innerTable->name}`");
         }
     }
 
@@ -367,7 +368,7 @@ class SchemaDumpClusterTest extends TestCase
         }
 
         return array_map(
-            fn (array $row): array => [$row['migration'], (int) $row['batch']],
+            fn (stdClass $row): array => [$row->migration, (int) $row->batch],
             DB::connection($node)->select(
                 "SELECT migration, batch FROM {$this->databaseName()}.migrations ORDER BY migration, batch"
             )

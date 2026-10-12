@@ -61,9 +61,9 @@ class SchemaTemporaryTableTest extends TestCase
 
             return [
                 'rows' => $model::query()->orderBy('id')->get()->toArray(),
-                'table' => $connection->select(
+                'table' => Rows::asArrays($connection->select(
                     "SELECT database, engine, is_temporary FROM system.tables WHERE name = '" . self::TEMPORARY . "'"
-                ),
+                )),
                 'hasTemporaryTable' => Schema::connection('clickhouse')->hasTemporaryTable(self::TEMPORARY),
                 'hasTable' => Schema::connection('clickhouse')->hasTable(self::TEMPORARY),
             ];
@@ -96,10 +96,10 @@ class SchemaTemporaryTableTest extends TestCase
                 $table->string('name');
             });
 
-            return $connection->select(
+            return Rows::asArrays($connection->select(
                 "SELECT engine, create_table_query FROM system.tables WHERE database = '' AND name = '"
                 . self::TEMPORARY . "'"
-            );
+            ));
         });
         $table = array_map(
             fn (array $row): array => array_replace(
@@ -158,7 +158,7 @@ class SchemaTemporaryTableTest extends TestCase
             $this->assertFalse($schema->hasTemporaryTable(self::SHADOWED));
         });
 
-        $this->assertSame([['id' => 1, 'v' => 'db']], $this->connection()->select('SELECT id, v FROM ' . self::SHADOWED));
+        $this->assertSame([['id' => 1, 'v' => 'db']], Rows::asArrays($this->connection()->select('SELECT id, v FROM ' . self::SHADOWED)));
     }
 
     public function test_drop_temporary_drops_the_temporary_table_only(): void
@@ -219,19 +219,19 @@ class SchemaTemporaryTableTest extends TestCase
                     ['name' => 'v', 'type' => 'String', 'default_expression' => "'x'"],
                     ['name' => 'extra', 'type' => 'Int32', 'default_expression' => ''],
                 ],
-                $connection->select(
+                Rows::asArrays($connection->select(
                     "SELECT name, type, default_expression FROM system.columns WHERE database = ''"
                     . " AND table = '" . self::SHADOWED . "' ORDER BY position"
-                )
+                ))
             );
         });
 
         $this->assertSame(
             [['name' => 'id', 'type' => 'Int32'], ['name' => 'v', 'type' => 'Nullable(String)']],
-            $this->connection()->select(
+            Rows::asArrays($this->connection()->select(
                 "SELECT name, type FROM system.columns WHERE database = currentDatabase() AND table = '"
                 . self::SHADOWED . "' ORDER BY position"
-            )
+            ))
         );
     }
 
@@ -290,10 +290,10 @@ class SchemaTemporaryTableTest extends TestCase
         $this->assertStringStartsWith('Cannot rename the temporary table ' . self::SHADOWED, $messages[2]);
         $this->assertSame(
             [['name' => 'id'], ['name' => 'v']],
-            $this->connection()->select(
+            Rows::asArrays($this->connection()->select(
                 "SELECT name FROM system.columns WHERE database = currentDatabase() AND table = '" . self::SHADOWED
                 . "' ORDER BY position"
-            )
+            ))
         );
         $this->assertSame('0', $this->countTables("name = '" . self::SHADOWED . "_renamed'"));
     }

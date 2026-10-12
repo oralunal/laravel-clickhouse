@@ -39,28 +39,10 @@ use RuntimeException;
  * (withExpression(), withRecursiveExpression(), withAlias()), INTERSECT and EXCEPT (intersect(), except()), and, for
  * the mutations, ON CLUSTER (onCluster()), lightweight deletes and IN PARTITION (delete(), update()).
  *
- * Each row is an associative array, not a stdClass object. Laravel's builder declares stdClass rows, so the @method
- * tags below give the methods that return rows the array type, for static analysis tools such as PHPStan and
- * Larastan.
+ * Each row is a stdClass object, as on Laravel's other connections; a value of a column, such as an Array, a Map or a
+ * Tuple, is a PHP array.
  *
  * @property QueryGrammar $grammar
- *
- * @method Collection<int, array<string, mixed>> get(string|ExpressionContract|array<string|ExpressionContract> $columns = ['*'])
- * @method array<string, mixed>|null first(array|string $columns = ['*'])
- * @method array<string, mixed> firstOrFail(array|string $columns = ['*'], string|null $message = null)
- * @method array<string, mixed> sole(array|string $columns = ['*'])
- * @method array<string, mixed>|null find(int|string $id, string|ExpressionContract|array<string|ExpressionContract> $columns = ['*'])
- * @method array<string, mixed>|TValue findOr<TValue>(mixed $id, (\Closure(): TValue)|string|ExpressionContract|array<string|ExpressionContract> $columns = ['*'], (\Closure(): TValue)|null $callback = null)
- * @method \Illuminate\Support\LazyCollection<int, array<string, mixed>> cursor()
- * @method \Illuminate\Support\LazyCollection<int, array<string, mixed>> lazy(int $chunkSize = 1000)
- * @method \Illuminate\Support\LazyCollection<int, array<string, mixed>> lazyById(int $chunkSize = 1000, string|null $column = null, string|null $alias = null)
- * @method \Illuminate\Support\LazyCollection<int, array<string, mixed>> lazyByIdDesc(int $chunkSize = 1000, string|null $column = null, string|null $alias = null)
- * @method bool chunk(int $count, callable(Collection<int, array<string, mixed>>, int): mixed $callback)
- * @method bool chunkById(int $count, callable(Collection<int, array<string, mixed>>, int): mixed $callback, string|null $column = null, string|null $alias = null)
- * @method bool chunkByIdDesc(int $count, callable(Collection<int, array<string, mixed>>, int): mixed $callback, string|null $column = null, string|null $alias = null)
- * @method bool each(callable(array<string, mixed>, int): mixed $callback, int $count = 1000)
- * @method bool eachById(callable(array<string, mixed>, int): mixed $callback, int $count = 1000, string|null $column = null, string|null $alias = null)
- * @method Collection<int, TReturn> chunkMap<TReturn>(callable(array<string, mixed>): TReturn $callback, int $count = 1000)
  */
 class QueryBuilder extends Builder
 {

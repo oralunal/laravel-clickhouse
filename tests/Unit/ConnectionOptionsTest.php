@@ -26,6 +26,7 @@ use Oralunal\LaravelClickHouse\QueryBuilder;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Tests\Fixtures\IntBackedEnumFixture;
+use Tests\Rows;
 
 /**
  * The connection without a server: its package options (datetime_precision, insert_format, use_on_cluster,
@@ -653,7 +654,7 @@ class ConnectionOptionsTest extends TestCase
 
         $rows = $connection->select('SELECT id FROM t WHERE d = ? AND f = ? AND s = ?', [$date, false, "it's"]);
 
-        $this->assertSame([['id' => '1']], $rows);
+        $this->assertSame([['id' => '1']], Rows::asArrays($rows));
         $this->assertCount(1, $curler->requests);
         $this->assertSame(
             "SELECT id FROM t WHERE d = '2024-01-02 03:04:05.123456' AND f = 0 AND s = 'it\\'s' FORMAT JSON",
@@ -907,7 +908,7 @@ class ConnectionOptionsTest extends TestCase
 
         $rows = $connection->select("SELECT note FROM t WHERE note = 'format csv'");
 
-        $this->assertSame([['note' => 'format csv']], $rows);
+        $this->assertSame([['note' => 'format csv']], Rows::asArrays($rows));
         $this->assertSame("SELECT note FROM t WHERE note = 'format csv'", self::sentSql($curler->requests[0]));
         $this->assertStringContainsString('default_format=JSON', $curler->requests[0]->getUrl());
     }
@@ -1066,7 +1067,7 @@ class ConnectionOptionsTest extends TestCase
         $cursor = $connection->cursor('SELECT number AS n FROM numbers(?) WHERE number > ?', [3, 0]);
         $this->assertSame([], $curler->requests);
 
-        $this->assertSame([['n' => '1'], ['n' => '2']], iterator_to_array($cursor));
+        $this->assertSame([['n' => '1'], ['n' => '2']], Rows::asArrays($cursor));
         $this->assertSame(
             "SELECT number AS n FROM numbers(3) WHERE number > 0\nFORMAT JSONEachRow",
             self::sentSql($curler->requests[0])

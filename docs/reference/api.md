@@ -149,9 +149,6 @@ createRepository(): void
 delete($migration): void
 deleteRepository(): void
 static fromLaravelRepository(Illuminate\Database\Migrations\DatabaseMigrationRepository $repository): ClickhouseMigrationRepository
-getLast()
-getMigrations($steps)
-getMigrationsByBatch($batch)
 log($file, $batch): void
 ```
 

@@ -64,8 +64,8 @@ class ParallelTest extends TestCase
     {
         return match (true) {
             $query instanceof EloquentBuilder => $query->get(),
-            $query instanceof Builder => $query->get()->all(),
-            default => DB::connection($query['connection'] ?? 'clickhouse')->select($query['sql'], $query['bindings'] ?? []),
+            $query instanceof Builder => $query->get()->map(Rows::asArray(...))->all(),
+            default => Rows::asArrays(DB::connection($query['connection'] ?? 'clickhouse')->select($query['sql'], $query['bindings'] ?? [])),
         };
     }
 
@@ -81,15 +81,15 @@ class ParallelTest extends TestCase
 
         $rows = Parallel::getRows([$sleep(1), $sleep(2), $sleep(3)]);
 
-        $this->assertSame([[['s' => 0]], [['s' => 0]], [['s' => 0]]], $rows);
+        $this->assertSame([[['s' => 0]], [['s' => 0]], [['s' => 0]]], Rows::ofEachResult($rows));
         DB::connection('clickhouse')->statement('SYSTEM FLUSH LOGS');
         $this->assertSame(
             [['queries' => '3', 'overlapped' => 1]],
-            DB::connection('clickhouse')->select(
+            Rows::asArrays(DB::connection('clickhouse')->select(
                 'SELECT toString(count()) AS queries, max(query_start_time_microseconds) < min(event_time_microseconds) AS overlapped'
                 . " FROM system.query_log WHERE type = 'QueryFinish' AND log_comment LIKE ?",
                 ["{$prefix}%"]
-            )
+            ))
         );
     }
 
@@ -165,9 +165,9 @@ class ParallelTest extends TestCase
             $this->assertInstanceOf(EloquentCollection::class, $rows['query']);
             $this->assertSame($alone->toArray(), $rows['query']->toArray());
         } else {
-            $this->assertSame($alone, $rows['query']);
+            $this->assertSame($alone, Rows::asArrays($rows['query']));
         }
-        $this->assertSame([['one' => 1]], $rows['other']);
+        $this->assertSame([['one' => 1]], Rows::asArrays($rows['other']));
     }
 
     public function test_a_batch_runs_queries_of_several_connections(): void
@@ -178,7 +178,7 @@ class ParallelTest extends TestCase
             'micro' => self::events('clickhouse-parallel-microsecond')->select('id')->where('id', 3),
         ]);
 
-        $this->assertSame(['first' => [['id' => 1]], 'second' => [['id' => 2]], 'micro' => [['id' => 3]]], $rows);
+        $this->assertSame(['first' => [['id' => 1]], 'second' => [['id' => 2]], 'micro' => [['id' => 3]]], Rows::ofEachResult($rows));
     }
 
     /**
@@ -198,7 +198,7 @@ class ParallelTest extends TestCase
 
         $this->assertSame(
             ['node1' => [['count' => (string) Example::query()->count()]], 'node2' => [['count' => (string) Example2::query()->count()]]],
-            $rows
+            Rows::ofEachResult($rows)
         );
     }
 
@@ -211,7 +211,7 @@ class ParallelTest extends TestCase
             ]);
             $this->fail('getRows() did not throw.');
         } catch (ParallelQueryException $exception) {
-            $this->assertSame(['rows' => [['id' => 1]]], $exception->getResults());
+            $this->assertSame(['rows' => [['id' => 1]]], Rows::ofEachResult($exception->getResults()));
             $error = $exception->getErrors()['missing'];
             $this->assertInstanceOf(DatabaseException::class, $error);
             $this->assertSame('UNKNOWN_TABLE', $error->getClickHouseExceptionName());
@@ -241,10 +241,10 @@ class ParallelTest extends TestCase
         DB::connection('clickhouse')->statement('SYSTEM FLUSH LOGS');
         $this->assertSame(
             [['attempts' => '3']],
-            DB::connection('clickhouse')->select(
+            Rows::asArrays(DB::connection('clickhouse')->select(
                 "SELECT toString(count()) AS attempts FROM system.query_log WHERE type = 'ExceptionBeforeStart' AND log_comment = ?",
                 [$comment]
-            )
+            ))
         );
     }
 
@@ -257,8 +257,8 @@ class ParallelTest extends TestCase
             )
             ->settings('max_threads', 2);
 
-        $this->assertSame(['set' => $query()->get()->all()], Parallel::getRows(['set' => $query()]));
-        $this->assertSame([['id' => 1]], $query()->get()->all());
+        $this->assertSame(['set' => $query()->get()->map(Rows::asArray(...))->all()], Rows::ofEachResult(Parallel::getRows(['set' => $query()])));
+        $this->assertSame([['id' => 1]], $query()->get()->map(Rows::asArray(...))->all());
     }
 
     public function test_a_query_builder_query_is_logged_as_get_logs_it(): void
@@ -286,7 +286,7 @@ class ParallelTest extends TestCase
             'page' => $query()->select('id')->orderBy('id')->forPage(2, 1),
         ]);
 
-        $this->assertSame(['total' => [['total' => '2']], 'page' => [['id' => 2]]], $rows);
+        $this->assertSame(['total' => [['total' => '2']], 'page' => [['id' => 2]]], Rows::ofEachResult($rows));
     }
 
     public function test_get_returns_the_statements(): void
@@ -344,7 +344,7 @@ class ParallelTest extends TestCase
 
         $this->assertSame(
             ['total' => [['total' => '6']], 'question mark' => [['value' => 'a']], 'plain' => [['one' => 1]]],
-            $rows
+            Rows::ofEachResult($rows)
         );
     }
 }

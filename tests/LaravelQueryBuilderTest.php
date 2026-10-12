@@ -108,10 +108,10 @@ class LaravelQueryBuilderTest extends TestCase
         $connection = $this->connection();
         $connection->enableQueryLog();
 
-        $this->assertSame([['id' => 2]], $connection->select('select id from ' . self::ROWS . ' where id = ?', [2]));
+        $this->assertSame([['id' => 2]], Rows::asArrays($connection->select('select id from ' . self::ROWS . ' where id = ?', [2])));
         $this->assertSame(
             [['id' => 2]],
-            $connection->select('select id from ' . self::ROWS . ' where id = ? and name = ?', [2, 'A'])
+            Rows::asArrays($connection->select('select id from ' . self::ROWS . ' where id = ? and name = ?', [2, 'A']))
         );
         $this->assertSame(
             [['query' => 'select id from ' . self::ROWS . ' where id = ?', 'bindings' => [2]]],
@@ -124,19 +124,19 @@ class LaravelQueryBuilderTest extends TestCase
     {
         $connection = $this->connection();
 
-        $this->assertSame([['t' => 10]], $connection->select('select ? > 1 ?? 10 : 20 as t', [5]));
-        $this->assertSame([['t' => 10]], $connection->select('select 5 > 1 ? 10 : 20 as t'));
-        $this->assertSame([['q?' => '?', 'b' => 7]], $connection->select("select '?' as \"q?\", -- why?\n ? as b", [7]));
-        $this->assertSame([['h' => 'a?b', 'v' => 1]], $connection->select('select $$a?b$$ as h, ? as v', [1]));
+        $this->assertSame([['t' => 10]], Rows::asArrays($connection->select('select ? > 1 ?? 10 : 20 as t', [5])));
+        $this->assertSame([['t' => 10]], Rows::asArrays($connection->select('select 5 > 1 ? 10 : 20 as t')));
+        $this->assertSame([['q?' => '?', 'b' => 7]], Rows::asArrays($connection->select("select '?' as \"q?\", -- why?\n ? as b", [7])));
+        $this->assertSame([['h' => 'a?b', 'v' => 1]], Rows::asArrays($connection->select('select $$a?b$$ as h, ? as v', [1])));
     }
 
     public function testSmi2PlaceholdersAndQueryParametersWorkAsBefore(): void
     {
         $connection = $this->connection();
 
-        $this->assertSame([['id' => 3]], $connection->select('select id from ' . self::ROWS . ' where id = :id', ['id' => 3]));
-        $this->assertSame([['id' => 3]], $connection->select('select id from {table} where id = 3', ['table' => self::ROWS]));
-        $this->assertSame([['v' => 5]], $connection->select('select {p:UInt8} + 1 as v', ['p' => 4]));
+        $this->assertSame([['id' => 3]], Rows::asArrays($connection->select('select id from ' . self::ROWS . ' where id = :id', ['id' => 3])));
+        $this->assertSame([['id' => 3]], Rows::asArrays($connection->select('select id from {table} where id = 3', ['table' => self::ROWS])));
+        $this->assertSame([['v' => 5]], Rows::asArrays($connection->select('select {p:UInt8} + 1 as v', ['p' => 4])));
     }
 
     public function testACountMismatchThrowsBeforeAnythingIsSent(): void

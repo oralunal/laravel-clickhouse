@@ -17,10 +17,11 @@ $clickhouse->insert('INSERT INTO my_table (id, field_one, ratio) VALUES (?, ?, ?
 // INSERT INTO my_table (id, field_one, ratio) VALUES (1, 'a', 0.3333333333333333)
 ```
 
+- `select()` returns the rows as `stdClass` objects, as Laravel's other connections do. `selectStatement()->rows()` returns associative arrays. See [FORMAT clauses](#format-clauses).
 - A string is escaped. A date is written in its own time zone. `true` and `false` are `1` and `0`. A float keeps all digits. An array is an array literal. `DB::raw()` is written as SQL.
 - A `?` in a string literal, a quoted name, a heredoc such as `$$...$$` or a comment is not a placeholder.
 - Write a `?` that is not a placeholder, such as the ternary operator, as `??`:
-  `$clickhouse->select('SELECT ? > 1 ?? 10 : 20 AS t', [5])` returns `[['t' => 10]]`.
+  `$clickhouse->select('SELECT ? > 1 ?? 10 : 20 AS t', [5])` returns `[(object) ['t' => 10]]`.
   An `INSERT` without bindings is sent as written, so the rows after its `FORMAT` keep their `??`.
 - A query with `?` placeholders and a different number of bindings throws an `InvalidArgumentException` before the request:
   `The query has 1 "?" placeholder, but 2 bindings were given. Write a literal "?" as "??".`
@@ -60,7 +61,7 @@ $clickhouse->selectStatement('SELECT id FROM my_table WHERE id < ? ORDER BY id F
 // "1\n2\n"
 
 $clickhouse->selectStatement('SELECT number FROM numbers(2)')->rows();
-// [['number' => '0'], ['number' => '1']]
+// [['number' => '0'], ['number' => '1']], associative arrays
 ```
 
 - The bindings are written as in `select()`. The query is logged one time.
@@ -80,11 +81,11 @@ $clickhouse->query()->fromRaw('remote(?, ?, ?, ?, ?)', ['ch-2:9000', 'analytics'
 
 ## Read rows one by one
 
-`cursor()` yields the rows of a `SELECT` one at a time, as associative arrays. Its memory stays flat:
+`cursor()` yields the rows of a `SELECT` one at a time, as `stdClass` objects, as `select()` returns them. Its memory stays flat:
 
 ```php
 foreach ($clickhouse->cursor('SELECT id, field_one FROM my_table WHERE field_two > ? ORDER BY id', [0]) as $row) {
-    // ['id' => 1, 'field_one' => 'click'], then ['id' => 2, 'field_one' => 'view'], ...
+    // (object) ['id' => 1, 'field_one' => 'click'], then (object) ['id' => 2, 'field_one' => 'view'], ...
 }
 // SELECT id, field_one FROM my_table WHERE field_two > 0 ORDER BY id
 // FORMAT JSONEachRow

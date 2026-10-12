@@ -61,7 +61,7 @@ class ValueWriterTest extends TestCase
         $this->assertSame('select * from "value_writer_rows" where "v" = 0.3333333333333333', $query->toRawSql());
         $this->assertSame(1, $query->count());
         $this->assertSame(2, DB::table(self::TABLE)->whereIn('v', [1 / 3, 0.1 + 0.2])->count());
-        $this->assertSame([['id' => 3]], DB::table(self::TABLE)->select('id')->where('v', 2.0)->get()->all());
+        $this->assertSame([['id' => 3]], DB::table(self::TABLE)->select('id')->where('v', 2.0)->get()->map(Rows::asArray(...))->all());
     }
 
     public function test_an_update_writes_every_digit_of_a_float(): void
@@ -69,7 +69,7 @@ class ValueWriterTest extends TestCase
         DB::table(self::TABLE)->where('id', 3)->update(['v' => 2 / 3]);
         $this->waitForMutations();
 
-        $this->assertSame([['id' => 3]], DB::table(self::TABLE)->select('id')->where('v', 2 / 3)->get()->all());
+        $this->assertSame([['id' => 3]], DB::table(self::TABLE)->select('id')->where('v', 2 / 3)->get()->map(Rows::asArray(...))->all());
         $this->assertSame(
             [['exact' => 1]],
             DB::connection('clickhouse')->getClient()
@@ -136,7 +136,7 @@ class ValueWriterTest extends TestCase
             'select "id" from "value_writer_rows" where "id" > 1 and "d6" < now() order by "id" asc',
             $query->toRawSql()
         );
-        $this->assertSame([['id' => 2], ['id' => 3]], $query->get()->all());
+        $this->assertSame([['id' => 2], ['id' => 3]], $query->get()->map(Rows::asArray(...))->all());
     }
 
     public function test_nan_and_infinities_are_written_as_their_literals(): void
@@ -146,8 +146,8 @@ class ValueWriterTest extends TestCase
             DB::table(self::TABLE)->select('id')->where('f', NAN)->orWhereIn('f', [INF, -INF])->orderBy('id')->toRawSql()
         );
         $this->assertSame(0, DB::table(self::TABLE)->where('f', NAN)->count(), 'ClickHouse finds no value equal to NaN');
-        $this->assertSame([['id' => 2]], DB::table(self::TABLE)->select('id')->where('f', INF)->get()->all());
-        $this->assertSame([['id' => 3]], DB::table(self::TABLE)->select('id')->where('f', -INF)->get()->all());
+        $this->assertSame([['id' => 2]], DB::table(self::TABLE)->select('id')->where('f', INF)->get()->map(Rows::asArray(...))->all());
+        $this->assertSame([['id' => 3]], DB::table(self::TABLE)->select('id')->where('f', -INF)->get()->map(Rows::asArray(...))->all());
     }
 
     public function test_dates_are_written_with_second_precision_by_default(): void
@@ -158,7 +158,7 @@ class ValueWriterTest extends TestCase
             "select \"id\" from \"value_writer_rows\" where \"d6\" = '2024-01-02 03:04:05'",
             $query->toRawSql()
         );
-        $this->assertSame([['id' => 1]], $query->get()->all());
+        $this->assertSame([['id' => 1]], $query->get()->map(Rows::asArray(...))->all());
     }
 
     public function test_format_takes_a_name_in_any_letter_case(): void

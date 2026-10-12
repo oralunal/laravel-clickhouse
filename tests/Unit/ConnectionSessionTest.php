@@ -24,6 +24,7 @@ use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use ReflectionProperty;
 use RuntimeException;
+use Tests\Rows;
 
 /**
  * Connection::session() without a server: the connection's cluster has one node, a CannedAsyncClient, whose
@@ -357,7 +358,7 @@ class ConnectionSessionTest extends TestCase
         ));
 
         $rows = $connection->session(
-            fn (Connection $connection): array => iterator_to_array($connection->cursor('SELECT 2'))
+            fn (Connection $connection): array => Rows::asArrays($connection->cursor('SELECT 2'))
         );
 
         $this->assertSame([['x' => '1']], $rows);

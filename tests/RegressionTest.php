@@ -81,7 +81,7 @@ class RegressionTest extends TestCase
     {
         $query = fn (): Builder => $this->reads()->select('grp', 'a')->orderBy('grp')->orderByRaw('a WITH FILL');
 
-        $this->assertSame([['g1', 1], ['g1', 2], ['g2', 5]], array_map('array_values', $query()->get()->all()));
+        $this->assertSame([['g1', 1], ['g1', 2], ['g2', 5]], array_map('array_values', $query()->get()->map(Rows::asArray(...))->all()));
         $this->assertSame(3, $query()->count());
         $this->assertSame(3, $query()->paginate(10)->total());
         $this->assertEquals(8, $query()->sum('a'));
@@ -99,7 +99,7 @@ class RegressionTest extends TestCase
         $connection = DB::connection('clickhouse');
         $limitBy = fn (): Builder => $this->reads()->select('id', 'grp', 'a')->orderBy('grp')->orderByRaw('id DESC LIMIT 1 BY grp');
 
-        $this->assertSame([[2, 'g1', 2], [3, 'g2', 5]], array_map('array_values', $limitBy()->get()->all()));
+        $this->assertSame([[2, 'g1', 2], [3, 'g2', 5]], array_map('array_values', $limitBy()->get()->map(Rows::asArray(...))->all()));
         $connection->enableQueryLog();
         $this->assertSame(2, $limitBy()->count());
         $this->assertSame(
@@ -110,11 +110,11 @@ class RegressionTest extends TestCase
         $this->assertSame(2, $limitBy()->paginate(10)->total());
 
         $withTies = fn (): Builder => $this->reads()->select('id', 'a')->orderBy('a', 'desc')->orderByRaw('grp LIMIT 1 WITH TIES');
-        $this->assertSame([[3, 5]], array_map('array_values', $withTies()->get()->all()));
+        $this->assertSame([[3, 5]], array_map('array_values', $withTies()->get()->map(Rows::asArray(...))->all()));
         $this->assertSame(1, $withTies()->count());
 
         $limit = fn (): Builder => $this->reads()->select('id', 'a')->orderBy('a')->orderByRaw('id DESC LIMIT 2');
-        $this->assertSame([[1, 1], [2, 2]], array_map('array_values', $limit()->get()->all()));
+        $this->assertSame([[1, 1], [2, 2]], array_map('array_values', $limit()->get()->map(Rows::asArray(...))->all()));
         $this->assertSame(2, $limit()->count());
 
         $this->assertSame(1, $this->reads()->orderByRaw('id OFFSET 2 ROWS')->count());
@@ -157,10 +157,10 @@ class RegressionTest extends TestCase
     {
         $query = fn (): Builder => $this->reads()->select('id', 's')->orderBy('id', 'desc');
 
-        $this->assertSame(['id' => 3, 's' => 'z'], $query()->first());
+        $this->assertSame(['id' => 3, 's' => 'z'], Rows::asArray($query()->first()));
         $this->assertNull($this->reads()->where('id', 999)->first());
-        $this->assertSame(['id' => 2], $this->reads()->select('id')->orderBy('id')->limit(10)->offset(1)->first());
-        $this->assertSame(['id' => 1, 's' => 'x'], $this->reads()->orderBy('id')->first(['id', 's']));
+        $this->assertSame(['id' => 2], Rows::asArray($this->reads()->select('id')->orderBy('id')->limit(10)->offset(1)->first()));
+        $this->assertSame(['id' => 1, 's' => 'x'], Rows::asArray($this->reads()->orderBy('id')->first(['id', 's'])));
         $this->assertSame('z', $this->reads()->orderBy('id', 'desc')->value('s'));
         $this->assertEquals(2, $this->reads()->orderBy('id')->value(DB::raw('a + 1')));
         $this->assertSame(5, $this->reads()->value(DB::raw('max(a)')));

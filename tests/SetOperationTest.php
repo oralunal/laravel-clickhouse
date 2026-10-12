@@ -314,8 +314,8 @@ class SetOperationTest extends TestCase
         $this->assertSame([1, 10, 11], $this->sortedValues($query()->paginate(10)->items()));
         $this->assertEquals(22, $query()->sum('x'));
         $this->assertSame(1, $query()->min('x'));
-        $this->assertSame(['x' => 1], $this->values('3, 1, 2')->orderBy('x')->limit(1)->unionAll($this->values('10, 11'))
-            ->settings(['max_threads' => 1])->first());
+        $this->assertSame(['x' => 1], Rows::asArray($this->values('3, 1, 2')->orderBy('x')->limit(1)
+            ->unionAll($this->values('10, 11'))->settings(['max_threads' => 1])->first()));
     }
 
     /**

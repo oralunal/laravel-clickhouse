@@ -27,6 +27,8 @@ use Oralunal\LaravelClickHouse\Parallel;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use stdClass;
+use Tests\Rows;
 
 /**
  * Parallel::get() and getRows(), and Connection::selectParallelly(), without a server: every client is a
@@ -212,7 +214,7 @@ class ParallelTest extends TestCase
             ],
             $client->sentSql()
         );
-        $this->assertSame([['v' => 'SELECT id FROM files ORDER BY format DESC FORMAT JSON']], $rows['desc']);
+        $this->assertSame([['v' => 'SELECT id FROM files ORDER BY format DESC FORMAT JSON']], Rows::asArrays($rows['desc']));
         $this->assertSame(['desc', 'like', 'alias', 'laravel'], array_keys($rows));
     }
 
@@ -292,7 +294,7 @@ class ParallelTest extends TestCase
             $this->assertInstanceOf(QueryException::class, $exception);
             $this->assertSame(
                 ['first' => [['v' => 'SELECT 1 FORMAT JSON']], 'last' => [['v' => 'select * from "t" FORMAT JSON']]],
-                $exception->getResults()
+                Rows::ofEachResult($exception->getResults())
             );
             $this->assertSame(['bad'], array_keys($exception->getErrors()));
             $this->assertInstanceOf(DatabaseException::class, $exception->getErrors()['bad']);
@@ -316,14 +318,16 @@ class ParallelTest extends TestCase
 
         $rows = Parallel::getRows([
             'mapped' => self::laravelQuery($connection)->from('t')
-                ->afterQuery(fn (Collection $rows): Collection => $rows->map(fn (array $row): int => (int) $row['id'] * 10)),
+                ->afterQuery(fn (Collection $rows): Collection => $rows->map(fn (stdClass $row): int => (int) $row->id * 10)),
             'plain' => self::laravelQuery($connection)->from('t'),
             'sql' => ['sql' => 'SELECT id FROM t'],
         ]);
 
+        $this->assertSame(['mapped', 'plain', 'sql'], array_keys($rows));
+        $this->assertSame([10, 20], $rows['mapped']);
         $this->assertSame(
-            ['mapped' => [10, 20], 'plain' => [['id' => '1'], ['id' => '2']], 'sql' => [['id' => '1'], ['id' => '2']]],
-            $rows
+            ['plain' => [['id' => '1'], ['id' => '2']], 'sql' => [['id' => '1'], ['id' => '2']]],
+            Rows::ofEachResult(['plain' => $rows['plain'], 'sql' => $rows['sql']])
         );
     }
 
@@ -594,7 +598,7 @@ class ParallelTest extends TestCase
         $rows = Parallel::getRows($queries, 2);
 
         $this->assertSame(array_keys($queries), array_keys($rows));
-        $this->assertSame([['v' => 'SELECT 6 FORMAT JSON']], $rows['q6']);
+        $this->assertSame([['v' => 'SELECT 6 FORMAT JSON']], Rows::asArrays($rows['q6']));
     }
 
     // The clients' own curlers
@@ -646,7 +650,7 @@ class ParallelTest extends TestCase
 
         $this->assertSame(
             ['total' => [['v' => 'SELECT count() FROM t FORMAT JSON']], 'recent' => [['v' => 'SELECT id FROM t WHERE v >= 30 FORMAT JSON']]],
-            $rows
+            Rows::ofEachResult($rows)
         );
         $this->assertSame([], $other->requests, "The 'connection' key is ignored.");
         $this->assertSame(['SELECT count() FROM t', 'SELECT id FROM t WHERE v >= ?'], array_column($connection->getQueryLog(), 'query'));

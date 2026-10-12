@@ -11,6 +11,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Builder as BaseBuilder;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException as ClickHouseQueryException;
+use stdClass;
 
 class SchemaBuilder extends BaseBuilder
 {
@@ -330,7 +331,7 @@ class SchemaBuilder extends BaseBuilder
      */
     public function dropAllTables(): void
     {
-        $this->dropObjects(fn (array $object): bool => true);
+        $this->dropObjects(fn (stdClass $object): bool => true);
     }
 
     /**
@@ -340,7 +341,7 @@ class SchemaBuilder extends BaseBuilder
      */
     public function dropAllViews(): void
     {
-        $this->dropObjects(fn (array $object): bool => str_ends_with($object['engine'], 'View'));
+        $this->dropObjects(fn (stdClass $object): bool => str_ends_with($object->engine, 'View'));
     }
 
     /**
@@ -359,7 +360,7 @@ class SchemaBuilder extends BaseBuilder
      * statementOnEveryHost()). Each DROP is logged, and nothing is sent while
      * the connection pretends.
      *
-     * @param callable(array{name: string, engine: string, dependents: string[]}): bool $filter
+     * @param callable(stdClass): bool $filter Gets a row with the name, the engine and the dependents of an object
      * @return void
      */
     protected function dropObjects(callable $filter): void
@@ -378,20 +379,20 @@ class SchemaBuilder extends BaseBuilder
             ['database' => $database]
         ) as $object) {
             if ($filter($object)) {
-                $pending[$object['name']] = $object;
+                $pending[$object->name] = $object;
             }
         }
 
         while ($pending) {
             $next = array_key_first($pending);
             foreach ($pending as $name => $object) {
-                if (!array_intersect($object['dependents'], array_keys($pending))) {
+                if (!array_intersect($object->dependents, array_keys($pending))) {
                     $next = $name;
                     break;
                 }
             }
 
-            $kind = $pending[$next]['engine'] === 'Dictionary' ? 'DICTIONARY' : 'TABLE';
+            $kind = $pending[$next]->engine === 'Dictionary' ? 'DICTIONARY' : 'TABLE';
             $this->statementOnEveryHost(
                 "DROP {$kind} IF EXISTS " . SchemaGrammar::quoteIdentifier($database)
                 . '.' . SchemaGrammar::quoteIdentifier($next),

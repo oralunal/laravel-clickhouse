@@ -83,7 +83,7 @@ class TransactionTest extends TestCase
         $this->assertNull($connection->rollBack());
         $this->assertNull($connection->rollBack(0));
         $this->assertSame(0, $connection->transactionLevel());
-        $this->assertSame([['one' => 1]], $connection->select('SELECT 1 AS one'));
+        $this->assertSame([['one' => 1]], Rows::asArrays($connection->select('SELECT 1 AS one')));
     }
 
     /**

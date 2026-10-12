@@ -44,44 +44,6 @@ class ClickhouseMigrationRepository extends DatabaseMigrationRepository
     }
 
     /**
-     * Get the last $steps migrations that ran, the latest first.
-     *
-     * @param int $steps
-     * @return object[]
-     */
-    public function getMigrations($steps)
-    {
-        $migrations = parent::getMigrations($steps);
-
-        return $this->usesClickhouse() ? $this->asObjects($migrations) : $migrations;
-    }
-
-    /**
-     * Get the migrations of a batch, the latest first.
-     *
-     * @param int $batch
-     * @return object[]
-     */
-    public function getMigrationsByBatch($batch)
-    {
-        $migrations = parent::getMigrationsByBatch($batch);
-
-        return $this->usesClickhouse() ? $this->asObjects($migrations) : $migrations;
-    }
-
-    /**
-     * Get the migrations of the last batch, the latest first.
-     *
-     * @return object[]
-     */
-    public function getLast()
-    {
-        $migrations = parent::getLast();
-
-        return $this->usesClickhouse() ? $this->asObjects($migrations) : $migrations;
-    }
-
-    /**
      * Log that a migration ran.
      *
      * On a ClickHouse connection, the row is sent with insert into `migrations` (`migration`, `batch`) settings
@@ -259,27 +221,5 @@ class ClickhouseMigrationRepository extends DatabaseMigrationRepository
             '/\A\s*(?:Replicated|Shared)?MergeTree\s*(?:\((?:[^()\'"]|\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*")*\))?\s*\z/',
             $engine
         ) === 1;
-    }
-
-    /**
-     * Determine if the repository's connection is a ClickHouse connection.
-     *
-     * @return bool
-     */
-    protected function usesClickhouse(): bool
-    {
-        return $this->getConnection() instanceof Connection;
-    }
-
-    /**
-     * Turn the rows of the migrations table, which a ClickHouse connection gives as arrays, into objects, as Laravel's
-     * repository returns them on other connections.
-     *
-     * @param array<int, array<string, mixed>|object> $rows
-     * @return object[]
-     */
-    protected function asObjects(array $rows): array
-    {
-        return array_map(fn (array|object $row): object => (object) $row, $rows);
     }
 }

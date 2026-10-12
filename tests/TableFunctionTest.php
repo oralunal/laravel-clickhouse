@@ -47,7 +47,7 @@ class TableFunctionTest extends TestCase
             'table_fn_1',
             (string) $connection->getConfig('username'),
             (string) $connection->getConfig('password'),
-        ])->orderBy('id')->get()->all();
+        ])->orderBy('id')->get()->map(Rows::asArray(...))->all();
 
         $this->assertSame([['id' => 1], ['id' => 2]], $rows);
     }

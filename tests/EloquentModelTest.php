@@ -220,7 +220,7 @@ class EloquentModelTest extends TestCase
         $this->assertTrue($results['events']->first()->relationLoaded('user'));
         $this->assertSame('Ada', $results['events']->first()->user->name);
         $this->assertSame([1, 2], $results['users']->modelKeys());
-        $this->assertSame(3, (int) $results['count'][0]['c']);
+        $this->assertSame(3, (int) $results['count'][0]->c);
     }
 
     public function test_a_model_on_another_connection_is_refused(): void

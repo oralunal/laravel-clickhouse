@@ -6,6 +6,7 @@ namespace Oralunal\LaravelClickHouse;
 
 use Illuminate\Database\Connection as BaseConnection;
 use Illuminate\Database\Schema\SchemaState as BaseSchemaState;
+use stdClass;
 
 /**
  * Backs `php artisan schema:dump` and the schema loading step of `php artisan migrate`.
@@ -257,15 +258,15 @@ class SchemaState extends BaseSchemaState
         // Dictionaries first (a column default may call dictGet()), views last.
         usort(
             $objects,
-            fn (array $a, array $b): int => $this->creationRank($a['engine']) <=> $this->creationRank($b['engine'])
+            fn (stdClass $a, stdClass $b): int => $this->creationRank($a->engine) <=> $this->creationRank($b->engine)
         );
 
         $database = $this->quoteIdentifier($this->connection->getDatabaseName());
         $pending = [];
         foreach ($objects as $object) {
-            $pending[$object['name']] = $this->connection->select(
-                "SHOW CREATE TABLE {$database}." . $this->quoteIdentifier($object['name'])
-            )[0]['statement'] . ';';
+            $pending[$object->name] = $this->connection->select(
+                "SHOW CREATE TABLE {$database}." . $this->quoteIdentifier($object->name)
+            )[0]->statement . ';';
         }
 
         // A view can select from another view, which must exist first.
