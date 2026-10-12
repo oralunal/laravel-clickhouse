@@ -401,11 +401,13 @@ Final class `Oralunal\LaravelClickHouse\ClientRequests`.
 
 ```php
 static clientSelectsAsIntended(string $sql, ?string $format): bool
+static columnTypes(ClickHouseDB\Client $client, string $sql, array $bindings = []): ?array
 static encodeJsonEachRow(array $rows, JsonEachRowEncoder $encoder): array
 static pretendedStatement(string $sql): ClickHouseDB\Statement
-static select(ClickHouseDB\Client $client, string $sql, array $bindings = [], ?string $format = null): ClickHouseDB\Statement
+static rowsOf(ClickHouseDB\Statement $statement): array
+static select(ClickHouseDB\Client $client, string $sql, array $bindings = [], ?string $format = null, array $settings = []): ClickHouseDB\Statement
 static selectIntoStream(ClickHouseDB\Client $client, string $sql, array $bindings, mixed $stream): ClickHouseDB\Statement
-static selectRequest(ClickHouseDB\Client $client, string $sql, array $bindings = [], ?string $format = null): ClickHouseDB\Transport\CurlerRequest
+static selectRequest(ClickHouseDB\Client $client, string $sql, array $bindings = [], ?string $format = null, array $settings = []): ClickHouseDB\Transport\CurlerRequest
 static selectStatement(ClickHouseDB\Transport\CurlerRequest $request): ClickHouseDB\Statement
 static sendInsert(ClickHouseDB\Client $client, string $head, string $body, string $format): ClickHouseDB\Statement
 static write(ClickHouseDB\Client $client, Connection $connection, string $sql, array $bindings = []): ClickHouseDB\Statement
@@ -536,6 +538,20 @@ processColumns($results): array
 processIndexes($results): array
 processInsertGetId(Illuminate\Database\Query\Builder $query, $sql, $values, $sequence = null): never
 static typeAcceptsNull(string $type): bool
+```
+
+### ResultValues
+
+Final class `Oralunal\LaravelClickHouse\ResultValues`.
+
+```php
+const SETTINGS = ['output_format_json_quote_decimals' => 1, 'output_format_decimal_trailing_zeros' => 1, 'output_format_json_quote_denormals' => 1];
+const JSON_DECODE_FLAGS = 4194306;
+
+static converter(string $type): ?Closure
+static rowConverter(array $meta): Closure
+static rows(array $meta, iterable $rows): array
+static settingsFor(ClickHouseDB\Client $client): array
 ```
 
 ### SchemaGrammar

@@ -296,6 +296,23 @@ class QueryGrammar extends Grammar
     }
 
     /**
+     * Compile an aggregate as Laravel does, with avgOrNull() in place of avg(): ClickHouse's avg() of no rows is NaN,
+     * where Laravel's avg() returns null, as avgOrNull() does. An average of values that hold NaN stays NaN.
+     *
+     * @param Builder $query
+     * @param array{function: string, columns: array<int, ExpressionContract|string>} $aggregate
+     * @return string
+     */
+    protected function compileAggregate(Builder $query, $aggregate)
+    {
+        if (strtolower($aggregate['function']) === 'avg') {
+            $aggregate['function'] = 'avgOrNull';
+        }
+
+        return parent::compileAggregate($query, $aggregate);
+    }
+
+    /**
      * Compile a select query.
      *
      * - A table qualifier is kept in every column name of the select, also when it is a sub-query of a delete or an

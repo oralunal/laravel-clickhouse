@@ -19,7 +19,6 @@ use InvalidArgumentException;
 use LogicException;
 use Oralunal\LaravelClickHouse\Exceptions\ParallelQueryException;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
-use stdClass;
 
 /**
  * Run SELECT queries at the same time, over one curl multi handle, and get the statement or the rows of each.
@@ -128,10 +127,10 @@ class Parallel
         $results = [];
         $errors = [];
         $statements = [];
-        foreach (static::run($queries, $concurrency) as $key => $query) {
+        foreach (static::run($queries, $concurrency, true) as $key => $query) {
             $statements[$key] = $query['statement'];
             try {
-                $rows = array_map(fn (array $row): stdClass => (object) $row, array_values($query['statement']->rows()));
+                $rows = ClientRequests::rowsOf($query['statement']);
             } catch (ClickHouseException $exception) {
                 $errors[$key] = $exception;
                 continue;
@@ -154,13 +153,15 @@ class Parallel
      *
      * @param array<int|string, mixed> $queries
      * @param int $concurrency
+     * @param bool $forRows Whether the rows are read, so that each request asks for the values that
+     *                      ResultValues reads exactly; Parallel::get() leaves the statements as select() would
      * @return array<int|string, SentQuery>
      * @throws InvalidArgumentException When an entry is invalid or the concurrency is below 2
      * @throws QueryException When the FORMAT clause of a Laravel query builder or SQL names a format that select()
      *                        cannot read rows from
      * @throws LogicException When a query would run on a client that uses a ClickHouse session
      */
-    protected static function run(array $queries, int $concurrency): array
+    protected static function run(array $queries, int $concurrency, bool $forRows = false): array
     {
         if ($concurrency < 2) {
             throw new InvalidArgumentException(sprintf(
@@ -173,7 +174,7 @@ class Parallel
             return [];
         }
 
-        $prepared = static::prepare($queries);
+        $prepared = static::prepare($queries, $forRows);
         static::verifyNoSession($prepared);
 
         foreach ($prepared as $query) {
@@ -190,13 +191,14 @@ class Parallel
      * Compile every query and build its request, in the order given, before anything is sent.
      *
      * @param array<int|string, mixed> $queries
+     * @param bool $forRows See run()
      * @return array<int|string, PreparedQuery>
      * @throws InvalidArgumentException When an entry is neither a query builder of a ClickHouse connection nor an
      *                                  array with an sql string, its SQL is empty, or its bindings do not fit
      * @throws QueryException When the FORMAT clause of a Laravel query builder or SQL names a format that
      *                        select() cannot read rows from (see Connection::verifySelectFormat())
      */
-    protected static function prepare(array $queries): array
+    protected static function prepare(array $queries, bool $forRows = false): array
     {
         $prepared = [];
         foreach ($queries as $key => $query) {
@@ -213,7 +215,14 @@ class Parallel
                 }
 
                 $sql = $query->toSql();
-                $prepared[$key] = static::prepareSelect($key, $query, $connection, $sql, $query->getBindings());
+                $prepared[$key] = static::prepareSelect(
+                    $key,
+                    $query,
+                    $connection,
+                    $sql,
+                    $query->getBindings(),
+                    $forRows
+                );
                 if ($eloquent !== null) {
                     $prepared[$key]['eloquent'] = $eloquent;
                 }
@@ -228,7 +237,7 @@ class Parallel
                 }
 
                 $connection = static::resolveConnection($key, $query['connection'] ?? Connection::DEFAULT_NAME);
-                $prepared[$key] = static::prepareSelect($key, null, $connection, $query['sql'], $bindings);
+                $prepared[$key] = static::prepareSelect($key, null, $connection, $query['sql'], $bindings, $forRows);
             } else {
                 throw new InvalidArgumentException(sprintf(
                     'Parallel query [%s] must be a query builder, an Eloquent query builder or an array with an sql'
@@ -251,6 +260,7 @@ class Parallel
      * @param Connection $connection
      * @param string $sql
      * @param array<int|string, mixed> $bindings
+     * @param bool $forRows See run()
      * @return PreparedQuery
      * @throws InvalidArgumentException When the SQL is empty or the bindings do not fit its placeholders
      */
@@ -259,7 +269,8 @@ class Parallel
         ?LaravelBuilder $query,
         Connection $connection,
         string $sql,
-        array $bindings
+        array $bindings,
+        bool $forRows = false
     ): array {
         if (trim($sql) === '') {
             throw new InvalidArgumentException("Parallel query [{$key}] is empty.");
@@ -280,7 +291,13 @@ class Parallel
 
         [$clientSql, $clientBindings] = $connection->prepareSelectForClient($sql, $bindings);
         $prepared['client'] = $connection->getClient();
-        $prepared['request'] = ClientRequests::selectRequest($prepared['client'], $clientSql, $clientBindings);
+        $prepared['request'] = ClientRequests::selectRequest(
+            $prepared['client'],
+            $clientSql,
+            $clientBindings,
+            null,
+            $forRows ? ResultValues::settingsFor($prepared['client']) : []
+        );
 
         return $prepared;
     }

@@ -119,9 +119,50 @@ class ConnectionCursorStreamTest extends TestCase
 
     public function test_an_empty_result_yields_nothing(): void
     {
-        $connection = $this->connection(new CursorStreamCurler([CursorStreamCurler::ok([])]));
+        $curler = new CursorStreamCurler([CursorStreamCurler::ok([])]);
+        $connection = $this->connection($curler);
 
         $this->assertSame([], self::read($connection->cursor('SELECT 1 WHERE 0')));
+        $this->assertSame([], $curler->describes, 'a result without rows needs no types');
+    }
+
+    /**
+     * JSONEachRow names no types, so cursor() asks DESCRIBE TABLE for them, with the SQL on lines of its own and the
+     * bindings filled, and gives each value the PHP type of its column, as select() does.
+     */
+    public function test_the_values_get_the_types_that_describe_table_gives(): void
+    {
+        $curler = new CursorStreamCurler(
+            [CursorStreamCurler::ok(['{"id":"1","f":2,"d":"1.5","n":"nan"}' . "\n"])],
+            0,
+            ['id' => 'UInt64', 'f' => 'Float64', 'd' => 'Decimal(10, 2)', 'n' => 'Float64']
+        );
+        $connection = $this->connection($curler);
+        $connection->enableQueryLog();
+
+        $rows = iterator_to_array($connection->cursor('SELECT id, f, d, n FROM t WHERE id = :id -- the end', ['id' => 1]));
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(1, $rows[0]->id);
+        $this->assertSame(2.0, $rows[0]->f);
+        $this->assertSame('1.50', $rows[0]->d);
+        $this->assertNan($rows[0]->n);
+        $this->assertCount(1, $curler->describes);
+        $this->assertSame("DESCRIBE TABLE (\nSELECT id, f, d, n FROM t WHERE id = 1 -- the end\n) FORMAT JSON", self::sentSql($curler->describes[0]));
+        $this->assertCount(1, $connection->getQueryLog(), 'DESCRIBE TABLE is not logged');
+    }
+
+    /**
+     * When ClickHouse cannot describe the query, as for SHOW TABLES, the values stay as the JSON result writes them.
+     */
+    public function test_without_types_the_values_stay_as_the_result_writes_them(): void
+    {
+        $curler = new CursorStreamCurler([CursorStreamCurler::ok(['{"name":"t","total_rows":"18446744073709551615"}' . "\n"])]);
+
+        $rows = self::read($this->connection($curler)->cursor('SHOW TABLES'));
+
+        $this->assertSame([['name' => 't', 'total_rows' => '18446744073709551615']], $rows);
+        $this->assertCount(1, $curler->describes);
     }
 
     /**
@@ -137,6 +178,8 @@ class ConnectionCursorStreamTest extends TestCase
 
         $this->assertSame([['bad' => "\u{FFFD}("]], $rows);
         $this->assertSame('1', self::urlParameters($curler->requests[0])['output_format_json_validate_utf8'] ?? null);
+        $this->assertSame('1', self::urlParameters($curler->requests[0])['output_format_json_quote_decimals'] ?? null);
+        $this->assertSame('1', self::urlParameters($curler->requests[0])['output_format_json_quote_denormals'] ?? null);
     }
 
     /**
@@ -152,6 +195,7 @@ class ConnectionCursorStreamTest extends TestCase
 
         $this->assertSame([['id' => 1, 'h' => "a\u{FFFD}("], ['id' => 2, 'h' => "\u{FFFD}\u{FFFD}b"]], $rows);
         $this->assertArrayNotHasKey('output_format_json_validate_utf8', self::urlParameters($curler->requests[0]));
+        $this->assertArrayNotHasKey('output_format_json_quote_decimals', self::urlParameters($curler->requests[0]));
     }
 
     /**
@@ -547,19 +591,28 @@ class ConnectionCursorStreamTest extends TestCase
 final class CursorStreamCurler extends CurlerRollingWithRetries
 {
     /**
-     * Every request that was attempted, once per attempt.
+     * Every request of the result that was attempted, once per attempt.
      *
      * @var list<CurlerRequest>
      */
     public array $requests = [];
+
+    /**
+     * Every DESCRIBE TABLE request that cursor() sent for the types of the columns.
+     *
+     * @var list<CurlerRequest>
+     */
+    public array $describes = [];
 
     public int $attempts = 0;
 
     /**
      * @param list<array{code: int, chunks: list<string>, headers: array<string, string>, errorNo?: int, error?: string}> $responses
      * @param int $retries
+     * @param array<string, string>|null $types The type of each column, by its name, that a DESCRIBE TABLE request
+     *                                          gets; null makes ClickHouse refuse it, as for SHOW TABLES
      */
-    public function __construct(private array $responses, int $retries = 0)
+    public function __construct(private array $responses, int $retries = 0, private ?array $types = null)
     {
         $this->setRetries($retries);
     }
@@ -588,6 +641,10 @@ final class CursorStreamCurler extends CurlerRollingWithRetries
 
     protected function attempt(CurlerRequest $request, bool $auto_close): int
     {
+        if (str_starts_with((string) $request->getRequestExtendedInfo('sql'), 'DESCRIBE TABLE (')) {
+            return $this->describe($request);
+        }
+
         $this->requests[] = $request;
         $this->attempts++;
         $response = count($this->responses) > 1 ? array_shift($this->responses) : $this->responses[0];
@@ -617,6 +674,37 @@ final class CursorStreamCurler extends CurlerRollingWithRetries
         $request->setResponse($curlerResponse);
 
         return $response['code'];
+    }
+
+    /**
+     * Answer a DESCRIBE TABLE request with the types of the columns, as a JSON result, or with the error of
+     * ClickHouse when there are no types.
+     *
+     * @param CurlerRequest $request
+     * @return int
+     */
+    private function describe(CurlerRequest $request): int
+    {
+        $this->describes[] = $request;
+        $response = new CurlerResponse();
+        if ($this->types === null) {
+            $response->_info = ['http_code' => 400, 'content_type' => 'text/plain; charset=UTF-8'];
+            $response->_body = 'Code: 62. DB::Exception: Syntax error: failed at position 18. (SYNTAX_ERROR) (version 24.8.14.39 (official build))';
+        } else {
+            $response->_info = ['http_code' => 200, 'content_type' => 'application/json; charset=UTF-8'];
+            $response->_body = (string) json_encode([
+                'meta' => [['name' => 'name', 'type' => 'String'], ['name' => 'type', 'type' => 'String']],
+                'data' => array_map(
+                    fn (string $name, string $type): array => ['name' => $name, 'type' => $type],
+                    array_keys($this->types),
+                    array_values($this->types)
+                ),
+            ]);
+        }
+        $response->_headers = ['http_code' => ''];
+        $request->setResponse($response);
+
+        return $response->_info['http_code'];
     }
 
     /**
