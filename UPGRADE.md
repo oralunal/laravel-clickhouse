@@ -362,6 +362,11 @@ find a case by its name in any letter case.
 - **An empty row** is refused: `insert([[]])` throws `Inserting empty values
   array is not supported in ClickHouse`. `insert([])` returns `true` and sends
   nothing, as in Laravel.
+- **Rows with other keys** are refused: every row of `insert()` needs the keys
+  of the first row, in any order, or `QueryException::insertKeysDiffer()` is
+  thrown before anything is sent. Laravel's insert stored the value of another
+  key in a column of the first row. Give every row the same keys, with `null`
+  for a missing value.
 - **Buffered rows and model inserts** are sent as given (see step 3).
 
 #### 9. Migrations to check

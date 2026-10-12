@@ -379,7 +379,7 @@ static cannotRunAsynchronouslyInSession(): Exceptions\QueryException
 static cannotUpdateEmptyValues(): Exceptions\QueryException
 static cannotUpdateJsonPath(string $selector, string $reason): Exceptions\QueryException
 static cannotUpdateWithoutWhere(): Exceptions\QueryException
-static insertKeysDiffer(string|int $index, array $keys, array $expectedKeys): Exceptions\QueryException
+static insertKeysDiffer(string|int $index, array $keys, array $expectedKeys, string $format = 'JSONEachRow'): Exceptions\QueryException
 static sessionIsLocked(string $sessionId, Throwable $previous): Exceptions\QueryException
 static sessionNotFound(string $sessionId, int $timeout, Throwable $previous): Exceptions\QueryException
 ```

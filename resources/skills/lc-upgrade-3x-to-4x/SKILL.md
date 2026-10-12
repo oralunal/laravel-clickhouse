@@ -477,8 +477,10 @@ user. **Ask before you change any of them.**
    `round(..., <scale>)` or an int or numeric string. `update()` needs a
    numeric string or an int.
 5. **Casts on inserts** (step 4.5) and **rows with missing keys**: `insert()`
-   and `buffer()` refuse a row without keys, and `buffer()` refuses a row whose
-   keys differ from the buffered rows'. Check how the rows are built.
+   and `buffer()` refuse a row without keys, `insert()` refuses a row whose
+   keys differ from the first row's, in any order, and `buffer()` one whose
+   keys differ from the buffered rows'. Check how the rows are built, such as
+   rows that leave out a key whose value is null.
 6. **Laravel's insert.** `insert([])` returns `true` and sends nothing, as in
    Laravel; 3.x threw. Point out code that relied on the exception.
 

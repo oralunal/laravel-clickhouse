@@ -91,7 +91,7 @@ The static methods of `QueryException` make the exceptions that the package thro
 | --- | --- |
 | `QueryException::cannotDeleteWithoutWhere()`, `cannotUpdateWithoutWhere()` | `delete()` or `update()` without a condition |
 | `QueryException::cannotMutateWithClauses()` | A mutation with a clause that ClickHouse ignores. See [Refused clauses](/query-builder/writing-data#refused-clauses). |
-| `QueryException::insertKeysDiffer()` | A row of a `JSONEachRow` insert has other keys than the first row |
+| `QueryException::insertKeysDiffer()` | A row of an insert has other keys than the first row, in `Values` and `JSONEachRow` |
 | `QueryException::cannotCreateTemporaryTableOutsideSession()`, `cannotReachTemporaryTable()` | A temporary table outside a session, or a statement that ClickHouse runs on a database table of the same name. See [Sessions](/advanced/sessions#temporary-tables). |
 | `QueryException::cannotRunAsynchronouslyInSession()` | An asynchronous request or `insertFiles()` in a session |
 | `QueryException::sessionNotFound()`, `sessionIsLocked()` | The ClickHouse errors `SESSION_NOT_FOUND` and `SESSION_IS_LOCKED`. See [Sessions](/advanced/sessions#errors-in-a-session). |
