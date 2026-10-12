@@ -255,19 +255,28 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
     }
 
     /**
-     * A row of a JSONEachRow insert has other keys than the first row.
+     * A row of an insert has other keys than the first row.
      *
-     * The column list of the insert is taken from the keys of the first row. ClickHouse (24.8 checked) silently
-     * drops a key that the list does not name, and gives a column that a row leaves out its default value, so
-     * the rows are refused before anything is sent. Keys may come in any order.
+     * The column list of the insert is taken from the keys of the first row, so the rows are refused before anything
+     * is sent. Keys may come in any order. In JSONEachRow, ClickHouse (24.8 checked) silently drops a key that the
+     * list does not name, and gives a column that a row leaves out its default value. In Values, Laravel writes the
+     * values of each row in the order of its own keys, so ClickHouse stores the value of another key in a column of
+     * the first row, and refuses a row with fewer or more values (SYNTAX_ERROR).
+     *
+     * Thrown by QueryBuilder::insert(), before anything is sent.
      *
      * @param int|string $index The key of the row in the inserted array
      * @param array<int, int|string> $keys The keys of that row
      * @param array<int, int|string> $expectedKeys The keys of the first row
+     * @param string $format The format of the insert: JSONEachRow or Values
      * @return self
      */
-    public static function insertKeysDiffer(int|string $index, array $keys, array $expectedKeys): self
-    {
+    public static function insertKeysDiffer(
+        int|string $index,
+        array $keys,
+        array $expectedKeys,
+        string $format = 'JSONEachRow'
+    ): self {
         $describe = fn (array $names): string => '[' . implode(', ', array_map('strval', $names)) . ']';
         $missing = array_values(array_diff(array_map('strval', $expectedKeys), array_map('strval', $keys)));
         $extra = array_values(array_diff(array_map('strval', $keys), array_map('strval', $expectedKeys)));
@@ -283,11 +292,16 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
             $differences[] = 'has the keys ' . $describe($keys) . ', and the first row ' . $describe($expectedKeys);
         }
 
+        $consequence = $format === 'Values'
+            ? ' row, and the values of each row are written in the order of its own keys, so ClickHouse (24.8 checked)'
+                . ' would store the value of another key in a column of the first row.'
+            : ' row, and ClickHouse (24.8 checked) silently drops a key that the list does not name and gives a'
+                . ' column that a row leaves out its default value.';
+
         return new self(
-            "Cannot insert the rows as JSONEachRow: the row at index {$index} " . implode(' and ', $differences) . '.'
+            "Cannot insert the rows as {$format}: the row at index {$index} " . implode(' and ', $differences) . '.'
             . " Every row must have the first row's keys, in any order: the column list is taken from the first"
-            . ' row, and ClickHouse (24.8 checked) silently drops a key that the list does not name and gives a'
-            . ' column that a row leaves out its default value.'
+            . $consequence
         );
     }
 

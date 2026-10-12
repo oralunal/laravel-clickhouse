@@ -1783,13 +1783,16 @@ class QueryBuilder extends Builder
      *   refuses a float with a fraction, which Values cuts off. Raw SQL, such as DB::raw(), and a string that is not
      *   valid UTF-8 are refused before anything is sent.
      *
+     * In both formats, every row must have the keys of the first row, in any order, or the rows are refused before
+     * anything is sent or logged (see refuseRowsWithOtherKeys()).
+     *
      * @param array<int|string, mixed> $values One row, or a list of rows
      * @param Format|string|null $format Format::Values or Format::JsonEachRow, or 'Values' or 'JSONEachRow' in any
      *                                   letter case; null uses the connection's insert_format
      * @return bool
      * @throws InvalidArgumentException When the format is neither Values nor JSONEachRow, or, in JSONEachRow, a
      *                                  value cannot be sent as JSON or the connection is not a ClickHouse connection
-     * @throws QueryException When, in JSONEachRow, a row's keys differ from the first row's
+     * @throws QueryException When a row's keys differ from the first row's
      * @throws ClientQueryException When a row has no keys, before anything is sent, or, in JSONEachRow, the insert
      *                              fails
      */
@@ -1812,7 +1815,46 @@ class QueryBuilder extends Builder
             throw ClientQueryException::cannotInsertEmptyValues();
         }
 
-        return $format === Format::JsonEachRow ? $this->insertJsonEachRow($rows) : parent::insert($rows);
+        if ($format === Format::JsonEachRow) {
+            return $this->insertJsonEachRow($rows);
+        }
+
+        $this->refuseRowsWithOtherKeys($rows);
+
+        return parent::insert($rows);
+    }
+
+    /**
+     * Refuse the rows of a Values insert whose keys differ from the first row's, in any order, as a JSONEachRow
+     * insert refuses them (see ClientRequests::encodeJsonEachRow()). Laravel takes the column list from the keys of
+     * the first row, and writes the values of each row in the order of its own keys, so ClickHouse (24.8 checked)
+     * stores the value of another key in a column of the first row: [['a' => 1], ['b' => 5]] stores 5 in the column
+     * a. A row with fewer or more keys fails with SYNTAX_ERROR, and no row is stored. A row that is no array is left
+     * to Laravel.
+     *
+     * @param array<int|string, mixed> $rows
+     * @return void
+     * @throws QueryException When a row's keys differ from the first row's
+     */
+    protected function refuseRowsWithOtherKeys(array $rows): void
+    {
+        $first = null;
+
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            if ($first === null) {
+                $first = $row;
+
+                continue;
+            }
+
+            if (count($row) !== count($first) || array_diff_key($row, $first) !== []) {
+                throw QueryException::insertKeysDiffer($index, array_keys($row), array_keys($first), Format::Values->value);
+            }
+        }
     }
 
     /**

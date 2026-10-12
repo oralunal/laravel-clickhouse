@@ -17,9 +17,9 @@ DB::connection('clickhouse')->table('events')->insert(['id' => 'e3', 'type' => '
 - The rows go as given. Casts, mutators, timestamps and model events do not apply. To apply them, use `create()`.
 - Laravel takes the columns from the keys of the first row, in alphabetical order, and writes the values of each row
   in the order of its own keys. Each row must have the keys of the first row, in any order.
-  In the `Values` format, ClickHouse refuses a row with fewer or more keys (`SYNTAX_ERROR`) and stores no row.
-  A row with as many keys but other names is stored: its values go into the columns of the first row.
-  `JSONEachRow` refuses such a row before the package sends the request.
+  A row with other keys throws a `QueryException` before the package sends the request, in both formats:
+  `Cannot insert the rows as Values: the row at index 1 lacks the keys [amount]. ...`
+  Without this check, `[['id' => 'e1'], ['type' => 'view']]` would store `view` in the column `id`.
 - `insert([])` sends nothing and returns `true`, as in Laravel. A row without keys, such as `[[]]`, throws
   `Inserting empty values array is not supported in ClickHouse` before the package sends the request.
 - The package quotes each column name as one identifier. A column name cannot add SQL to the statement.
@@ -146,8 +146,8 @@ DB::connection('clickhouse')->table('events')->insert($rows, Format::JsonEachRow
 - `Model::insert()`, `create()`, `save()` and `flushBuffer()` use the `insert_format` option.
 - `insert_format` takes `Values` or `JSONEachRow`, in any letter case, or a `Format` case. `null` and `''` are `Values`.
   Another value throws an `InvalidArgumentException`.
-- Each row must have the keys of the first row. A row with other keys throws before the package sends the request:
-  `Cannot insert the rows as JSONEachRow: the row at index 1 lacks the keys [amount]. ...`
+- Each row must have the keys of the first row, as in `Values`. A row with other keys throws before the package sends
+  the request: `Cannot insert the rows as JSONEachRow: the row at index 1 lacks the keys [amount]. ...`
 - The `INSERT` goes in the URL and the rows in the body. An error message shows the `INSERT` and some bytes near the
   incorrect value, not all of the data.
 

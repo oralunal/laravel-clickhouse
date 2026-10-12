@@ -402,18 +402,65 @@ class LaravelQueryBuilderTest extends TestCase
     }
 
     /**
-     * A row that the JSONEachRow insert refuses, here one whose keys differ from the first row's, stores nothing.
+     * Rows whose keys differ from the first row's, and the message that refuses them, in each format.
+     *
+     * @return array<string, array{list<array<string, mixed>>, string, string}>
      */
-    public function testARefusedJsonEachRowInsertStoresNothing(): void
+    public static function rowsWithOtherKeysProvider(): array
     {
+        $values = ' Every row must have the first row\'s keys, in any order: the column list is taken from the first row,'
+            . ' and the values of each row are written in the order of its own keys, so ClickHouse (24.8 checked) would'
+            . ' store the value of another key in a column of the first row.';
+
+        return [
+            'a key missing in JSONEachRow' => [
+                [['id' => 10, 'name' => 'a', 'flag' => 0], ['id' => 11, 'name' => 'b']],
+                'JSONEachRow',
+                'Cannot insert the rows as JSONEachRow: the row at index 1 lacks the keys [flag].',
+            ],
+            'as many keys with other names in Values' => [
+                [['id' => 10, 'name' => 'a'], ['id' => 11, 'flag' => 1]],
+                'Values',
+                'Cannot insert the rows as Values: the row at index 1 lacks the keys [name] and has the keys [flag], which'
+                . ' the first row does not have.' . $values,
+            ],
+            'a key missing in Values' => [
+                [['id' => 10, 'name' => 'a', 'flag' => 0], ['flag' => 1, 'id' => 11]],
+                'Values',
+                'Cannot insert the rows as Values: the row at index 1 lacks the keys [name].' . $values,
+            ],
+            'a key more in Values, with the keys of a list' => [
+                ['x' => ['id' => 10], 'y' => ['id' => 11, 'flag' => 1]],
+                'Values',
+                'Cannot insert the rows as Values: the row at index y has the keys [flag], which the first row does not have.',
+            ],
+        ];
+    }
+
+    /**
+     * Rows whose keys differ from the first row's are refused before anything is sent, in both formats: in Values,
+     * Laravel would write the value of another key into a column of the first row. Keys in another order are kept.
+     *
+     * @param list<array<string, mixed>> $rows
+     */
+    #[DataProvider('rowsWithOtherKeysProvider')]
+    public function testRowsWithOtherKeysAreRefusedAndStoreNothing(array $rows, string $format, string $message): void
+    {
+        $connection = $this->connection();
+        $connection->enableQueryLog();
+
         try {
-            $this->connection()->table(self::ROWS)->insert([['id' => 10, 'name' => 'a', 'flag' => 0], ['id' => 11, 'name' => 'b']], 'JSONEachRow');
+            $connection->table(self::ROWS)->insert($rows, $format);
             $this->fail('The insert should throw');
         } catch (QueryException $exception) {
-            $this->assertStringStartsWith('Cannot insert the rows as JSONEachRow: the row at index 1 lacks the keys [flag].', $exception->getMessage());
+            $this->assertStringStartsWith($message, $exception->getMessage());
         }
 
-        $this->assertSame([1, 2, 3, 4], $this->ids($this->connection()->table(self::ROWS)));
+        $this->assertSame([], $connection->getQueryLog());
+        $this->assertSame([1, 2, 3, 4], $this->ids($connection->table(self::ROWS)));
+
+        $connection->table(self::ROWS)->insert([['id' => 10, 'name' => 'a'], ['name' => 'b', 'id' => 11]], $format);
+        $this->assertSame([1, 2, 3, 4, 10, 11], $this->ids($connection->table(self::ROWS)));
     }
 
     // count() and paginate()

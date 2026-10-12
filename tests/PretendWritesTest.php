@@ -182,9 +182,9 @@ class PretendWritesTest extends TestCase
     }
 
     /**
-     * An insert that a check refuses before anything is sent, with the exception and the start of its message: in
-     * JSONEachRow, rows whose keys differ, raw SQL or a string that is not valid UTF-8, since the rows are encoded
-     * while pretending too.
+     * An insert that a check refuses before anything is sent, with the exception and the start of its message: rows
+     * whose keys differ, in both formats, and, in JSONEachRow, raw SQL or a string that is not valid UTF-8, since the
+     * rows are encoded while pretending too.
      *
      * @return array<string, array{Closure(): mixed, class-string, string}>
      */
@@ -197,6 +197,12 @@ class PretendWritesTest extends TestCase
                 fn () => $json([['id' => 2, 'f_string' => 'a'], ['id' => 3]]),
                 QueryException::class,
                 'Cannot insert the rows as JSONEachRow: the row at index 1 lacks the keys [f_string].',
+            ],
+            'keys that differ in Values' => [
+                fn () => DB::connection('clickhouse')->table('json_examples')->insert([['id' => 2], ['f_string' => 'a']], 'Values'),
+                QueryException::class,
+                'Cannot insert the rows as Values: the row at index 1 lacks the keys [id] and has the keys [f_string],'
+                . ' which the first row does not have.',
             ],
             'raw SQL' => [
                 fn () => $json([['id' => 2, 'f_string' => DB::raw("'x'")]]),
