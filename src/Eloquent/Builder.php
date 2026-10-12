@@ -20,11 +20,17 @@ use Oralunal\LaravelClickHouse\QueryBuilder;
  * the ClickHouse joins, reach it through Eloquent's forwarding. has(), whereHas(), doesntHave() and their variants
  * check the relation with an IN sub-query (see addHasWhere()).
  *
+ * The base query of a ClickHouse model is always a QueryBuilder, because Model::newBaseQueryBuilder() refuses another
+ * connection. The @method tags below give toBase() and getQuery() that type, for static analysis tools.
+ *
  * @template TModel of EloquentModel
  *
  * @extends EloquentBuilder<TModel>
  *
  * @mixin QueryBuilder
+ *
+ * @method QueryBuilder toBase()
+ * @method QueryBuilder getQuery()
  */
 class Builder extends EloquentBuilder
 {

@@ -17,6 +17,25 @@ $query->select('id', 'field_one')->orderBy('id')->get();
 - ClickHouse 24.8 returns 64-bit integers, such as `UInt64` and the result of `count()` in SQL, as strings. 25.8 and later return numbers.
   The `output_format_json_quote_64bit_integers` setting chooses. See [ClickHouse versions](/reference/clickhouse-versions).
 
+### Static analysis
+
+`QueryBuilder` gives static analysis tools, such as PHPStan and Larastan, the array type of its rows.
+`get()` returns `Collection<int, array<string, mixed>>`, and `first()` returns `array<string, mixed>|null`.
+The same applies to `find()`, `sole()`, `cursor()`, `lazy()`, `chunk()`, `each()` and their variants.
+On a model query, `toBase()` and `getQuery()` return `QueryBuilder`.
+
+`DB::connection()` declares Laravel's connection type. Thus PHPStan reads `DB::connection('clickhouse')->table()` as
+Laravel's builder, with `stdClass` rows. Declare the type of the connection:
+
+```php
+use Oralunal\LaravelClickHouse\Connection;
+
+/** @var Connection $clickhouse */
+$clickhouse = DB::connection('clickhouse');
+
+$rows = $clickhouse->table('my_table')->get(); // Collection<int, array<string, mixed>>
+```
+
 ## First row and single values
 
 ```php
