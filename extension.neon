@@ -1,0 +1,31 @@
+# The PHPStan extension of oralunal/laravel-clickhouse, for Larastan. Include it after Larastan's extension:
+#
+#     includes:
+#         - vendor/larastan/larastan/extension.neon
+#         - vendor/oralunal/laravel-clickhouse/extension.neon
+#
+# See https://laravel-clickhouse.oralunal.com/reference/static-analysis
+
+services:
+    # Larastan's SQL parser, with the schema dumps of ClickHouse connections (see ClickHouseSqlParser).
+    sqlParser:
+        type: Larastan\Larastan\SQL\SqlParser
+        factory: Oralunal\LaravelClickHouse\PHPStan\ClickHouseSqlParser::create()
+
+    -
+        class: Oralunal\LaravelClickHouse\PHPStan\ConnectionConfig
+
+    -
+        class: Oralunal\LaravelClickHouse\PHPStan\DatabaseFacadeReturnType
+        tags:
+            - phpstan.broker.dynamicStaticMethodReturnTypeExtension
+
+    -
+        class: Oralunal\LaravelClickHouse\PHPStan\SchemaFacadeReturnType
+        tags:
+            - phpstan.broker.dynamicStaticMethodReturnTypeExtension
+
+    -
+        class: Oralunal\LaravelClickHouse\PHPStan\DatabaseManagerReturnType
+        tags:
+            - phpstan.broker.dynamicMethodReturnTypeExtension

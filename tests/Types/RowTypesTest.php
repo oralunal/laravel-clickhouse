@@ -8,9 +8,12 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
 /**
- * PHPStan, with Larastan, reads each row of QueryBuilder as a stdClass object, as the builder returns it, and the base
- * query of a ClickHouse model as a QueryBuilder. The assertions are the assertType() calls in data/row-types.php;
- * RowObjectsTest checks the rows that the same methods return.
+ * PHPStan, with Larastan and the extension of the package (extension.neon), reads the types that the package
+ * returns. The assertions are the assertType() calls of the files in data/:
+ * - row-types.php: each row of QueryBuilder is a stdClass object, and the base query of a ClickHouse model is a
+ *   QueryBuilder. RowObjectsTest checks the rows that the same methods return;
+ * - extension.php: the columns of the models come from the ClickHouse schema dump in schema/, with the PHP types of
+ *   the values that ResultValues returns, and the facades give the package's types for ClickHouse connections.
  *
  * PHPStan runs in its own process, because Larastan boots a Laravel application, whose error and exception handlers
  * must not stay in the process of the other tests.

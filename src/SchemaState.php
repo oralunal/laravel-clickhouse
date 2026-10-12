@@ -14,9 +14,17 @@ use stdClass;
  * The dump is built from SHOW CREATE TABLE over HTTP, so no clickhouse-client
  * binary is required. Qualifiers naming the connection's own database are
  * stripped, which lets a dump taken from one database be loaded into another.
+ * Its first line, a comment, names the connection (see DUMP_HEADER), so that
+ * the PHPStan extension of the package reads the dump with the options of that
+ * connection.
  */
 class SchemaState extends BaseSchemaState
 {
+    /**
+     * The first line of a dump, followed by the name of its connection.
+     */
+    public const DUMP_HEADER = '-- ClickHouse schema of the connection: ';
+
     /**
      * The whitespace and comments that may come before a statement of a
      * dump: -- line comments and block comments.
@@ -56,7 +64,11 @@ class SchemaState extends BaseSchemaState
             $statements[] = $this->migrationDataStatement();
         }
 
-        $this->files->put($path, implode(PHP_EOL . PHP_EOL, array_filter($statements)) . PHP_EOL);
+        $this->files->put(
+            $path,
+            self::DUMP_HEADER . $this->connection->getName() . PHP_EOL . PHP_EOL
+            . implode(PHP_EOL . PHP_EOL, array_filter($statements)) . PHP_EOL
+        );
     }
 
     /**
@@ -70,7 +82,9 @@ class SchemaState extends BaseSchemaState
      * insert, the default of ClickHouse 26.x, returns before the rows are
      * written when the connection's settings say wait_for_async_insert = 0,
      * so that migrate would run the migrations of the dump again. A dump
-     * written by 3.0.0 is loaded the same way.
+     * written by 3.0.0 is loaded the same way. A statement that holds only
+     * comments, such as the header of a dump of a database without objects,
+     * is not sent.
      *
      * Without a cluster_name, each statement goes to every node of the
      * connection, one after another, as statementOnEveryNode() sends it.
@@ -101,7 +115,8 @@ class SchemaState extends BaseSchemaState
             fn (string $statement): string => $this->withSynchronousInsert($statement),
             array_values(array_filter(
                 array_map('trim', preg_split('/;\s*$/m', $this->files->get($path))),
-                fn (string $statement): bool => $statement !== ''
+                fn (string $statement): bool
+                    => preg_replace('/\A' . self::LEADING_COMMENTS . '/s', '', $statement) !== ''
             ))
         );
 
