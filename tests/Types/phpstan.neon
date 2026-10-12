@@ -1,7 +1,13 @@
 includes:
     - ../../vendor/larastan/larastan/extension.neon
+    - ../../extension.neon
 
 parameters:
     level: 5
     paths:
         - data
+    # Larastan reads these paths from the working directory, which RowTypesTest sets to the root of the package.
+    squashedMigrationsPath:
+        - tests/Types/schema
+    databaseMigrationsPath:
+        - tests/Types/schema

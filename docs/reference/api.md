@@ -495,6 +495,66 @@ encodeRows(array $rows): string
 normalizeValue(mixed $value): mixed
 ```
 
+### PHPStan\ClickHouseSqlParser
+
+Final class `Oralunal\LaravelClickHouse\PHPStan\ClickHouseSqlParser`, implements `Larastan\Larastan\SQL\SqlParser`.
+
+```php
+new ClickHouseSqlParser(Larastan\Larastan\SQL\SqlParser $fallback, PHPStan\ConnectionConfig $config)
+static create(): object
+parseTables(string $sql): array
+```
+
+### PHPStan\ConnectionArgument
+
+Final class `Oralunal\LaravelClickHouse\PHPStan\ConnectionArgument`.
+
+```php
+static namesClickHouse(array $args, PHPStan\Analyser\Scope $scope, PHPStan\ConnectionConfig $config): bool
+```
+
+### PHPStan\ConnectionConfig
+
+Final class `Oralunal\LaravelClickHouse\PHPStan\ConnectionConfig`.
+
+```php
+isClickHouse(?string $name): bool
+isReadOnly(string $name): bool
+```
+
+### PHPStan\DatabaseFacadeReturnType
+
+Final class `Oralunal\LaravelClickHouse\PHPStan\DatabaseFacadeReturnType`, implements `PHPStan\Type\DynamicStaticMethodReturnTypeExtension`.
+
+```php
+new DatabaseFacadeReturnType(PHPStan\ConnectionConfig $config, PHPStan\DependencyInjection\Container $container)
+getClass(): string
+getTypeFromStaticMethodCall(PHPStan\Reflection\MethodReflection $methodReflection, PhpParser\Node\Expr\StaticCall $methodCall, PHPStan\Analyser\Scope $scope): ?PHPStan\Type\Type
+isStaticMethodSupported(PHPStan\Reflection\MethodReflection $methodReflection): bool
+```
+
+### PHPStan\DatabaseManagerReturnType
+
+Final class `Oralunal\LaravelClickHouse\PHPStan\DatabaseManagerReturnType`, implements `PHPStan\Type\DynamicMethodReturnTypeExtension`.
+
+```php
+new DatabaseManagerReturnType(PHPStan\ConnectionConfig $config)
+getClass(): string
+getTypeFromMethodCall(PHPStan\Reflection\MethodReflection $methodReflection, PhpParser\Node\Expr\MethodCall $methodCall, PHPStan\Analyser\Scope $scope): ?PHPStan\Type\Type
+isMethodSupported(PHPStan\Reflection\MethodReflection $methodReflection): bool
+```
+
+### PHPStan\SchemaFacadeReturnType
+
+Final class `Oralunal\LaravelClickHouse\PHPStan\SchemaFacadeReturnType`, implements `PHPStan\Type\DynamicStaticMethodReturnTypeExtension`.
+
+```php
+new SchemaFacadeReturnType(PHPStan\ConnectionConfig $config)
+getClass(): string
+getTypeFromStaticMethodCall(PHPStan\Reflection\MethodReflection $methodReflection, PhpParser\Node\Expr\StaticCall $methodCall, PHPStan\Analyser\Scope $scope): ?PHPStan\Type\Type
+isStaticMethodSupported(PHPStan\Reflection\MethodReflection $methodReflection): bool
+```
+
 ### QueryGrammar
 
 Class `Oralunal\LaravelClickHouse\QueryGrammar`, extends `Illuminate\Database\Query\Grammars\Grammar`, uses `Concerns\CompilesJsonPaths`, `Concerns\SubstitutesBindings`.
@@ -607,6 +667,8 @@ Class `Oralunal\LaravelClickHouse\SchemaState`, extends `Illuminate\Database\Sch
 See [the guide](/schema/migration-commands).
 
 ```php
+const DUMP_HEADER = '-- ClickHouse schema of the connection: ';
+
 dump(Illuminate\Database\Connection $connection, $path): void
 load($path): void
 ```

@@ -6,6 +6,7 @@ use Illuminate\Database\Migrations\DatabaseMigrationRepository;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Oralunal\LaravelClickHouse\SchemaState;
 
 class SchemaDumpTest extends TestCase
 {
@@ -72,6 +73,22 @@ class SchemaDumpTest extends TestCase
         return [];
     }
 
+    /**
+     * The dump of a database without objects holds only its header, a comment, which is not sent on load: ClickHouse
+     * refuses an empty query.
+     */
+    public function testADumpWithOnlyItsHeaderLoadsWithoutAnError(): void
+    {
+        $path = $this->workDir . '/empty.sql';
+        file_put_contents($path, SchemaState::DUMP_HEADER . self::SOURCE . "\n\n");
+        $connection = DB::connection(self::SOURCE);
+        $connection->enableQueryLog();
+
+        $connection->getSchemaState()->load($path);
+
+        $this->assertSame([], $connection->getQueryLog());
+    }
+
     public function testDumpWritesPortableDdlInDependencyOrderWithMigrationData(): void
     {
         $path = $this->workDir . '/schema.sql';
@@ -79,6 +96,9 @@ class SchemaDumpTest extends TestCase
         $this->assertSame(0, Artisan::call('schema:dump', ['--database' => self::SOURCE, '--path' => $path]));
 
         $dump = file_get_contents($path);
+        $header = SchemaState::DUMP_HEADER . self::SOURCE . "\n\n";
+        $this->assertStringStartsWith($header, $dump, 'The first line names the connection.');
+        $dump = substr($dump, strlen($header));
         $this->assertStringNotContainsString(self::SOURCE, $dump);
         $this->assertStringContainsString("`name` String DEFAULT 'a;b'", $dump);
         $this->assertStringContainsString("FROM events_view;", $dump);
