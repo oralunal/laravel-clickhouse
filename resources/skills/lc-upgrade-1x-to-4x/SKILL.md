@@ -142,14 +142,14 @@ is unclear.
 
    ```bash
    composer remove oralunal/phpclickhouse-laravel oralunal/clickhouse-builder the-tinderbox/clickhouse-builder glushkovds/clickhouse-builder glushkovds/php-clickhouse-schema-builder --no-update
-   composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+   composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
    ```
 
    `myclabs/php-enum` and `the-tinderbox/clickhouse-php-client` are no longer
    installed with the package. If step 1 found application code that uses
    `MyCLabs\Enum` for its own enums, or the `Tinderbox\Clickhouse\` client
    directly, add that package to the same `composer require` line, for example
-   `composer require oralunal/laravel-clickhouse:^4.0 myclabs/php-enum --with-all-dependencies`.
+   `composer require oralunal/laravel-clickhouse:^4.1 myclabs/php-enum --with-all-dependencies`.
 
    `composer remove` only warns about a package that `composer.json` does not
    list. `oralunal/laravel-clickhouse` conflicts with

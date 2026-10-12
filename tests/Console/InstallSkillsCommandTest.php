@@ -131,7 +131,7 @@ class InstallSkillsCommandTest extends TestCase
             $contents = $this->files->get("{$skills}/{$skill}/SKILL.md");
 
             $this->assertStringContainsString('vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-3x-to-4x/SKILL.md', $contents, $skill);
-            $this->assertStringContainsString('composer require oralunal/laravel-clickhouse:^4.0', $contents, $skill);
+            $this->assertStringContainsString('composer require oralunal/laravel-clickhouse:^4.1', $contents, $skill);
         }
     }
 

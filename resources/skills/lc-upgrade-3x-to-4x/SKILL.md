@@ -29,8 +29,9 @@ the behavior changes that alter which rows a write touches, which values it
 stores, what a read returns, or which tables a migration creates.
 
 Work through the steps in order. Do not skip the checks. Once 4.x is
-installed, the complete list of changes is the `[4.0.0]` section of
-`vendor/oralunal/laravel-clickhouse/CHANGELOG.md`, the human-readable guide is
+installed, the complete list of changes is the `[4.0.0]` and `[4.1.0]`
+sections of `vendor/oralunal/laravel-clickhouse/CHANGELOG.md`, the
+human-readable guide is
 `vendor/oralunal/laravel-clickhouse/UPGRADE.md`, and every public class and
 signature of 4.x is in
 `vendor/oralunal/laravel-clickhouse/docs/reference/api.md` and under
@@ -147,7 +148,7 @@ before you write a call to it.
 ## Step 2: Update the dependency
 
 ```bash
-composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
 ```
 
 If Composer refuses because another package of the project or a third-party
@@ -849,4 +850,10 @@ End with a short summary for the user:
 - if the ClickHouse servers run 25.8 or later, a pointer to
   https://laravel-clickhouse.oralunal.com/reference/clickhouse-versions, which
   lists what they do otherwise than 24.8 and the settings that bring back its
-  behavior.
+  behavior;
+- if the project runs PHPStan with Larastan (`larastan/larastan` in
+  `composer.json`), a pointer to
+  https://laravel-clickhouse.oralunal.com/reference/static-analysis: the
+  package's extension, `vendor/oralunal/laravel-clickhouse/extension.neon`,
+  included after Larastan's, reads the ClickHouse schema dumps and gives the
+  facades the package's types. Do not add it yourself.
