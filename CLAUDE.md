@@ -105,3 +105,5 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - Laravel can be deployed using [Laravel Cloud](https://cloud.laravel.com/), which is the fastest way to deploy and scale production Laravel applications.
 
 </laravel-boost-guidelines>
+
+Always write all text (documentation, code comments, commit messages and changelog entries) in ASD-STE100 Simplified Technical English.
