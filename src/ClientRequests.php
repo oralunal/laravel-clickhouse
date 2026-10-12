@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Oralunal\LaravelClickHouse;
 
 use ClickHouseDB\Client;
+use ClickHouseDB\Exception\ClickHouseException;
 use ClickHouseDB\Exception\DatabaseException;
 use ClickHouseDB\Exception\QueryException as ClientQueryException;
 use ClickHouseDB\Query\Degeneration\Bindings;
@@ -14,8 +15,10 @@ use ClickHouseDB\Transport\CurlerRequest;
 use ClickHouseDB\Transport\CurlerResponse;
 use Generator;
 use InvalidArgumentException;
+use JsonException;
 use Oralunal\LaravelClickHouse\Enums\Format;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
+use stdClass;
 
 /**
  * Requests that the package sends through a smi2 client where smi2's own Client methods would send or read them
@@ -85,18 +88,24 @@ final class ClientRequests
      * @param string $sql
      * @param array<int|string, mixed> $bindings Bindings for smi2's Bindings degeneration (':name' and '{name}')
      * @param string|null $format The format that the SQL names in its FORMAT clause, or null when it names none
+     * @param array<string, int|string> $settings Settings of this request only, such as ResultValues::SETTINGS
      * @return Statement
      */
-    public static function select(Client $client, string $sql, array $bindings = [], ?string $format = null): Statement
-    {
+    public static function select(
+        Client $client,
+        string $sql,
+        array $bindings = [],
+        ?string $format = null,
+        array $settings = []
+    ): Statement {
         if (self::clientSelectsAsIntended($sql, $format)) {
-            $statement = $client->select($sql, $bindings);
+            $statement = $client->select($sql, $bindings, null, null, $settings);
             self::readExceptionWrittenIntoTheResult($statement->getRequest(), $statement->getFormat());
 
             return $statement;
         }
 
-        $request = self::newReroutedSelectRequest($client, $sql, $bindings, $format);
+        $request = self::newReroutedSelectRequest($client, $sql, $bindings, $format, $settings);
         $client->transport()->getCurler()->execOne($request);
 
         return self::selectStatement($request);
@@ -114,22 +123,73 @@ final class ClientRequests
      * @param string $sql
      * @param array<int|string, mixed> $bindings
      * @param string|null $format The format that the SQL names in its FORMAT clause, or null when it names none
+     * @param array<string, int|string> $settings Settings of this request only, such as ResultValues::SETTINGS
      * @return CurlerRequest
      */
     public static function selectRequest(
         Client $client,
         string $sql,
         array $bindings = [],
-        ?string $format = null
+        ?string $format = null,
+        array $settings = []
     ): CurlerRequest {
         if (!self::clientSelectsAsIntended($sql, $format)) {
-            return self::newReroutedSelectRequest($client, $sql, $bindings, $format);
+            return self::newReroutedSelectRequest($client, $sql, $bindings, $format, $settings);
         }
 
         $query = new Query($sql, [self::bindings($bindings)]);
         $query->setFormat(self::SELECT_FORMAT);
 
-        return $client->transport()->getRequestRead($query);
+        return $client->transport()->getRequestRead($query, null, null, $settings);
+    }
+
+    /**
+     * Read the rows of a SELECT statement as stdClass objects whose values have the PHP types of their ClickHouse
+     * types, the same on every ClickHouse version (see ResultValues).
+     *
+     * A JSON result, as select() asks for it, is decoded here with ResultValues::JSON_DECODE_FLAGS, so that an
+     * integer that does not fit a PHP int keeps its digits as a string, where smi2 would decode it as a float, and
+     * the meta of the result gives the type of each column. A result in another JSON format that a FORMAT clause of
+     * the SQL names, such as JSONStrings or JSONCompact, keeps the values that smi2 reads, as the SQL asked for them.
+     * The statement of a query that was not sent, while the connection pretends, has no rows.
+     *
+     * @param Statement $statement
+     * @return list<stdClass>
+     * @throws DatabaseException When ClickHouse reported an error
+     * @throws ClientQueryException When the request failed without a ClickHouse error, or its result is not JSON
+     */
+    public static function rowsOf(Statement $statement): array
+    {
+        $request = $statement->getRequest();
+        $format = $statement->getFormat();
+        if (!is_string($format) || strtoupper($format) !== self::SELECT_FORMAT || !$request->isResponseExists()) {
+            return array_map(static fn (array $row): stdClass => (object) $row, array_values($statement->rows()));
+        }
+
+        if ($statement->isError()) {
+            $statement->error();
+        }
+
+        $body = $request->response()->body();
+        if (trim((string) $body) === '') {
+            return [];
+        }
+
+        try {
+            $document = json_decode((string) $body, true, 512, ResultValues::JSON_DECODE_FLAGS);
+        } catch (JsonException $exception) {
+            throw new ClientQueryException(
+                'Cannot read the JSON result of the query: ' . $exception->getMessage(),
+                0,
+                $exception
+            );
+        }
+
+        if (!is_array($document) || !is_array($document['meta'] ?? null)) {
+            throw new ClientQueryException('Can`t find meta');
+        }
+
+        return ResultValues::rows($document['meta'], is_array($document['data'] ?? null) ? $document['data'] : []);
     }
 
     /**
@@ -317,8 +377,9 @@ final class ClientRequests
      * The request also sends output_format_json_validate_utf8=1, so that ClickHouse replaces the bytes of a string
      * that are not valid UTF-8, such as those of a binary MD5 hash, with U+FFFD, as it always does in FORMAT JSON,
      * which select() reads: the rows are then the rows of select(). Without it, JSONEachRow writes such bytes as they
-     * are, and the line is not JSON that PHP can decode (24.8, 26.3 and 26.8 checked). A read-only user, the readonly
-     * option of the connection, cannot change a setting, so the setting is not sent for such a user.
+     * are, and the line is not JSON that PHP can decode (24.8, 26.3 and 26.8 checked). It sends the settings of
+     * ResultValues too, so that every value is read exactly. A read-only user, the readonly option of the
+     * connection, cannot change a setting, so these settings are not sent for such a user.
      *
      * smi2's Client::streamRead() reports a failed query as 'HttpCode:500 ; ;', since ClickHouse writes the error
      * into the stream and not into the response body. Here the error is read from the end of the stream (see
@@ -349,7 +410,9 @@ final class ClientRequests
             new Query($sql . "\nFORMAT " . self::JSON_EACH_ROW, [self::bindings($bindings)]),
             null,
             null,
-            $client->settings()->isReadOnlyUser() ? [] : ['output_format_json_validate_utf8' => 1]
+            $client->settings()->isReadOnlyUser()
+                ? []
+                : ['output_format_json_validate_utf8' => 1] + ResultValues::SETTINGS
         );
         $request->setRequestExtendedInfo(
             array_merge($request->getRequestExtendedInfo(), ['format' => self::JSON_EACH_ROW])
@@ -396,6 +459,45 @@ final class ClientRequests
         throw new ClientQueryException(
             'ClickHouse reported an error after the rows of the result: ' . $response->_body
         );
+    }
+
+    /**
+     * Get the name and the type of each column of the result of a SELECT, as DESCRIBE TABLE (<sql>) gives them,
+     * without running the query: the meta that a JSON result holds, for a result in a format without types, such as
+     * the JSONEachRow of selectIntoStream(). The SQL goes on lines of its own inside the parentheses, so that a line
+     * comment at its end stays a comment, and its bindings are filled as select() fills them.
+     *
+     * Null when ClickHouse cannot describe the query, as for SQL that is no SELECT, such as SHOW TABLES, or when the
+     * request fails. The request is not logged.
+     *
+     * @param Client $client
+     * @param string $sql A query without a FORMAT clause
+     * @param array<int|string, mixed> $bindings Bindings for smi2's Bindings degeneration (':name' and '{name}')
+     * @return list<array{name: string, type: string}>|null
+     */
+    public static function columnTypes(Client $client, string $sql, array $bindings = []): ?array
+    {
+        $sql = rtrim($sql);
+        if (str_ends_with($sql, ';')) {
+            $sql = rtrim(substr($sql, 0, -1));
+        }
+
+        try {
+            $rows = self::select($client, "DESCRIBE TABLE (\n{$sql}\n)", $bindings)->rows();
+        } catch (ClickHouseException) {
+            return null;
+        }
+
+        $columns = [];
+        foreach ($rows as $row) {
+            if (!is_array($row) || !is_string($row['name'] ?? null) || !is_string($row['type'] ?? null)) {
+                return null;
+            }
+
+            $columns[] = ['name' => $row['name'], 'type' => $row['type']];
+        }
+
+        return $columns === [] ? null : $columns;
     }
 
     /**
@@ -622,19 +724,21 @@ final class ClientRequests
      * @param string $sql
      * @param array<int|string, mixed> $bindings
      * @param string|null $format
+     * @param array<string, int|string> $settings
      * @return CurlerRequest
      */
     private static function newReroutedSelectRequest(
         Client $client,
         string $sql,
         array $bindings,
-        ?string $format
+        ?string $format,
+        array $settings = []
     ): CurlerRequest {
         $request = $client->transport()->getRequestRead(
             new Query($sql, [self::bindings($bindings)]),
             null,
             null,
-            ['default_format' => self::SELECT_FORMAT]
+            ['default_format' => self::SELECT_FORMAT] + $settings
         );
         $request->setRequestExtendedInfo(
             array_merge($request->getRequestExtendedInfo(), ['format' => $format ?? self::SELECT_FORMAT])

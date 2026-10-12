@@ -107,16 +107,15 @@ class SettingsTest extends TestCase
     }
 
     /**
-     * output_format_json_quote_64bit_integers = 1 in the connection's settings keeps 64-bit integers exact: they come
-     * back as strings, as ClickHouse 24.8 returns them by default. 25.8 and later default it to 0 and return JSON
-     * numbers, which PHP reads as an int, or as a float above PHP_INT_MAX: 18446744073709551615 becomes
-     * 1.8446744073709552E+19.
+     * select() and the query builder read every 64-bit integer exactly, whatever output_format_json_quote_64bit_integers
+     * says: an int when it fits one, and a numeric string above PHP_INT_MAX. ClickHouse 24.8 quotes such integers by
+     * default, and 25.8 and later write them as JSON numbers, which smi2 reads as a float above PHP_INT_MAX:
+     * 18446744073709551615 becomes 1.8446744073709552E+19 in the rows of smi2's own statement.
      *
-     * A connection with the setting at 0 reads such numbers on every version, 24.8 included, so the connection's
-     * settings are shown to reach the server whatever its default. settings() on one query overrides the
-     * connection's value in both directions.
+     * A connection with the setting at 0 gets JSON numbers on every version, 24.8 included, so the connection's
+     * settings are shown to reach the server whatever its default, and settings() on one query overrides them.
      */
-    public function testQuotedSixtyFourBitIntegersStayExactOnEveryPath(): void
+    public function testSixtyFourBitIntegersStayExactOnEveryPathWhateverTheSetting(): void
     {
         $quoted = $this->connectionWithSettings('clickhouse-quoted-integers', ['output_format_json_quote_64bit_integers' => 1]);
         $unquoted = $this->connectionWithSettings('clickhouse-unquoted-integers', ['output_format_json_quote_64bit_integers' => 0]);
@@ -125,29 +124,31 @@ class SettingsTest extends TestCase
             DB::raw("toUInt64('18446744073709551615') AS big"),
             DB::raw("toInt64('-9223372036854775808') AS small"),
         ];
-        $exact = [['big' => '18446744073709551615', 'small' => '-9223372036854775808']];
-        $numbers = [['big' => 1.8446744073709552E+19, 'small' => PHP_INT_MIN]];
+        $exact = [['big' => '18446744073709551615', 'small' => PHP_INT_MIN]];
 
         try {
-            foreach ([[$quoted, $exact], [$unquoted, $numbers]] as [$connection, $expected]) {
-                $this->assertSame($expected, Rows::asArrays($connection->select($sql)), $connection->getName());
-                $this->assertSame($expected, $connection->getClient()->select($sql)->rows(), $connection->getName());
-                $this->assertSame($expected, $connection->table('system.one')->select($columns)->get()->map(Rows::asArray(...))->all(), $connection->getName());
+            foreach ([$quoted, $unquoted] as $connection) {
+                $this->assertSame($exact, Rows::asArrays($connection->select($sql)), $connection->getName());
+                $this->assertSame($exact, $connection->table('system.one')->select($columns)->get()->map(Rows::asArray(...))->all(), $connection->getName());
+                $this->assertSame($exact, Rows::asArrays($connection->cursor($sql)), $connection->getName());
             }
 
+            $this->assertSame(
+                [['big' => '18446744073709551615', 'small' => '-9223372036854775808']],
+                $quoted->getClient()->select($sql)->rows(),
+                'smi2 reads the quoted integers as strings.'
+            );
+            $this->assertSame(
+                [['big' => 1.8446744073709552E+19, 'small' => PHP_INT_MIN]],
+                $unquoted->getClient()->select($sql)->rows(),
+                'smi2 reads a JSON number above PHP_INT_MAX as a float.'
+            );
             $this->assertSame(
                 $exact,
                 $unquoted->table('system.one')->select($columns)
                     ->settings('output_format_json_quote_64bit_integers', 1)
                     ->get()->map(Rows::asArray(...))->all(),
                 "The setting of one query overrides the connection's 0."
-            );
-            $this->assertSame(
-                $numbers,
-                $quoted->table('system.one')->select($columns)
-                    ->settings('output_format_json_quote_64bit_integers', 0)
-                    ->get()->map(Rows::asArray(...))->all(),
-                "The setting of one query overrides the connection's 1."
             );
         } finally {
             DB::purge('clickhouse-quoted-integers');

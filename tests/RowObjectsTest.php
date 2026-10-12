@@ -116,6 +116,52 @@ class RowObjectsTest extends TestCase
         $this->assertSame(['id' => 2, 'name' => 'b'], $model::select(['id', 'name'])->where('id', 2)->first()->getAttributes());
     }
 
+    /**
+     * Each value has the PHP type of its ClickHouse type, the same through select(), the query builder, cursor()
+     * and the parallel queries, and on every ClickHouse version: 24.8 quotes the 64-bit integers, and 25.8 and later
+     * write them as numbers.
+     */
+    public function test_each_value_has_the_php_type_of_its_column_on_every_path(): void
+    {
+        $sql = "SELECT toUInt64(5) AS u64, toUInt64('18446744073709551615') AS big, toInt64(-5) AS i64,"
+            . " toFloat64(2) AS whole, toFloat32(2.5) AS f32, nan AS not_a_number, inf AS infinite,"
+            . " toDecimal64(1.5, 2) AS price, toDecimal32(3, 1) AS whole_price, toNullable(toDecimal64(1, 2)) AS maybe,"
+            . " CAST(NULL, 'Nullable(UInt64)') AS nothing, [1.0, 2.5] AS floats, map('a', toUInt64(1)) AS counts,"
+            . " tuple(toUInt64(7), toFloat64(1)) AS pair, true AS flag, 'x' AS name";
+        $expected = [
+            'u64' => 5,
+            'big' => '18446744073709551615',
+            'i64' => -5,
+            'whole' => 2.0,
+            'f32' => 2.5,
+            'infinite' => INF,
+            'price' => '1.50',
+            'whole_price' => '3.0',
+            'maybe' => '1.00',
+            'nothing' => null,
+            'floats' => [1.0, 2.5],
+            'counts' => ['a' => 1],
+            'pair' => [7, 1.0],
+            'flag' => true,
+            'name' => 'x',
+        ];
+        $connection = DB::connection('clickhouse');
+
+        $rows = [
+            'select()' => $connection->select($sql)[0],
+            'get()' => $connection->query()->fromSub(fn ($query) => $query->selectRaw(substr($sql, 7)), 's')->get()[0],
+            'cursor()' => iterator_to_array($connection->cursor($sql))[0],
+            'Parallel::getRows()' => Parallel::getRows(['q' => ['sql' => $sql, 'connection' => 'clickhouse']])['q'][0],
+        ];
+
+        foreach ($rows as $path => $row) {
+            $values = Rows::asArray($row);
+            $this->assertNan($values['not_a_number'], $path);
+            unset($values['not_a_number']);
+            $this->assertSame($expected, $values, $path);
+        }
+    }
+
     public function test_the_parallel_queries_return_objects(): void
     {
         $connection = DB::connection('clickhouse');

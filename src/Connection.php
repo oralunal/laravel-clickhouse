@@ -229,8 +229,10 @@ class Connection extends BaseConnection
 
     /**
      * Run a select statement on the active node and return its rows as stdClass objects, as Laravel's other
-     * connections return them. Each column is a property of the row; a value of the column, such as an Array, a Map
-     * or a Tuple, stays a PHP array.
+     * connections return them. Each column is a property of the row, with the PHP type of its ClickHouse type, the
+     * same on every ClickHouse version (see ResultValues): an int for an integer that fits one, a float for a
+     * floating-point value, a string with every digit for a decimal, and a PHP array for an Array, a Map or a Tuple.
+     * The request asks for the settings of ResultValues::settingsFor(), so that every value is read exactly.
      *
      * The query and its bindings are logged as given. While the connection pretends, nothing is sent and the
      * result is empty. Otherwise the bindings are prepared and a FORMAT clause is checked (see
@@ -256,9 +258,10 @@ class Connection extends BaseConnection
 
             [$sql, $clientBindings] = $this->prepareSelectForClient($query, $bindings);
 
-            return array_map(
-                fn (array $row): stdClass => (object) $row,
-                array_values(ClientRequests::select($this->getClient(), $sql, $clientBindings)->rows())
+            $client = $this->getClient();
+
+            return ClientRequests::rowsOf(
+                ClientRequests::select($client, $sql, $clientBindings, null, ResultValues::settingsFor($client))
             );
         });
     }
@@ -337,13 +340,17 @@ class Connection extends BaseConnection
     }
 
     /**
-     * Run a select statement on the active node and yield its rows one by one, as stdClass objects, as select()
-     * returns them. The cursor() of Laravel's query builder and of Eloquent reads its rows with it.
+     * Run a select statement on the active node and yield its rows one by one, as stdClass objects with the values
+     * that select() returns (see ResultValues). The cursor() of Laravel's query builder and of Eloquent reads its
+     * rows with it.
      *
      * The result is asked for in JSONEachRow and written to a temporary stream, php://temp, which keeps up to 2 MB
      * in memory and moves to a temporary file above that (see ClientRequests::selectIntoStream()). The whole result
      * is downloaded before the first row is yielded, so the query runs only once, and memory stays flat however
-     * many rows it has. Each line of the result is then decoded as it is yielded. An error that ClickHouse reports,
+     * many rows it has. Each line of the result is then decoded as it is yielded. JSONEachRow names no types, so a
+     * result with rows is followed by a DESCRIBE TABLE of the query, which gives the type of each column without
+     * running the query again (see ClientRequests::columnTypes()); it is not logged. When ClickHouse cannot describe
+     * the query, as for SHOW TABLES, the values stay as the JSON result writes them. An error that ClickHouse reports,
      * also one after the first rows of the result, is thrown as a DatabaseException with its message before any row
      * is yielded.
      *
@@ -408,10 +415,20 @@ class Connection extends BaseConnection
         }
 
         try {
+            $row = static fn (array $values): stdClass => (object) $values;
+            if ((int) (fstat($stream)['size'] ?? 0) > 0) {
+                [$sql, $clientBindings] = $this->prepareQueryForClient($query, $bindings);
+                $columns = ClientRequests::columnTypes($this->getClient(), $sql, $clientBindings);
+                if ($columns !== null) {
+                    $row = ResultValues::rowConverter($columns);
+                }
+            }
+
             rewind($stream);
+            $flags = ResultValues::JSON_DECODE_FLAGS | JSON_INVALID_UTF8_SUBSTITUTE;
             while (($line = fgets($stream)) !== false) {
                 if (trim($line) !== '') {
-                    yield (object) json_decode($line, true, 512, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+                    yield $row(json_decode($line, true, 512, $flags));
                 }
             }
         } finally {
