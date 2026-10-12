@@ -27,7 +27,7 @@
            'timeout_query' => 2,
            'https' => false,
            'retries' => 0,
-           'retry_on' => 'any',
+           'retry_on' => 'reads',
            'use_lightweight_delete' => false,
        ],
    ];

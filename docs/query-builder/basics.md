@@ -184,7 +184,7 @@ DB::connection('clickhouse')->table('my_table')
 - The settings go on the outer query. A union is selected from as a sub-query first, because ClickHouse refuses `SETTINGS` after the last query of a union in parentheses.
 - `timeout($seconds)`, `forceIndex($index)` and `ignoreIndex($index)` add their settings before the others:
   `timeout(5)` gives `settings max_execution_time = 5`, and `forceIndex('idx_url')` gives `settings force_data_skipping_indices = 'idx_url'`.
-- `delete()` and `update()` throw for a query with settings. Put the settings of a mutation in the connection `settings`.
+- `delete()` and `update()` send only the settings that change how a mutation runs, such as `mutations_sync`. See [Mutation settings](/query-builder/writing-data#mutation-settings).
 
 ## Other output formats
 

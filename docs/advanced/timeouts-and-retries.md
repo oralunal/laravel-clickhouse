@@ -22,7 +22,7 @@ Migration commands can need more time. An `ON CLUSTER` statement waits for all h
 
 ```dotenv
 CLICKHOUSE_RETRIES=2
-CLICKHOUSE_RETRY_ON=unsent
+CLICKHOUSE_RETRY_ON=reads
 ```
 
 - `retries` is `0` by default: one attempt. `1` is one attempt and one retry.
@@ -30,16 +30,19 @@ CLICKHOUSE_RETRY_ON=unsent
 
 | `retry_on` | Sends again |
 | --- | --- |
-| `any` (default) | Each failed request, also a request that timed out on the client and a request that ClickHouse answered with an error |
+| `reads` (default) | Each failed read. A write only when it did not reach the server. |
+| `any` | Each failed request, also a write that timed out on the client and a request that ClickHouse answered with an error |
 | `unsent` | Only a request that did not reach the server: the connection was refused, the host name was not found, or the connect timeout ended |
+
+- A read is a request that the smi2 client sends with `readonly=2`: `select()`, the reads of the query builder, `cursor()` and parallel queries. A write has `readonly=0`: inserts, mutations, DDL and `statement()`. The requests of a read-only user have no `readonly` and are reads.
+- A write that reached the server can continue on the server after it failed on the client. `reads` and `unsent` do not send it again.
 
 ::: danger
 With `any`, a write can run more than one time. A request that timed out on the client can continue on the server, and the retry sends it again.
-On ClickHouse 24.8, with `retries` set to `2`, an `INSERT` that timed out stored its rows three times.
-Use `unsent` on connections that write.
+On ClickHouse 24.8, with `retries` set to `2`, an `INSERT` that timed out stored its rows three times. With `reads` and `unsent`, it stored them one time.
 :::
 
-- `retry_on` accepts any letter case. `null` and `''` are `any`. Another value throws an `InvalidArgumentException`, also when `retries` is `0`.
+- `retry_on` accepts any letter case. `null` and `''` are `reads`. Another value throws an `InvalidArgumentException`, also when `retries` is `0`.
 - In a [session](/advanced/sessions), a request is sent again only when it did not reach the server.
 - [Parallel queries](/advanced/parallel-queries) send a failed request again in a later round.
 - The smi2 client's `selectAsync()` with `executeAsync()`, and the files of `insertFiles()`, are sent one time.

@@ -15,8 +15,11 @@ DB::connection('clickhouse')->table('events')->insert(['id' => 'e3', 'type' => '
 ```
 
 - The rows go as given. Casts, mutators, timestamps and model events do not apply. To apply them, use `create()`.
-- Laravel writes the columns in alphabetical order. Each row must have the keys of the first row, in any order.
-  In the `Values` format, ClickHouse refuses a row with other keys and stores no row.
+- Laravel takes the columns from the keys of the first row, in alphabetical order, and writes the values of each row
+  in the order of its own keys. Each row must have the keys of the first row, in any order.
+  In the `Values` format, ClickHouse refuses a row with fewer or more keys (`SYNTAX_ERROR`) and stores no row.
+  A row with as many keys but other names is stored: its values go into the columns of the first row.
+  `JSONEachRow` refuses such a row before the package sends the request.
 - `insert([])` sends nothing and returns `true`, as in Laravel. A row without keys, such as `[[]]`, throws
   `Inserting empty values array is not supported in ClickHouse` before the package sends the request.
 - The package quotes each column name as one identifier. A column name cannot add SQL to the statement.

@@ -83,6 +83,8 @@ These changes make the same code do something else:
   the first argument throws.
 - `min()`, `max()`, `sum()`, `avg()` and `aggregate()` are Laravel's: they drop the select list and the order.
   `count()` and the `paginate()` total count the rows that `get()` returns.
+- A connection with `retries` sends a write again only when it never reached the server. 3.x sent every failed
+  request again. Set `retry_on` to `any` to keep that. See [Retries](/advanced/timeouts-and-retries#retries).
 
 [UPGRADE.md](https://github.com/oralunal/laravel-clickhouse/blob/master/UPGRADE.md) has each step, with the code
 before and after.

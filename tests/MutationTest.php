@@ -122,6 +122,19 @@ class MutationTest extends TestCase
         $this->assertStringStartsWith('UPDATE _row_exists = 0', $this->lastMutationCommand());
     }
 
+    /**
+     * mutations_sync in settings() makes the update wait for its mutation, without the connection's settings.
+     */
+    public function testAnUpdateWithMutationsSyncChangesTheRowsBeforeItReturns(): void
+    {
+        $this->table()->where('id', 1)->settings('mutations_sync', 2)->update(['v' => 'x']);
+
+        $this->assertSame([[1, 'x'], [2, 'b'], [3, 'c'], [4, 'd']], $this->rows(), 'the update must be done when it returns');
+        $this->assertSame([], $this->client()->select(
+            "SELECT 1 FROM system.mutations WHERE database = currentDatabase() AND table = '" . self::TABLE . "' AND is_done = 0"
+        )->rows());
+    }
+
     public function testModelLightweightDelete(): void
     {
         MutationRow::where('id', 2)->delete(true);

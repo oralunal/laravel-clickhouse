@@ -127,7 +127,11 @@ until the next steps are done; continue.
 2. Do not add the new options of 4.x (`use_lightweight_delete`,
    `datetime_precision`, `insert_format`, `engine`, `default_index_type`,
    `use_on_cluster`, `retry_on`) unless the user asks: their defaults keep the
-   3.x behavior. Mention them in the report.
+   3.x behavior, except `retry_on`. Mention them in the report.
+3. If a connection sets `retries` above `0`, tell the user in the report that
+   4.x sends a write again only when it never reached the server (`retry_on`
+   `reads`, the default), where 3.x sent every failed request again. Do not set
+   `retry_on` to `any` unless the user asks.
 
 ## Step 4: Models
 

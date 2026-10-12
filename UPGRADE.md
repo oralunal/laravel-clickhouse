@@ -91,7 +91,10 @@ Remove `fix_default_query_builder` from your ClickHouse connections. In 4.0,
 ClickHouse clauses. The packaged `config/clickhouse.php` has new, optional
 options, such as `use_lightweight_delete`, `datetime_precision`,
 `insert_format`, `engine` and `use_on_cluster`. Their defaults keep the 3.x
-behavior.
+behavior, except `retry_on`: a connection with `retries` sends a write again
+only when it never reached the server. 3.x sent every failed request again, so
+an `INSERT` that timed out could store its rows twice. Set `retry_on` to `any`
+to keep the 3.x behavior.
 
 #### 3. Models
 

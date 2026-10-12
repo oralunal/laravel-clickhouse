@@ -20,14 +20,17 @@ use PHPUnit\Framework\TestCase;
  */
 class CurlerRollingWithRetriesTest extends TestCase
 {
-    public function test_the_policy_is_any_by_default(): void
+    public function test_the_policy_is_reads_by_default(): void
     {
-        $this->assertSame(CurlerRollingWithRetries::RETRY_ON_ANY, (new CurlerRollingWithRetries())->getRetryOn());
+        $this->assertSame(CurlerRollingWithRetries::RETRY_ON_READS, (new CurlerRollingWithRetries())->getRetryOn());
     }
 
-    public function test_set_retry_on_takes_unsent_and_any(): void
+    public function test_set_retry_on_takes_reads_unsent_and_any(): void
     {
         $curler = new CurlerRollingWithRetries();
+
+        $curler->setRetryOn('reads');
+        $this->assertSame(CurlerRollingWithRetries::RETRY_ON_READS, $curler->getRetryOn());
 
         $curler->setRetryOn('unsent');
         $this->assertSame(CurlerRollingWithRetries::RETRY_ON_UNSENT, $curler->getRetryOn());
@@ -39,7 +42,7 @@ class CurlerRollingWithRetriesTest extends TestCase
     public function test_set_retry_on_refuses_other_values(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage("The retry policy must be 'any' or 'unsent', [bogus] given.");
+        $this->expectExceptionMessage("The retry policy must be 'reads', 'any' or 'unsent', [bogus] given.");
 
         (new CurlerRollingWithRetries())->setRetryOn('bogus');
     }
@@ -50,9 +53,45 @@ class CurlerRollingWithRetriesTest extends TestCase
     public static function policies(): array
     {
         return [
+            'reads' => [CurlerRollingWithRetries::RETRY_ON_READS],
             'any' => [CurlerRollingWithRetries::RETRY_ON_ANY],
             'unsent' => [CurlerRollingWithRetries::RETRY_ON_UNSENT],
         ];
+    }
+
+    /**
+     * Under 'reads', a read that reached the server is sent again, as under 'any', and a write is sent again only when
+     * it never reached the server, as under 'unsent'. smi2 marks its reads with readonly=2 and its writes with
+     * readonly=0; a read-only user's requests have no readonly at all and count as reads.
+     *
+     * @return array<string, array{string, array<string, int|float>, int}>
+     */
+    public static function readsAndWrites(): array
+    {
+        $reached = ['http_code' => 500, 'connect_time' => 0.001, 'size_upload' => 47];
+        $refused = ['http_code' => 0, 'connect_time' => 0.0, 'size_upload' => 0];
+
+        return [
+            'a read that reached the server' => ['readonly=2&query=SELECT+1', $reached, 3],
+            'a read of a read-only user' => ['query=SELECT+1', $reached, 3],
+            'a write that reached the server' => ['readonly=0&query=INSERT', $reached, 1],
+            'a write that never reached the server' => ['readonly=0&query=INSERT', $refused, 3],
+        ];
+    }
+
+    /**
+     * @param array<string, int|float> $info
+     */
+    #[DataProvider('readsAndWrites')]
+    public function test_reads_sends_reads_again_and_writes_only_when_unsent(string $query, array $info, int $attempts): void
+    {
+        $curler = $this->cannedCurler([$info, $info, $info], retries: 2, policy: CurlerRollingWithRetries::RETRY_ON_READS);
+        $request = new CurlerRequest();
+        $request->url('http://127.0.0.1:8123/?' . $query);
+
+        $curler->execOne($request);
+
+        $this->assertSame($attempts, $curler->attempts);
     }
 
     #[DataProvider('policies')]

@@ -33,6 +33,37 @@ class QueryGrammar extends Grammar
     use SubstitutesBindings;
 
     /**
+     * The settings that a delete or an update sends with its statement, from settings() of its query: those that
+     * change how the mutation runs or how long the call waits for it, and not which rows it changes. ClickHouse (24.8
+     * and 26.8 checked) ignores the settings that change which rows a SELECT reads, such as limit, offset or
+     * additional_table_filters, in a mutation, which then changes every row that the where conditions match.
+     *
+     * @var list<string>
+     */
+    public const MUTATION_SETTINGS = [
+        'mutations_sync',
+        'alter_sync',
+        'replication_alter_partitions_sync',
+        'lightweight_deletes_sync',
+        'lightweight_delete_mode',
+        'lightweight_mutation_projection_mode',
+        'enable_lightweight_delete',
+        'allow_experimental_lightweight_delete',
+        'allow_nondeterministic_mutations',
+        'mutations_execute_subqueries_on_initiator',
+        'mutations_execute_nondeterministic_on_initiator',
+        'mutations_max_literal_size_to_replace',
+        'distributed_ddl_task_timeout',
+        'distributed_ddl_output_mode',
+        'log_comment',
+        'max_query_size',
+        'max_ast_depth',
+        'max_ast_elements',
+        'max_expanded_ast_elements',
+        'max_parser_depth',
+    ];
+
+    /**
      * The package grammar that writes the literals of compileLiteral(), created when it is first needed.
      *
      * @var LiteralGrammar|null
@@ -1003,13 +1034,17 @@ class QueryGrammar extends Grammar
         $this->queryDepth++;
 
         try {
-            return $compile();
+            $sql = $compile();
         } finally {
             $this->queryDepth--;
             $this->mutationTableQualifiers = $qualifiers;
             $query->from = $from;
             $query->wheres = $wheres;
         }
+
+        return $query instanceof QueryBuilder && $query->settings !== []
+            ? $sql . ' settings ' . $this->getLiteralGrammar()->compileSettings($query->settings)
+            : $sql;
     }
 
     /**
@@ -1699,7 +1734,9 @@ class QueryGrammar extends Grammar
      * - LIMIT (limit(0) included), which also names groupLimit(): a per-group
      *   LIMIT that Laravel compiles into a row_number() window;
      * - OFFSET, above 0, and each kind of union, named UNION (union(), sent as
-     *   UNION DISTINCT) or UNION ALL.
+     *   UNION DISTINCT) or UNION ALL;
+     * - SETTINGS, when settings() names a setting that is not one of
+     *   MUTATION_SETTINGS. The others go after the statement (see compileMutation()).
      *
      * An offset of 0 skips no row and is allowed, as is any other ORDER BY: it sorts
      * the rows, and WITH FILL only adds rows that the table does not have. DISTINCT,
@@ -1725,6 +1762,7 @@ class QueryGrammar extends Grammar
      */
     protected function verifyClausesOfMutation(Builder $query, string $statement): void
     {
+        $refusedSettings = $this->getSettingsThatAMutationIgnores($query);
         $clauses = array_keys(array_filter([
             'SELECT aliases or expressions' => $this->selectsAnAliasOrAnExpression($query),
             'JOIN' => !empty($query->joins),
@@ -1739,7 +1777,7 @@ class QueryGrammar extends Grammar
             'ARRAY JOIN' => $query instanceof QueryBuilder && $query->arrayJoins !== [],
             'LIMIT BY' => $query instanceof QueryBuilder && $query->limitBy !== null,
             'WITH' => $query instanceof QueryBuilder && $query->withs !== [],
-            'SETTINGS' => $query instanceof QueryBuilder && $query->settings !== [],
+            'SETTINGS' => $refusedSettings !== [],
         ]));
         $unions = array_map(
             fn (array $union): string => match (true) {
@@ -1756,9 +1794,29 @@ class QueryGrammar extends Grammar
                 $statement,
                 $clauses,
                 ['first()', 'chunk()', 'paginate()', 'simplePaginate()'],
-                'updateOrInsert()'
+                'updateOrInsert()',
+                $refusedSettings
             );
         }
+    }
+
+    /**
+     * Get the names of the settings from settings() of a query that a mutation would ignore: every setting that is
+     * not one of MUTATION_SETTINGS, in any letter case.
+     *
+     * @param Builder $query
+     * @return list<string>
+     */
+    protected function getSettingsThatAMutationIgnores(Builder $query): array
+    {
+        if (!$query instanceof QueryBuilder) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            array_map(fn (int|string $name): string => (string) $name, array_keys($query->settings)),
+            fn (string $name): bool => !in_array(strtolower($name), static::MUTATION_SETTINGS, true)
+        ));
     }
 
     /**

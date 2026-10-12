@@ -148,11 +148,12 @@ class ClusterTest extends TestCase
     public static function retryPolicies(): array
     {
         return [
+            'reads' => ['reads', CurlerRollingWithRetries::RETRY_ON_READS],
             'any' => ['any', CurlerRollingWithRetries::RETRY_ON_ANY],
             'unsent' => ['unsent', CurlerRollingWithRetries::RETRY_ON_UNSENT],
             'letter case and spaces do not matter' => [' Unsent ', CurlerRollingWithRetries::RETRY_ON_UNSENT],
-            'null means any' => [null, CurlerRollingWithRetries::RETRY_ON_ANY],
-            'a blank string means any' => ['', CurlerRollingWithRetries::RETRY_ON_ANY],
+            'null means reads' => [null, CurlerRollingWithRetries::RETRY_ON_READS],
+            'a blank string means reads' => ['', CurlerRollingWithRetries::RETRY_ON_READS],
         ];
     }
 
@@ -167,12 +168,12 @@ class ClusterTest extends TestCase
         $this->assertSame($policy, $curler->getRetryOn());
     }
 
-    public function test_a_missing_retry_on_means_any(): void
+    public function test_a_missing_retry_on_means_reads(): void
     {
         $curler = $this->createClient(['retries' => '1'])->transport()->getCurler();
 
         $this->assertInstanceOf(CurlerRollingWithRetries::class, $curler);
-        $this->assertSame(CurlerRollingWithRetries::RETRY_ON_ANY, $curler->getRetryOn());
+        $this->assertSame(CurlerRollingWithRetries::RETRY_ON_READS, $curler->getRetryOn());
     }
 
     public function test_a_client_without_retries_keeps_smi2s_curler(): void
@@ -188,9 +189,9 @@ class ClusterTest extends TestCase
     public static function invalidRetryPolicies(): array
     {
         return [
-            'another word' => ['bogus', "The [retry_on] option of the ClickHouse connection must be 'any' or 'unsent', [bogus] given."],
-            'a boolean' => [true, "The [retry_on] option of the ClickHouse connection must be 'any' or 'unsent', [true] given."],
-            'a number' => [1, "The [retry_on] option of the ClickHouse connection must be 'any' or 'unsent', [1] given."],
+            'another word' => ['bogus', "The [retry_on] option of the ClickHouse connection must be 'reads', 'any' or 'unsent', [bogus] given."],
+            'a boolean' => [true, "The [retry_on] option of the ClickHouse connection must be 'reads', 'any' or 'unsent', [true] given."],
+            'a number' => [1, "The [retry_on] option of the ClickHouse connection must be 'reads', 'any' or 'unsent', [1] given."],
         ];
     }
 

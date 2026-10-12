@@ -17,7 +17,7 @@ defaults. A connection in `config/database.php` overrides both. See [Installatio
 | `timeout_connect` | `CLICKHOUSE_TIMEOUT_CONNECT` | `2` | Seconds to wait for a connection. See [Timeouts](/advanced/timeouts-and-retries#timeouts). |
 | `timeout_query` | `CLICKHOUSE_TIMEOUT_QUERY` | `2` | Seconds that a request can take. See [Timeouts](/advanced/timeouts-and-retries#timeouts). |
 | `retries` | `CLICKHOUSE_RETRIES` | `0` | Number of retries of a failed request. See [Retries](/advanced/timeouts-and-retries#retries). |
-| `retry_on` | `CLICKHOUSE_RETRY_ON` | `any` | `any` or `unsent`: the failed requests that the retries send again |
+| `retry_on` | `CLICKHOUSE_RETRY_ON` | `reads` | `reads`, `any` or `unsent`: the failed requests that the retries send again. See [Retries](/advanced/timeouts-and-retries#retries). |
 | `settings` | | `[]` | ClickHouse settings for each query of the connection |
 | `use_lightweight_delete` | `CLICKHOUSE_USE_LIGHTWEIGHT_DELETE` | `false` | `delete()` without an argument sends a lightweight `DELETE FROM`. See [Deletions](/query-builder/writing-data#deletions). |
 | `engine` | `CLICKHOUSE_ENGINE` | `null` | Engine of a table that `Schema::create()` creates without `engine()`. `null` is `MergeTree()`. |
