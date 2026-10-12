@@ -95,6 +95,10 @@ builder, and `select()` and `cursor()` of the connection. 3.x returned associati
 `$row['id']` fails. Read `$row->id`, or keep the arrays with `getStatement()->rows()` of a query and
 `selectStatement($sql)->rows()` of the connection.
 
+Each value has the PHP type of its ClickHouse type, on every ClickHouse version: a `UInt64` is an `int`, where 3.x
+gave a string on 24.8, a whole `Float64` is a float, NaN is `NAN`, and a `Decimal` is a string with every digit, such
+as `'1.50'`, where 3.x gave a float. See [Read results](/query-builder/reading-results#rows).
+
 Some changes make the same code do something else, without an error. Among them:
 
 - `where('id', [1, 2])` compared with `IN (1, 2)` in 3.x. Laravel compares with the first value only, so a `delete()`

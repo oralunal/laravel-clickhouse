@@ -171,6 +171,7 @@ export default defineConfig({
         items: [
           { text: 'ClickHouse versions', link: '/reference/clickhouse-versions' },
           { text: 'Known limitations', link: '/reference/known-limitations' },
+          { text: 'Static analysis', link: '/reference/static-analysis' },
           { text: 'Helpers, enums and exceptions', link: '/reference/helpers' },
           { text: 'API reference', link: '/reference/api' },
           { text: 'Coding-agent skills', link: '/reference/agent-skills' },

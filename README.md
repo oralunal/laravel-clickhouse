@@ -133,6 +133,7 @@ DB::connection('clickhouse')->table('my_table')
 | Queries at the same time, across connections | [Parallel queries](https://laravel-clickhouse.oralunal.com/advanced/parallel-queries) |
 | Node rotation, retries, `ON CLUSTER` DDL, replicated tables | [Clusters](https://laravel-clickhouse.oralunal.com/advanced/clusters) |
 | `DatabaseTruncation`, SQLite with ClickHouse, parallel test databases | [Tests](https://laravel-clickhouse.oralunal.com/advanced/testing) |
+| Rows and values with the types that Laravel declares, a PHPStan extension for Larastan that reads ClickHouse schema dumps | [Static analysis](https://laravel-clickhouse.oralunal.com/reference/static-analysis) |
 
 ## Upgrading
 

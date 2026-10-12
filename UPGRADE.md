@@ -261,6 +261,23 @@ What else changes:
   `$row->id`, or keep the arrays with `getStatement()->rows()` of the query
   and `selectStatement($sql)->rows()` of the connection. A value of an
   `Array`, a `Map` or a `Tuple` column stays a PHP array.
+- **Values have the PHP types of their columns.** 3.x returned the values of
+  the JSON result, which changed with the ClickHouse version. In 4.0 each
+  value has the type of its ClickHouse type, on every version:
+
+  | ClickHouse type | 3.x | 4.0 |
+  | --- | --- | --- |
+  | `UInt64`, `Int64` | `'5'` on 24.8, `5` on 25.8 and later | `5`; a numeric string above `PHP_INT_MAX` |
+  | `Float64` with a whole value | `2` (an int) | `2.0` |
+  | NaN and the infinities | `null` | `NAN`, `INF`, `-INF` |
+  | `Decimal(10, 2)` | `1.5` (a float), `1` for a whole value | `'1.50'` |
+
+  Look for code that compares such a value with a string, such as
+  `$row['total'] === '0'`, that tests its type with `is_string()` or
+  `is_float()`, or that gives a decimal to a function that takes a float,
+  such as `round()` or `number_format()`: with `declare(strict_types=1)`, a
+  string fails with a `TypeError`. Cast it with `(float)`. `getStatement()`
+  and `selectStatement()` keep the values of the JSON result.
 - **Aggregates take column names.** `sum('price * qty')` quotes the string as
   a column name and fails with `UNKNOWN_IDENTIFIER`. Pass SQL with
   `DB::raw()`: `sum(DB::raw('price * qty'))`.
