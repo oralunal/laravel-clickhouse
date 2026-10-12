@@ -1,5 +1,6 @@
 # Upgrade Guide
 
+- [Upgrading from 4.0 to 4.1](#upgrading-from-40-to-41)
 - [Upgrading from 3.x to 4.0](#upgrading-from-3x-to-40)
 - [Upgrading from 2.x to 4.0](#upgrading-from-2x-to-40) (`oralunal/phpclickhouse-laravel` 2.x)
 - [Upgrading from 1.x to 4.0](#upgrading-from-1x-to-40) (`oralunal/phpclickhouse-laravel` 1.x)
@@ -17,6 +18,37 @@ list of names. It also removes the skills of earlier releases,
 `/plc-upgrade-1x-to-2x` and `/lc-upgrade-2x-to-3x`, which 4.0 no longer ships,
 from the skills directory of each agent that it installs for. See
 [Coding-agent skills](https://laravel-clickhouse.oralunal.com/reference/agent-skills).
+
+The sections from 3.x, 2.x and 1.x describe 4.1 and later, and the skills
+install 4.1 or later.
+
+## Upgrading from 4.0 to 4.1
+
+4.1 has two breaking changes, as a one-time exception in a minor version:
+4.0.0 was out for less than a day. See the `[4.1.0]` section of the
+[CHANGELOG](CHANGELOG.md).
+
+```sh
+composer require oralunal/laravel-clickhouse:^4.1
+```
+
+- **Rows are objects.** Each row of the query builder, of `select()`,
+  `selectOne()` and `cursor()` of the connection, and of
+  `Parallel::getRows()` is a `stdClass` object, as on Laravel's other
+  connections. Read `$row->id` in place of `$row['id']`, or keep associative
+  arrays with `getStatement()->rows()` and `selectStatement($sql)->rows()`.
+- **Values have the PHP types of their columns**, on every ClickHouse
+  version: an integer is an `int`, or a numeric string above `PHP_INT_MAX`;
+  a `Float64` is a `float`, also a whole value, with `NAN`, `INF` and `-INF`;
+  a `Decimal` is a string with the scale of its column, such as `'1.50'`.
+  4.0.0 gave the values of the JSON result: a `UInt64` was a string on
+  ClickHouse 24.8, a whole `Float64` or `Decimal` was an int, and NaN was
+  `null`.
+- `avg()` sends `avgOrNull()`, so that no rows still give `null`.
+- A schema dump starts with a comment that names its connection. A dump of
+  4.0.0 loads as before.
+- For PHPStan with Larastan, include the new extension. See
+  [Static analysis](https://laravel-clickhouse.oralunal.com/reference/static-analysis).
 
 ## Upgrading from 3.x to 4.0
 
@@ -48,7 +80,7 @@ have to change or check.
 2. Update the package and install the skills:
 
    ```sh
-   composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+   composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
    php artisan clickhouse:install-skills
    ```
 
@@ -104,7 +136,7 @@ now an object (see step 4).
 #### 1. Update the dependency
 
 ```sh
-composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
 ```
 
 #### 2. Configuration
@@ -600,7 +632,7 @@ needs permission to create and drop databases.
 
    ```sh
    composer remove oralunal/phpclickhouse-laravel --no-update
-   composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+   composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
    php artisan clickhouse:install-skills
    ```
 
@@ -642,7 +674,7 @@ cp -r vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-2x-to-4x \
 
    ```sh
    composer remove oralunal/phpclickhouse-laravel --no-update
-   composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+   composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
    ```
 
    The `artisan` scripts that Composer runs may fail with a class-not-found
@@ -718,7 +750,7 @@ together:
 
    ```sh
    composer remove oralunal/phpclickhouse-laravel oralunal/clickhouse-builder glushkovds/php-clickhouse-schema-builder --no-update
-   composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+   composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
    php artisan clickhouse:install-skills
    ```
 
@@ -779,7 +811,7 @@ provider is auto-discovered. Then:
 
 ```sh
 composer remove oralunal/phpclickhouse-laravel oralunal/clickhouse-builder glushkovds/php-clickhouse-schema-builder --no-update
-composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
 ```
 
 Also remove `the-tinderbox/clickhouse-builder` or

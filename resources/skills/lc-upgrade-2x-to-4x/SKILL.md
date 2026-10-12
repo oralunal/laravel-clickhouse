@@ -119,7 +119,7 @@ is unclear.
 
 ```bash
 composer remove oralunal/phpclickhouse-laravel --no-update
-composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
 ```
 
 `oralunal/laravel-clickhouse` conflicts with `oralunal/phpclickhouse-laravel`,

@@ -8,6 +8,10 @@
 
 PHP 8.5 and Laravel 13 stay the requirements.
 2.0.0 still required the libraries that 2.0.1 bundled, so upgrade 2.0.0 as 1.x.
+
+From 4.0, run `composer require oralunal/laravel-clickhouse:^4.1`. 4.1 makes each row a `stdClass` object and gives
+each value the PHP type of its column. See
+[Upgrading from 4.0 to 4.1](https://github.com/oralunal/laravel-clickhouse/blob/master/UPGRADE.md#upgrading-from-40-to-41).
 The complete guide is [UPGRADE.md](https://github.com/oralunal/laravel-clickhouse/blob/master/UPGRADE.md).
 The [changelog](https://github.com/oralunal/laravel-clickhouse/blob/master/CHANGELOG.md) shows each change with the SQL before and after.
 
@@ -24,7 +28,7 @@ After the update the old code no longer loads, so the skill compares its run wit
 1. Update the package and install the skills:
 
    ```sh
-   composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+   composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
    php artisan clickhouse:install-skills
    ```
 
@@ -36,7 +40,7 @@ After the update the old code no longer loads, so the skill compares its run wit
 
    ```sh
    composer remove oralunal/phpclickhouse-laravel --no-update
-   composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+   composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
    php artisan clickhouse:install-skills
    ```
 
@@ -53,7 +57,7 @@ After the update the old code no longer loads, so the skill compares its run wit
 
    ```sh
    composer remove oralunal/phpclickhouse-laravel oralunal/clickhouse-builder glushkovds/php-clickhouse-schema-builder --no-update
-   composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
+   composer require oralunal/laravel-clickhouse:^4.1 --with-all-dependencies
    php artisan clickhouse:install-skills
    ```
 
