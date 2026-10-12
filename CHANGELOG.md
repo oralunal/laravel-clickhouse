@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The upgrade skills keep the errors of PHPStan before the upgrade, when the project runs it. In a project with Larastan, `lc-upgrade-3x-to-4x`, which the upgrades from 2.x and 1.x follow, offers to include the PHPStan extension of the package, adds the line after Larastan's extension only when the user agrees, and compares the errors of PHPStan with the run before the upgrade: an offset access on a `stdClass` row or a comparison that is always false shows a read that the searches missed. It tells the user that `schema:dump` writes the dump that Larastan reads, and does not run it.
+
 ## [4.1.0] - 2026-10-12
 
 This release makes the rows and their values those that Laravel's other connections give, so that static analysis reads them correctly. The first two entries of Changed are breaking. They come in a 4.x release, without a new major version, as a one-time exception: 4.0.0 was out for less than a day, and Packagist counted no install of it. UPGRADE.md and the `lc-upgrade-3x-to-4x` skill show the changes from 3.x.

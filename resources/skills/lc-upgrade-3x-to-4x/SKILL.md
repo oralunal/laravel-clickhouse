@@ -107,6 +107,11 @@ before you write a call to it.
      the test command in `../lc-baseline`, then
      `git worktree remove ../lc-baseline`. Otherwise say in the report that
      there is no baseline.
+   - If the project runs PHPStan (a `phpstan.neon`, `phpstan.neon.dist` or
+     `phpstan.dist.neon` file), run it as well, as the project runs it, such
+     as `vendor/bin/phpstan analyse` or a Composer script, and keep its
+     errors. Step 14.8 of the `lc-upgrade-3x-to-4x` skill compares them. In a
+     worktree, run it there after the test suite.
 4. Find the ClickHouse connections: the entries of `config/database.php`
    (and of any config file merged into it, such as `config/clickhouse.php`)
    whose `driver` is `clickhouse`, and `DB_CONNECTION` in `.env`. For each
@@ -831,6 +836,37 @@ Run all of these and fix what they report:
    inside `DB::connection('<name>')->pretend(...)`. A method that a collection
    or a builder does not have, such as a `Statement` method, fails only when
    it runs.
+8. **Static analysis.** Do this only when `composer.json` requires
+   `larastan/larastan` and the project has a PHPStan config file (see step
+   1.3).
+   - If the config does not include
+     `vendor/oralunal/laravel-clickhouse/extension.neon`, offer it to the user
+     and ask before you add it. Tell the user what it does: it reads the
+     schema dumps of the ClickHouse connections in `database/schema`, so that
+     PHPStan knows the columns of the ClickHouse models, and it gives
+     `DB::connection('<name>')`, `Schema::connection('<name>')` and
+     `DB::table()` the types of the package, so that PHPStan knows their
+     ClickHouse methods. See
+     https://laravel-clickhouse.oralunal.com/reference/static-analysis.
+   - If the user agrees, add the line to the `includes` of the config, after
+     the line of `vendor/larastan/larastan/extension.neon`. When the config
+     does not name Larastan's extension, because `phpstan/extension-installer`
+     includes it, add the line to `includes`, and add `includes` when it is
+     not there: the config of the project loads after the extensions of the
+     installer. Never put the line before Larastan's line: PHPStan then stops
+     with "must be included after the extension of Larastan".
+   - If the user does not agree, change nothing and say so in the report.
+   - Run PHPStan as in step 1.3 and compare its errors with those of the
+     baseline. An error that is new in the code that you changed, or in the
+     code that reads the rows of steps 9.6 and 9.7, such as an offset access
+     on a `stdClass` row or a comparison that is always false, shows a case
+     that the searches missed: fix it as that step says, or ask the user.
+     Explain the other new errors in the report.
+   - Larastan reads the ClickHouse tables from a schema dump, and reads the
+     migrations after the dumps (see the page above). If the project has no
+     dump of a ClickHouse connection, tell the user that
+     `php artisan schema:dump --database=<name>` writes one. Do not run it
+     yourself, and never with `--prune`, which deletes the migrations.
 
 ## Step 15: Report
 
@@ -851,9 +887,6 @@ End with a short summary for the user:
   https://laravel-clickhouse.oralunal.com/reference/clickhouse-versions, which
   lists what they do otherwise than 24.8 and the settings that bring back its
   behavior;
-- if the project runs PHPStan with Larastan (`larastan/larastan` in
-  `composer.json`), a pointer to
-  https://laravel-clickhouse.oralunal.com/reference/static-analysis: the
-  package's extension, `vendor/oralunal/laravel-clickhouse/extension.neon`,
-  included after Larastan's, reads the ClickHouse schema dumps and gives the
-  facades the package's types. Do not add it yourself.
+- for a project with Larastan, the answer about the PHPStan extension of step
+  14.8, the PHPStan errors compared with the baseline, and the note about a
+  schema dump.
