@@ -4,7 +4,7 @@ The site shows the documentation of the latest version by default. Select anothe
 
 | Version | Package | Namespace | Last release | Documentation |
 | --- | --- | --- | --- | --- |
-| 4.x (latest) | `oralunal/laravel-clickhouse` | `Oralunal\LaravelClickHouse\` | 4.1.0 | [4.x](/getting-started/introduction) |
+| 4.x (latest) | `oralunal/laravel-clickhouse` | `Oralunal\LaravelClickHouse\` | 4.1.1 | [4.x](/getting-started/introduction) |
 | 3.x | `oralunal/laravel-clickhouse` | `Oralunal\LaravelClickHouse\` | 3.0.0 | [3.x](/3.x/getting-started/introduction) |
 | 2.x | `oralunal/phpclickhouse-laravel` | `PhpClickHouseLaravel\` | 2.0.2 | [2.x](/2.x/getting-started/introduction) |
 | 1.x | `oralunal/phpclickhouse-laravel` | `PhpClickHouseLaravel\`, `Tinderbox\ClickhouseBuilder\`, `PhpClickHouseSchemaBuilder\` | 1.5.0 | [1.x](/1.x/getting-started/introduction) |
