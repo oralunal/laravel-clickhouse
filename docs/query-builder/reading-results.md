@@ -4,28 +4,31 @@ The examples use `$query = DB::connection('clickhouse')->table('my_table')`.
 
 ## Rows
 
-`get()` returns a Laravel collection of the rows. Each row is an associative array:
+`get()` returns a Laravel collection of the rows. Each row is a `stdClass` object, as on Laravel's other connections:
 
 ```php
-$query->select('id', 'field_one')->orderBy('id')->get();
+$rows = $query->select('id', 'field_one')->orderBy('id')->get();
 // select "id", "field_one" from "my_table" order by "id" asc
-// collect([['id' => 1, 'field_one' => 'a'], ['id' => 2, 'field_one' => 'b'], ['id' => 3, 'field_one' => 'c']])
+// collect([(object) ['id' => 1, 'field_one' => 'a'], (object) ['id' => 2, 'field_one' => 'b'], ...])
+
+$rows[0]->field_one; // 'a'
 ```
 
-- Laravel's query builder returns `stdClass` objects on the other drivers. Read a column as `$row['id']`, or cast the row: `(object) $row`.
+- A value of an `Array`, a `Map` or a `Tuple` column is a PHP array: `$row->tags[0]`.
+- To read the rows as associative arrays, use `getStatement()->rows()`. See [Other formats](#other-formats).
 - The Eloquent builder of a model returns models. See [Eloquent models](/models/eloquent).
 - ClickHouse 24.8 returns 64-bit integers, such as `UInt64` and the result of `count()` in SQL, as strings. 25.8 and later return numbers.
   The `output_format_json_quote_64bit_integers` setting chooses. See [ClickHouse versions](/reference/clickhouse-versions).
 
 ### Static analysis
 
-`QueryBuilder` gives static analysis tools, such as PHPStan and Larastan, the array type of its rows.
-`get()` returns `Collection<int, array<string, mixed>>`, and `first()` returns `array<string, mixed>|null`.
-The same applies to `find()`, `sole()`, `cursor()`, `lazy()`, `chunk()`, `each()` and their variants.
+The rows have the types that Laravel declares, so static analysis tools, such as PHPStan and Larastan, read them
+correctly: `get()` returns `Collection<int, stdClass>`, and `first()` returns `stdClass|null`.
 On a model query, `toBase()` and `getQuery()` return `QueryBuilder`.
 
 `DB::connection()` declares Laravel's connection type. Thus PHPStan reads `DB::connection('clickhouse')->table()` as
-Laravel's builder, with `stdClass` rows. Declare the type of the connection:
+Laravel's builder, and does not know the ClickHouse methods, such as `final()` and `settings()`. Declare the type of
+the connection:
 
 ```php
 use Oralunal\LaravelClickHouse\Connection;
@@ -33,7 +36,7 @@ use Oralunal\LaravelClickHouse\Connection;
 /** @var Connection $clickhouse */
 $clickhouse = DB::connection('clickhouse');
 
-$rows = $clickhouse->table('my_table')->get(); // Collection<int, array<string, mixed>>
+$rows = $clickhouse->table('my_table')->final()->get(); // QueryBuilder::final(), Collection<int, stdClass>
 ```
 
 ## First row and single values
@@ -41,7 +44,7 @@ $rows = $clickhouse->table('my_table')->get(); // Collection<int, array<string, 
 ```php
 $query->orderBy('created_at', 'desc')->first();
 // select * from "my_table" order by "created_at" desc limit 1
-// ['id' => 3, 'field_one' => 'c', ...], or null without a row
+// (object) ['id' => 3, 'field_one' => 'c', ...], or null without a row
 
 $query->where('id', 2)->value('field_one');
 // select "field_one" from "my_table" where "id" = 2 limit 1
@@ -172,7 +175,7 @@ $query->orderBy('id')->paginate(15);
 ```php
 $query->select('id')->orderBy('id')->chunk(2, function (Collection $rows, int $page) {
     foreach ($rows as $row) {
-        echo $row['id'] . "\n";
+        echo $row->id . "\n";
     }
 });
 // select "id" from "my_table" order by "id" asc limit 2 offset 0
@@ -190,7 +193,7 @@ $query->select('id')->orderBy('id')->chunk(2, function (Collection $rows, int $p
 
 ```php
 foreach ($query->select('id')->orderBy('id')->cursor() as $row) {
-    // ['id' => 1], then ['id' => 2], ...
+    // (object) ['id' => 1], then (object) ['id' => 2], ...
 }
 ```
 
@@ -207,7 +210,7 @@ $query->select('id', 'field_one')->orderBy('id')->getStatement('CSVWithNames')->
 // "\"id\",\"field_one\"\n1,\"a\"\n2,\"b\"\n3,\"c\"\n"
 
 $statement = $query->select('user_id', DB::raw('count() as c'))->groupByRaw('user_id with totals')->getStatement();
-$statement->rows();   // [['user_id' => 7, 'c' => '2'], ['user_id' => 8, 'c' => '1']]
+$statement->rows();   // [['user_id' => 7, 'c' => '2'], ['user_id' => 8, 'c' => '1']], associative arrays
 $statement->totals(); // ['user_id' => 0, 'c' => '3']
 ```
 

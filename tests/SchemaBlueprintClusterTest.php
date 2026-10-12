@@ -86,7 +86,7 @@ class SchemaBlueprintClusterTest extends TestCase
 
         DB::connection(self::CLUSTER)->statement("INSERT INTO `{$events}` VALUES (1, 'a'), (2, 'b')");
         DB::connection('clickhouse2')->statement("SYSTEM SYNC REPLICA `{$events}`");
-        $this->assertSame([['c' => '2']], DB::connection('clickhouse2')->select("SELECT toString(count()) AS c FROM `{$events}`"));
+        $this->assertSame([['c' => '2']], Rows::asArrays(DB::connection('clickhouse2')->select("SELECT toString(count()) AS c FROM `{$events}`")));
 
         $schema->table($events, function (SchemaBlueprint $table) {
             $table->integer('extra')->default(7);
@@ -119,7 +119,7 @@ class SchemaBlueprintClusterTest extends TestCase
         }
         $this->assertSame(
             [['c' => '0']],
-            DB::connection('clickhouse')->select("SELECT toString(count()) AS c FROM system.zookeeper WHERE path = '/clickhouse/tables/{$uuid}'"),
+            Rows::asArrays(DB::connection('clickhouse')->select("SELECT toString(count()) AS c FROM system.zookeeper WHERE path = '/clickhouse/tables/{$uuid}'")),
             'drop()->sync() leaves no replica of the table in ZooKeeper.'
         );
     }
@@ -427,7 +427,7 @@ class SchemaBlueprintClusterTest extends TestCase
                 $table->temporary();
                 $table->integer('extra');
             });
-            $messages[] = $connection->select("SELECT name FROM system.columns WHERE database = '' AND table = '{$shadowed}' ORDER BY position");
+            $messages[] = Rows::asArrays($connection->select("SELECT name FROM system.columns WHERE database = '' AND table = '{$shadowed}' ORDER BY position"));
             $schema->dropTemporary($shadowed);
 
             return $messages;
@@ -462,7 +462,7 @@ class SchemaBlueprintClusterTest extends TestCase
             });
             $connection->statement("INSERT INTO `{$temporary}` VALUES (1)");
 
-            return $connection->select("SELECT id FROM `{$temporary}`");
+            return Rows::asArrays($connection->select("SELECT id FROM `{$temporary}`"));
         });
 
         $this->assertSame([['id' => 1]], $rows);
@@ -535,7 +535,7 @@ class SchemaBlueprintClusterTest extends TestCase
     {
         $rows = [];
         foreach (self::NODES as $node) {
-            $rows[$node] = DB::connection($node)->select($sql);
+            $rows[$node] = Rows::asArrays(DB::connection($node)->select($sql));
         }
 
         return $rows;

@@ -1290,8 +1290,8 @@ class SchemaBlueprintSqlTest extends TestCase
             return true;
         });
         $connection->method('select')->willReturn([
-            ['name' => 'events_dictionary', 'engine' => 'Dictionary', 'dependents' => []],
-            ['name' => 'events', 'engine' => 'MergeTree', 'dependents' => ['events_dictionary']],
+            (object) ['name' => 'events_dictionary', 'engine' => 'Dictionary', 'dependents' => []],
+            (object) ['name' => 'events', 'engine' => 'MergeTree', 'dependents' => ['events_dictionary']],
         ]);
         $builder = new SchemaBuilder($connection);
 

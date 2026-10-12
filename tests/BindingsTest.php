@@ -85,7 +85,7 @@ class BindingsTest extends TestCase
         );
         $this->assertSame(
             [['id' => 1]],
-            $connection->select('SELECT id FROM ' . self::TABLE . ' WHERE price = ? AND created = ? AND flag = ?', [19.99, new DateTime('2024-01-02 03:04:05'), false])
+            Rows::asArrays($connection->select('SELECT id FROM ' . self::TABLE . ' WHERE price = ? AND created = ? AND flag = ?', [19.99, new DateTime('2024-01-02 03:04:05'), false]))
         );
     }
 
@@ -113,7 +113,7 @@ class BindingsTest extends TestCase
                 ['id' => 5, 'note' => "it's??"],
                 ['id' => 6, 'note' => 'ok??'],
             ],
-            $connection->select('SELECT id, note FROM ' . self::TABLE . ' ORDER BY id')
+            Rows::asArrays($connection->select('SELECT id, note FROM ' . self::TABLE . ' ORDER BY id'))
         );
     }
 
@@ -123,8 +123,8 @@ class BindingsTest extends TestCase
 
         $connection->insert('INSERT INTO ' . self::TABLE . ' (id, price) VALUES (?, ?)', [1, 0.1 + 0.2]);
 
-        $this->assertSame([['exact' => 1]], $connection->select('SELECT toUInt8(price = 0.1 + 0.2) AS exact FROM ' . self::TABLE));
-        $this->assertSame([['id' => 1]], $connection->select('SELECT id FROM ' . self::TABLE . ' WHERE price = ?', [0.1 + 0.2]));
+        $this->assertSame([['exact' => 1]], Rows::asArrays($connection->select('SELECT toUInt8(price = 0.1 + 0.2) AS exact FROM ' . self::TABLE)));
+        $this->assertSame([['id' => 1]], Rows::asArrays($connection->select('SELECT id FROM ' . self::TABLE . ' WHERE price = ?', [0.1 + 0.2])));
     }
 
     /**
@@ -141,7 +141,7 @@ class BindingsTest extends TestCase
 
         $this->assertSame(
             [['id' => 2, 'created' => '2024-01-02 03:04:05', 'flag' => 1, 'note' => 'named']],
-            $connection->select('SELECT id, created, flag, note FROM ' . self::TABLE . ' WHERE note = :note', ['note' => 'named'])
+            Rows::asArrays($connection->select('SELECT id, created, flag, note FROM ' . self::TABLE . ' WHERE note = :note', ['note' => 'named']))
         );
     }
 
@@ -185,12 +185,12 @@ class BindingsTest extends TestCase
                 ['id' => 2, 'precise' => '2024-01-02 03:04:05.123457'],
                 ['id' => 3, 'precise' => '2024-01-02 03:04:05.123458'],
             ],
-            $connection->select('SELECT id, precise FROM ' . self::TABLE . ' ORDER BY id')
+            Rows::asArrays($connection->select('SELECT id, precise FROM ' . self::TABLE . ' ORDER BY id'))
         );
         $this->assertSame([1], $connection->table(self::TABLE)->where('precise', $date)->pluck('id')->all());
         $this->assertSame(
             [['id' => 2]],
-            $connection->select('SELECT id FROM ' . self::TABLE . ' WHERE precise = :precise', ['precise' => $date->copy()->addMicroseconds(1)])
+            Rows::asArrays($connection->select('SELECT id FROM ' . self::TABLE . ' WHERE precise = :precise', ['precise' => $date->copy()->addMicroseconds(1)]))
         );
     }
 

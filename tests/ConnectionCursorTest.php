@@ -93,12 +93,12 @@ class ConnectionCursorTest extends TestCase
         $cursor = $connection->cursor('SELECT id, v FROM ' . self::TABLE . ' WHERE id >= ? AND v != ? ORDER BY id', [10, '22']);
 
         $this->assertInstanceOf(Generator::class, $cursor);
-        $rows = iterator_to_array($cursor);
+        $rows = Rows::asArrays($cursor);
         $this->assertCount(2489, $rows);
         $this->assertSame(['id' => 10, 'v' => '20'], $rows[0]);
         $this->assertSame(['id' => 12, 'v' => '24'], $rows[1]);
         $this->assertSame(
-            $connection->select('SELECT id, v FROM ' . self::TABLE . ' WHERE id >= ? AND v != ? ORDER BY id', [10, '22']),
+            Rows::asArrays($connection->select('SELECT id, v FROM ' . self::TABLE . ' WHERE id >= ? AND v != ? ORDER BY id', [10, '22'])),
             $rows
         );
     }
@@ -108,11 +108,11 @@ class ConnectionCursorTest extends TestCase
         $connection = $this->laravelBuilderConnection();
         $query = fn () => $connection->table(self::TABLE)->where('id', '<', 1200)->orderBy('id');
 
-        $rows = $query()->get()->all();
+        $rows = $query()->get()->map(Rows::asArray(...))->all();
 
         $this->assertCount(1200, $rows);
-        $this->assertSame($rows, $query()->cursor()->all());
-        $this->assertSame($rows, $query()->lazy(500)->all());
+        $this->assertSame($rows, $query()->cursor()->map(Rows::asArray(...))->all());
+        $this->assertSame($rows, $query()->lazy(500)->map(Rows::asArray(...))->all());
         $this->assertSame(
             array_column($rows, 'id'),
             $connection->table(self::TABLE)->where('id', '<', 1200)->lazyById(500)->pluck('id')->all()
@@ -144,7 +144,7 @@ class ConnectionCursorTest extends TestCase
         $cursor = $connection->cursor('SELECT id FROM ' . self::TABLE . ' WHERE id < ? ORDER BY id', [3]);
         $this->assertSame([], $connection->getQueryLog());
 
-        $this->assertSame([['id' => 0], ['id' => 1], ['id' => 2]], iterator_to_array($cursor));
+        $this->assertSame([['id' => 0], ['id' => 1], ['id' => 2]], Rows::asArrays($cursor));
         $this->assertSame(
             [['query' => 'SELECT id FROM ' . self::TABLE . ' WHERE id < ? ORDER BY id', 'bindings' => [3]]],
             array_map(fn (array $entry): array => ['query' => $entry['query'], 'bindings' => $entry['bindings']], $connection->getQueryLog())
@@ -160,15 +160,15 @@ class ConnectionCursorTest extends TestCase
         $connection = DB::connection('clickhouse');
         $query = "SELECT id, MD5(v) AS h, unhex('C328') AS bad FROM " . self::TABLE . ' WHERE id < ? ORDER BY id';
 
-        $rows = iterator_to_array($connection->cursor($query, [300]));
+        $rows = Rows::asArrays($connection->cursor($query, [300]));
 
         $this->assertCount(300, $rows);
         $this->assertSame("\u{FFFD}(", $rows[0]['bad']);
-        $this->assertSame($connection->select($query, [300]), $rows);
+        $this->assertSame(Rows::asArrays($connection->select($query, [300])), $rows);
 
         $laravelConnection = $this->laravelBuilderConnection();
         $builder = fn () => $laravelConnection->table(self::TABLE)->selectRaw('id, MD5(v) AS h')->where('id', '<', 300)->orderBy('id');
-        $this->assertSame($builder()->get()->all(), $builder()->cursor()->all());
+        $this->assertSame($builder()->get()->map(Rows::asArray(...))->all(), $builder()->cursor()->map(Rows::asArray(...))->all());
     }
 
     /**
@@ -215,7 +215,7 @@ class ConnectionCursorTest extends TestCase
         $this->assertSame($before, $openStreams());
 
         $first = $this->laravelBuilderConnection()->table(self::TABLE)->orderBy('id')->cursor()->first();
-        $this->assertSame(['id' => 0, 'v' => '0'], $first);
+        $this->assertSame(['id' => 0, 'v' => '0'], Rows::asArray($first));
         $this->assertSame($before, $openStreams());
 
         try {
@@ -311,7 +311,7 @@ class ConnectionCursorTest extends TestCase
             $connection->statement('CREATE TEMPORARY TABLE cursor_temporary_rows (id UInt32)');
             $connection->statement('INSERT INTO cursor_temporary_rows VALUES (1), (2)');
 
-            return iterator_to_array($connection->cursor('SELECT id FROM cursor_temporary_rows ORDER BY id'));
+            return Rows::asArrays($connection->cursor('SELECT id FROM cursor_temporary_rows ORDER BY id'));
         });
 
         $this->assertSame([['id' => 1], ['id' => 2]], $rows);

@@ -20,6 +20,7 @@ use Oralunal\LaravelClickHouse\Enums\Format;
 use Oralunal\LaravelClickHouse\Exceptions\ParallelQueryException;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use RuntimeException;
+use stdClass;
 use Throwable;
 
 class Connection extends BaseConnection
@@ -227,7 +228,9 @@ class Connection extends BaseConnection
     }
 
     /**
-     * Run a select statement on the active node and return its rows as associative arrays.
+     * Run a select statement on the active node and return its rows as stdClass objects, as Laravel's other
+     * connections return them. Each column is a property of the row; a value of the column, such as an Array, a Map
+     * or a Tuple, stays a PHP array.
      *
      * The query and its bindings are logged as given. While the connection pretends, nothing is sent and the
      * result is empty. Otherwise the bindings are prepared and a FORMAT clause is checked (see
@@ -238,7 +241,7 @@ class Connection extends BaseConnection
      * @param array<int|string, mixed> $bindings
      * @param bool $useReadPdo Ignored: every query runs on the active node
      * @param array<int, mixed> $fetchUsing Ignored
-     * @return array<int, array<string, mixed>>
+     * @return list<\stdClass>
      * @throws InvalidArgumentException When the bindings do not fit the query's placeholders (see
      *                                  SubstitutesBindings::prepareQueryForClient())
      * @throws QueryException When the query's FORMAT clause names a format that select() cannot read rows from,
@@ -253,7 +256,10 @@ class Connection extends BaseConnection
 
             [$sql, $clientBindings] = $this->prepareSelectForClient($query, $bindings);
 
-            return ClientRequests::select($this->getClient(), $sql, $clientBindings)->rows();
+            return array_map(
+                fn (array $row): stdClass => (object) $row,
+                array_values(ClientRequests::select($this->getClient(), $sql, $clientBindings)->rows())
+            );
         });
     }
 
@@ -300,7 +306,7 @@ class Connection extends BaseConnection
      *
      * @param array<int|string, string|array{sql: string, bindings?: array<int|string, mixed>}> $queries
      * @param int $concurrency How many requests are in flight at once, at least 2
-     * @return array<int|string, array<int, array<string, mixed>>>
+     * @return array<int|string, list<stdClass>>
      * @throws InvalidArgumentException When an entry is neither SQL nor an array with an sql string, or is invalid
      *                                  as Parallel::getRows() says, before anything is sent
      * @throws QueryException When the FORMAT clause of an entry names a format that select() cannot read rows from,
@@ -331,7 +337,7 @@ class Connection extends BaseConnection
     }
 
     /**
-     * Run a select statement on the active node and yield its rows one by one, as associative arrays, as select()
+     * Run a select statement on the active node and yield its rows one by one, as stdClass objects, as select()
      * returns them. The cursor() of Laravel's query builder and of Eloquent reads its rows with it.
      *
      * The result is asked for in JSONEachRow and written to a temporary stream, php://temp, which keeps up to 2 MB
@@ -355,7 +361,7 @@ class Connection extends BaseConnection
      * @param array<int|string, mixed> $bindings
      * @param bool $useReadPdo Ignored: every query runs on the active node
      * @param array<int, mixed> $fetchUsing Ignored
-     * @return Generator<int, array<string, mixed>>
+     * @return Generator<int, stdClass>
      * @throws InvalidArgumentException When the bindings do not fit the query's placeholders
      * @throws QueryException When the query has a FORMAT clause, before anything is sent
      * @throws DatabaseException When ClickHouse reports an error
@@ -405,7 +411,7 @@ class Connection extends BaseConnection
             rewind($stream);
             while (($line = fgets($stream)) !== false) {
                 if (trim($line) !== '') {
-                    yield json_decode($line, true, 512, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+                    yield (object) json_decode($line, true, 512, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
                 }
             }
         } finally {

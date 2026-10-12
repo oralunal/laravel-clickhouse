@@ -97,7 +97,9 @@ result kept in a variable, `->get(` or `->getRows(` with bindings, `takeBy(`,
 `groupBy(` called twice, `addGroupBy(`, `cloneWithout(`, `onCluster(`,
 `final(false)`, `chunk(`, `::create(` compared with `false`, and enum
 constants called as methods, such as `Format::CSV()`. Chains often span lines:
-search across them.
+search across them. Also search for the reads of a column of a row, such as
+`$row['id']`, and for `select(` and `selectOne(` of a connection: a row is
+now an object (see step 4).
 
 #### 1. Update the dependency
 
@@ -150,7 +152,7 @@ class Event extends Model
 | `Event::insertAssoc($rows)` | `Event::insert($rows)` |
 | `Event::insertBulk($rows, $columns)` | `Event::insert(array_map(fn (array $row): array => array_combine($columns, $row), $rows))` |
 | `Event::prepareAndInsertAssoc()`, `prepareAndInsertBulk()`, `prepareAndInsert()` | Prepare the rows yourself, then `Event::insert()` |
-| `Event::select(...)->getRows()`, `Event::where(...)->getRows()` | `->toBase()->get()->all()` (arrays), or `->get()` (models) |
+| `Event::select(...)->getRows()`, `Event::where(...)->getRows()` | `->getStatement()->rows()` (associative arrays, as in 3.x), `->toBase()->get()->all()` (`stdClass` objects), or `->get()` (models) |
 | `Event::where(...)->get()` (a `ClickHouseDB\Statement`) | `->get()` returns models; `->getStatement()` returns the statement |
 | `Event::getClient()`, `$event->getThisClient()` | `(new Event())->getConnection()->getClient()` |
 | `$event->resolveConnection()` | `$event->getConnection()` |
@@ -195,8 +197,8 @@ What changes for a model:
   model, not saved, where BaseModel returned `false`: check `->exists`.
 - **Queries return models.** `Event::where(...)->get()` returns an Eloquent
   collection, and `first()` a model, with the casts applied. Call `toBase()`
-  where the code needs arrays, also before `chunk()`, which passes models on a
-  model query.
+  where the code needs rows, not models, also before `chunk()`, which passes
+  models on a model query. The rows are `stdClass` objects (see step 4).
 - **Types.** A type that receives a model query, such as `Event::select()`, is
   `Oralunal\LaravelClickHouse\Eloquent\Builder`, not `QueryBuilder`.
 
@@ -213,9 +215,9 @@ uses of the 3.x builder:
 | 3.x | 4.0 |
 | --- | --- |
 | `use Oralunal\LaravelClickHouse\Builder;` | `use Oralunal\LaravelClickHouse\QueryBuilder;` |
-| `->get()` (a `Statement`) | `->get()` (a collection of arrays) |
-| `->getRows()` | `->get()->all()` |
-| `->get()->rows()`, `->get()->fetchOne()` | `->get()->all()`, `->first()`; on a model query `->toBase()->get()->all()`, `->toBase()->first()` |
+| `->get()` (a `Statement`) | `->get()` (a collection of `stdClass` objects); `->getStatement()` returns the `Statement` |
+| `->getRows()` | `->getStatement()->rows()` (associative arrays), or `->get()->all()` (`stdClass` objects) |
+| `->get()->rows()`, `->get()->fetchOne()` | `->getStatement()->rows()`, `->getStatement()->fetchOne()` (associative arrays), or `->get()->all()`, `->first()` (`stdClass` objects); also on a model query |
 | `->get(['id' => 5])`, `->getRows($bindings)` (smi2 bindings) | `->whereRaw('id = ?', [5])->get()`; `get()` takes columns |
 | `->get()->rowsAsTree()`, `fetchRow()`, `statistics()`, other `Statement` methods | `->getStatement()->rowsAsTree()`, … |
 | `->format('CSV')->get()->rawData()` | `->getStatement('CSV')->rawData()` |
@@ -251,6 +253,14 @@ uses of the 3.x builder:
 
 What else changes:
 
+- **Rows are objects.** `get()`, `first()`, `cursor()` and the other reads of
+  the query builder, and `select()`, `selectOne()` and `cursor()` of the
+  connection, return each row as a `stdClass` object, as Laravel's other
+  connections do. 3.x returned associative arrays. A read such as `$row['id']`
+  fails with `Cannot use object of type stdClass as array`. Read a column as
+  `$row->id`, or keep the arrays with `getStatement()->rows()` of the query
+  and `selectStatement($sql)->rows()` of the connection. A value of an
+  `Array`, a `Map` or a `Tuple` column stays a PHP array.
 - **Aggregates take column names.** `sum('price * qty')` quotes the string as
   a column name and fails with `UNKNOWN_IDENTIFIER`. Pass SQL with
   `DB::raw()`: `sum(DB::raw('price * qty'))`.

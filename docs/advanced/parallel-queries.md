@@ -18,10 +18,12 @@ $results = Parallel::getRows([
         ->settings('max_threads', 2),
     'sql' => ['sql' => 'SELECT count() AS c FROM my_table WHERE field_one = ?', 'bindings' => ['click']],
 ]);
-// ['clicks' => [['id' => 1, 'field_two' => 10], ['id' => 3, 'field_two' => 30]],
-//  'top' => [['field_one' => 'click', 'total' => '40'], ['field_one' => 'view', 'total' => '20']],
-//  'sql' => [['c' => '2']]]
+// ['clicks' => [(object) ['id' => 1, 'field_two' => 10], (object) ['id' => 3, 'field_two' => 30]],
+//  'top' => [(object) ['field_one' => 'click', 'total' => '40'], (object) ['field_one' => 'view', 'total' => '20']],
+//  'sql' => [(object) ['c' => '2']]]
 ```
+
+- Each row is a `stdClass` object, as `get()` and `select()` return it.
 
 - The requests go out together over one curl multi handle. A batch takes approximately the time of its slowest query.
 - At most 10 requests run at the same time. Give a different number, 2 or more, as the second argument.
@@ -50,7 +52,7 @@ Use it for `totals()`, `extremes()` or `statistics()`. It does not throw for a f
 
 ```php
 $statements = Parallel::get(['ids' => $table()->select('id')->orderBy('id')]);
-$statements['ids']->rows();  // [['id' => 1], ['id' => 2], ['id' => 3]]
+$statements['ids']->rows();  // [['id' => 1], ['id' => 2], ['id' => 3]], associative arrays
 $statements['ids']->count(); // 3
 ```
 
@@ -69,7 +71,7 @@ try {
         'missing' => DB::connection('clickhouse')->table('no_such_table'),
     ]);
 } catch (ParallelQueryException $e) {
-    $e->getResults();    // ['clicks' => [['id' => 1], ['id' => 3]]]
+    $e->getResults();    // ['clicks' => [(object) ['id' => 1], (object) ['id' => 3]]]
     $e->getErrors();     // ['missing' => a ClickHouseDB\Exception\DatabaseException with the code 60]
     $e->getStatements(); // The statement of each query
 }
@@ -94,7 +96,7 @@ DB::connection('clickhouse')->selectParallelly([
     'total' => 'SELECT count() AS c FROM my_table',
     'recent' => ['sql' => 'SELECT id FROM my_table WHERE field_two >= ? ORDER BY id', 'bindings' => [20]],
 ]);
-// ['total' => [['c' => '3']], 'recent' => [['id' => 2], ['id' => 3]]]
+// ['total' => [(object) ['c' => '3']], 'recent' => [(object) ['id' => 2], (object) ['id' => 3]]]
 ```
 
 A `connection` key in an entry is ignored: each query runs on this connection.
@@ -109,7 +111,7 @@ Parallel::getRows([
     'exists' => $query()->selectRaw('1 as found')->limit(1),
     'page' => $query()->orderBy('id')->forPage(1, 15),
 ]);
-// ['total' => [['total' => '2']], 'exists' => [['found' => 1]], 'page' => [['id' => 2, ...], ['id' => 3, ...]]]
+// ['total' => [(object) ['total' => '2']], 'exists' => [(object) ['found' => 1]], 'page' => [(object) ['id' => 2, ...], ...]]
 ```
 
 `count()`, `exists()` and `paginate()` send their queries one after the other. In a batch, select the count and the page yourself.

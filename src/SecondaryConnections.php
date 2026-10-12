@@ -189,7 +189,7 @@ class SecondaryConnections
             "SELECT count() AS objects FROM system.tables"
             . " WHERE database = :database AND is_temporary = 0 AND NOT startsWith(name, '.inner')",
             ['database' => $connection->getDatabaseName()]
-        )[0]['objects'] > 0;
+        )[0]->objects > 0;
     }
 
     /**

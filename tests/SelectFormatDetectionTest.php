@@ -45,13 +45,13 @@ class SelectFormatDetectionTest extends TestCase
     {
         $query = fn (): Builder => $this->notes()->where('note', 'export as format csv please');
 
-        $this->assertSame([['id' => 1, 'note' => 'export as format csv please']], $query()->get()->all());
+        $this->assertSame([['id' => 1, 'note' => 'export as format csv please']], $query()->get()->map(Rows::asArray(...))->all());
         $this->assertSame(1, $query()->count());
         $this->assertTrue($query()->exists());
         $this->assertSame(1, $query()->paginate(10)->total());
         $this->assertCount(1, $query()->paginate(10)->items());
         $this->assertSame([1], $query()->pluck('id')->all());
-        $this->assertSame(['id' => 1, 'note' => 'export as format csv please'], $query()->first());
+        $this->assertSame(['id' => 1, 'note' => 'export as format csv please'], Rows::asArray($query()->first()));
     }
 
     public function test_a_value_that_names_the_json_format_returns_every_other_row(): void
@@ -69,7 +69,7 @@ class SelectFormatDetectionTest extends TestCase
         $connection = DB::connection('clickhouse');
         $connection->enableQueryLog();
 
-        $rows = $this->notes()->select('id')->where('note', 'export as format csv please')->settings(['max_threads' => 1])->get()->all();
+        $rows = $this->notes()->select('id')->where('note', 'export as format csv please')->settings(['max_threads' => 1])->get()->map(Rows::asArray(...))->all();
 
         $this->assertSame([['id' => 1]], $rows);
         $this->assertSame(
@@ -82,10 +82,10 @@ class SelectFormatDetectionTest extends TestCase
     {
         $connection = DB::connection('clickhouse');
 
-        $this->assertSame([['id' => 1]], $connection->select("SELECT id FROM sfd_notes WHERE note = 'export as format csv please'"));
+        $this->assertSame([['id' => 1]], Rows::asArrays($connection->select("SELECT id FROM sfd_notes WHERE note = 'export as format csv please'")));
         $this->assertSame(
             [['id' => 1], ['id' => 3]],
-            $connection->select("SELECT id FROM sfd_notes WHERE note != 'format JSON x' ORDER BY id")
+            Rows::asArrays($connection->select("SELECT id FROM sfd_notes WHERE note != 'format JSON x' ORDER BY id"))
         );
     }
 

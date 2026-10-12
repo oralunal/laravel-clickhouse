@@ -19,6 +19,7 @@ use InvalidArgumentException;
 use LogicException;
 use Oralunal\LaravelClickHouse\Exceptions\ParallelQueryException;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
+use stdClass;
 
 /**
  * Run SELECT queries at the same time, over one curl multi handle, and get the statement or the rows of each.
@@ -111,9 +112,9 @@ class Parallel
      *
      * @param array<int|string, Entry> $queries See get()
      * @param int $concurrency How many requests are in flight at once, at least 2
-     * @return array<int|string, mixed> The rows of each query, as arrays, the models of an Eloquent builder, or what
-     *                                  the afterQuery() callbacks of a Laravel query builder return when it is no
-     *                                  collection
+     * @return array<int|string, mixed> The rows of each query, as stdClass objects, the models of an Eloquent
+     *                                  builder, or what the afterQuery() callbacks of a Laravel query builder return
+     *                                  when it is no collection
      * @throws InvalidArgumentException When an entry is invalid or the concurrency is below 2, before anything is
      *                                  sent
      * @throws QueryException When the FORMAT clause of a Laravel query builder or SQL names a format that select()
@@ -130,7 +131,7 @@ class Parallel
         foreach (static::run($queries, $concurrency) as $key => $query) {
             $statements[$key] = $query['statement'];
             try {
-                $rows = $query['statement']->rows();
+                $rows = array_map(fn (array $row): stdClass => (object) $row, array_values($query['statement']->rows()));
             } catch (ClickHouseException $exception) {
                 $errors[$key] = $exception;
                 continue;

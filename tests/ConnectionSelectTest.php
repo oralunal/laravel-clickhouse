@@ -47,11 +47,11 @@ class ConnectionSelectTest extends TestCase
 
         $this->assertSame(
             [['id' => 1]],
-            $connection->select('SELECT id FROM ' . self::TABLE . " WHERE note = 'export as format csv please'")
+            Rows::asArrays($connection->select('SELECT id FROM ' . self::TABLE . " WHERE note = 'export as format csv please'"))
         );
         $this->assertSame(
             [['id' => 1], ['id' => 3]],
-            $connection->select('SELECT id FROM ' . self::TABLE . " WHERE note != 'format JSON x' ORDER BY id")
+            Rows::asArrays($connection->select('SELECT id FROM ' . self::TABLE . " WHERE note != 'format JSON x' ORDER BY id"))
         );
     }
 
@@ -61,11 +61,11 @@ class ConnectionSelectTest extends TestCase
 
         $this->assertSame(
             [['id' => 1]],
-            $connection->select('SELECT id FROM ' . self::TABLE . ' WHERE note = ?', ['export as format csv please'])
+            Rows::asArrays($connection->select('SELECT id FROM ' . self::TABLE . ' WHERE note = ?', ['export as format csv please']))
         );
         $this->assertSame(
             [['id' => 2]],
-            $connection->select('SELECT id FROM ' . self::TABLE . ' WHERE note = :note', ['note' => 'format JSON x'])
+            Rows::asArrays($connection->select('SELECT id FROM ' . self::TABLE . ' WHERE note = :note', ['note' => 'format JSON x']))
         );
     }
 
@@ -88,7 +88,7 @@ class ConnectionSelectTest extends TestCase
     {
         $this->assertSame(
             [['id' => 1], ['id' => 2]],
-            DB::connection('clickhouse')->select('SELECT id FROM ' . self::TABLE . ' WHERE id < ? ORDER BY id ' . $comment, [3])
+            Rows::asArrays(DB::connection('clickhouse')->select('SELECT id FROM ' . self::TABLE . ' WHERE id < ? ORDER BY id ' . $comment, [3]))
         );
     }
 

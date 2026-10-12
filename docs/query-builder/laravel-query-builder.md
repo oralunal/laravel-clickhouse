@@ -6,7 +6,7 @@ This page lists what works differently on ClickHouse, and what does not work.
 
 ## Rows and bindings
 
-- `get()` returns associative arrays, not `stdClass` objects. See [Read results](/query-builder/reading-results#rows).
+- `get()` returns `stdClass` objects, as on Laravel's other connections. See [Read results](/query-builder/reading-results#rows).
 - The grammar writes `?` for each value. The connection writes the values into the SQL as ClickHouse literals. See [Bindings and the SQL of a query](/query-builder/basics#bindings-and-the-sql-of-a-query).
 - Names are in double quotes, with backslashes and double quotes doubled: `select('na\me')` gives `select "na\\me"`.
 

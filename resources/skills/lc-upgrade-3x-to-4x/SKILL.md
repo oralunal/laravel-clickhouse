@@ -224,7 +224,7 @@ For every class that extends `BaseModel`:
    | `::insertBulk\(` | `Event::insertBulk($rows, ['a', 'b'])` | `Event::insert(array_map(fn (array $row): array => array_combine(['a', 'b'], $row), $rows))` |
    | `::insertBulk\(` without columns | positional rows in the table's column order | ask the user for the column names, then as above |
    | `::prepareAndInsert(Assoc\|Bulk)?\(`, `prepare(Assoc)?FromRequest` | rows prepared by the model's hook | map the rows with the hook's code, then `Event::insert()` |
-   | `->getRows\(` | `Event::where(...)->getRows()` | `Event::where(...)->toBase()->get()->all()` (arrays, as before) |
+   | `->getRows\(` | `Event::where(...)->getRows()` | `Event::where(...)->getStatement()->rows()` (associative arrays, as before) |
    | `::getClient\(\)`, `->getThisClient\(` | `Event::getClient()` | `(new Event())->getConnection()->getClient()` |
    | `resolveConnection\(` | `$event->resolveConnection()` | `$event->getConnection()` |
 
@@ -313,21 +313,24 @@ and Laravel's `Illuminate\Database\Query\Builder`.
      `Illuminate\Contracts\Database\Query\Builder`, or remove the type.
 2. **Results.** In 3.x, `get()` returned a `ClickHouseDB\Statement`. On a
    model query, 4.x `get()` returns models, and the casts apply to what it
-   reads: add `toBase()` where the code needs arrays.
+   reads: add `toBase()` where the code needs rows, not models. A 4.x row is a
+   `stdClass` object (see step 9.6); `getStatement()->rows()` gives the
+   associative arrays of 3.x, also on a model query.
    | Search | 3.x | 4.x |
    | --- | --- | --- |
-   | `->get\(\)\s*->\s*rows\(` | `->get()->rows()` | `->get()->all()`; on a model query `->toBase()->get()->all()` |
-   | `->get\(\)\s*->\s*fetchOne\(\)` | `->get()->fetchOne()` | `->first()`; on a model query `->toBase()->first()` |
+   | `->get\(\)\s*->\s*rows\(` | `->get()->rows()` | `->getStatement()->rows()`: associative arrays, as before |
+   | `->get\(\)\s*->\s*fetchOne\(\)` | `->get()->fetchOne()` | `->getStatement()->fetchOne()`: an associative array, as before |
    | `->get\(\)\s*->\s*fetchOne\(` with a name | `->get()->fetchOne('c')` | `->value('c')` (see step 12.3); on a model query `->toBase()->value('c')` |
    | `->get\(\)\s*->\s*(fetchRow\|rowsAsTree\|rowsGenerator\|jsonRows\|rawData\|totals\|extremes\|extremesMin\|extremesMax\|statistics\|countAll\|info\|summary\|isError\|error\|sql)\(` | `->get()->totals()` | `->getStatement()->totals()` |
    | `->format\(` | `->format('CSV')->get()->rawData()` | `->getStatement('CSV')->rawData()` |
-   | `->getRows\(` | `->getRows()` | `->get()->all()`; on a model query `->toBase()->get()->all()` |
+   | `->getRows\(` | `->getRows()` | `->getStatement()->rows()`: associative arrays, as before |
    | `->(get\|getRows)\(\s*[\[$]` | `->get(['id' => 5])`, `->getRows($bindings)`: smi2 bindings | write the values with the condition: `whereRaw('id = ?', [5])`; `get()` takes columns |
    Also search `->get\(\)\s*->` and read each method: one that a collection
    does not have was a `Statement` method. Search `=\s*[^;]*->get\(\)\s*;` and
    follow the variable: `$statement = $query->get(); $statement->fetchOne('c')`
    needs `getStatement()`. A `get()` whose result is iterated with `foreach`
-   still works: a collection of arrays, or of models on a model query. A
+   still runs: a collection of `stdClass` objects, or of models on a model
+   query; a read such as `$row['id']` in the loop must become `$row->id`. A
    `get()` whose result is passed on or type-hinted as `Statement` must
    change: ask the user which one the caller needs.
 3. **SQL text.** `->toSql()` of the package builder held the values; Laravel's
@@ -421,9 +424,10 @@ and Laravel's `Illuminate\Database\Query\Builder`.
    clause when using this function`, and on a model query it orders by the
    key. On a model query the collection holds models. Search `->chunk\(`.
    Type the callback parameter as `Illuminate\Support\Collection` or remove
-   the type. To keep the arrays of 3.x on a model query, call `toBase()`
-   before `chunk()`. In the callback, give array functions `$rows->all()`, and
-   test `$rows->isEmpty()` instead of `$rows === []`. Add `orderBy()` with a
+   the type. On the query builder, and on a model query after `toBase()`,
+   the collection holds `stdClass` objects: read `$row->id`, or `(array) $row`
+   where the code needs an array. In the callback, give array functions
+   `$rows->all()`, and test `$rows->isEmpty()` instead of `$rows === []`. Add `orderBy()` with a
    column that the user confirms. A model whose table has no `id` column needs
    an explicit `orderBy()` too.
 10. **Mutations.**
@@ -629,6 +633,25 @@ package's), `(static|self)::(write|createMergeTree)\(` and
    Laravel's. Its `getLast()`, `getMigrations()` and `getMigrationsByBatch()`
    return objects: code that reads `$row['migration']` must read
    `$row->migration`.
+6. **Rows are objects.** Each row that the query builder and the connection
+   return is a `stdClass` object, as on Laravel's other connections: `get()`,
+   `first()`, `find()`, `sole()`, `cursor()`, `lazy()`, `chunk()`, `each()`
+   and `paginate()` of a query, `select()`, `selectOne()` and `cursor()` of a
+   connection, and `Parallel::getRows()`. 3.x returned associative arrays, so
+   a read such as `$row['id']` fails with `Cannot use object of type stdClass
+   as array`. A value of an `Array`, a `Map` or a `Tuple` column stays a PHP
+   array. Search `->(select|selectOne)\(` on ClickHouse connections, and
+   `\$\w+(\[\d+\])?\[['"]\w+['"]\]` in the code that reads their rows and the
+   rows of queries, and follow each result: a variable, a `foreach`, a
+   callback, a return value. For each read:
+   - read the column as a property, `$row->id`; or
+   - keep the arrays: `getStatement()->rows()` of a query and
+     `selectStatement($sql, $bindings)->rows()` of a connection give the
+     associative arrays of 3.x; or convert one row with `(array) $row`.
+   Choose the property where the code reads a few columns, and the arrays
+   where the rows go on as arrays, such as into `array_column()` with a key,
+   a JSON response or a function typed `array`. `array_column()` reads the
+   properties of objects too.
 
 ## Step 10: Review the writes with the user
 

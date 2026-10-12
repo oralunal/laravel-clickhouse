@@ -42,11 +42,11 @@ class SettingsTest extends TestCase
             'log_comment' => "it's a \\ test",
         ])->get()->first();
 
-        $this->assertSame(2, $row['max_threads']);
-        $this->assertFalse($row['optimize_move_to_prewhere']);
-        $this->assertTrue($row['use_uncompressed_cache']);
-        $this->assertSame(0.25, $row['totals_auto_threshold']);
-        $this->assertSame("it's a \\ test", $row['log_comment']);
+        $this->assertSame(2, $row->max_threads);
+        $this->assertFalse($row->optimize_move_to_prewhere);
+        $this->assertTrue($row->use_uncompressed_cache);
+        $this->assertSame(0.25, $row->totals_auto_threshold);
+        $this->assertSame("it's a \\ test", $row->log_comment);
     }
 
     /**
@@ -71,20 +71,20 @@ class SettingsTest extends TestCase
             'max_threads' => IntBackedEnumFixture::High,
         ])->get()->first();
 
-        $this->assertSame("it's a \\ test", $row['log_comment']);
-        $this->assertSame(3, $row['max_threads']);
+        $this->assertSame("it's a \\ test", $row->log_comment);
+        $this->assertSame(3, $row->max_threads);
 
         $this->assertSame(
             '2026-01-01 00:00:00',
             $this->selectSettings(['log_comment'])
                 ->settings('log_comment', Carbon::parse('2026-01-01 00:00:00'))
-                ->get()->first()['log_comment']
+                ->get()->first()->log_comment
         );
         $this->assertSame(
             'active',
             $this->selectSettings(['log_comment'])
                 ->settings('log_comment', StringBackedEnumFixture::Active)
-                ->get()->first()['log_comment']
+                ->get()->first()->log_comment
         );
     }
 
@@ -130,23 +130,23 @@ class SettingsTest extends TestCase
 
         try {
             foreach ([[$quoted, $exact], [$unquoted, $numbers]] as [$connection, $expected]) {
-                $this->assertSame($expected, $connection->select($sql), $connection->getName());
+                $this->assertSame($expected, Rows::asArrays($connection->select($sql)), $connection->getName());
                 $this->assertSame($expected, $connection->getClient()->select($sql)->rows(), $connection->getName());
-                $this->assertSame($expected, $connection->table('system.one')->select($columns)->get()->all(), $connection->getName());
+                $this->assertSame($expected, $connection->table('system.one')->select($columns)->get()->map(Rows::asArray(...))->all(), $connection->getName());
             }
 
             $this->assertSame(
                 $exact,
                 $unquoted->table('system.one')->select($columns)
                     ->settings('output_format_json_quote_64bit_integers', 1)
-                    ->get()->all(),
+                    ->get()->map(Rows::asArray(...))->all(),
                 "The setting of one query overrides the connection's 0."
             );
             $this->assertSame(
                 $numbers,
                 $quoted->table('system.one')->select($columns)
                     ->settings('output_format_json_quote_64bit_integers', 0)
-                    ->get()->all(),
+                    ->get()->map(Rows::asArray(...))->all(),
                 "The setting of one query overrides the connection's 1."
             );
         } finally {
@@ -162,8 +162,8 @@ class SettingsTest extends TestCase
             ->settings('max_threads', 1)
             ->get()->first();
 
-        $this->assertSame(1, $row['max_threads']);
-        $this->assertSame('first', $row['log_comment']);
+        $this->assertSame(1, $row->max_threads);
+        $this->assertSame('first', $row->log_comment);
     }
 
     /**

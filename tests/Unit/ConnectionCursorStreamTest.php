@@ -18,6 +18,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 use stdClass;
+use Tests\Rows;
 
 /**
  * Connection::cursor() without a server: the curler of the connection's client plays the HTTP responses of
@@ -91,7 +92,7 @@ class ConnectionCursorStreamTest extends TestCase
         $rows = [];
         foreach ($cursor as $row) {
             $yielded++;
-            $rows[] = $row;
+            $rows[] = Rows::asArray($row);
         }
 
         return $rows;

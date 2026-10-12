@@ -71,8 +71,8 @@ class SessionTest extends TestCase
 
             return [
                 'model' => SessionTemporaryRow::select(['id', 'name'])->orderBy('id')->get()->toArray(),
-                'builder' => $connection->table('session_test_rows')->where('id', '>', 1)->orderBy('id')->get()->all(),
-                'select' => $connection->select('SELECT toString(count()) AS rows FROM session_test_rows'),
+                'builder' => $connection->table('session_test_rows')->where('id', '>', 1)->orderBy('id')->get()->map(Rows::asArray(...))->all(),
+                'select' => Rows::asArrays($connection->select('SELECT toString(count()) AS rows FROM session_test_rows')),
             ];
         });
 
@@ -140,7 +140,7 @@ class SessionTest extends TestCase
             $create($connection);
 
             return [
-                'cursor' => iterator_to_array($connection->cursor('SELECT id FROM session_test_rows ORDER BY id')),
+                'cursor' => Rows::asArrays($connection->cursor('SELECT id FROM session_test_rows ORDER BY id')),
                 'lazy' => $connection->table('session_test_rows')->orderBy('id')->cursor()->pluck('name')->all(),
             ];
         });
@@ -165,7 +165,7 @@ class SessionTest extends TestCase
     public function test_a_setting_lasts_for_the_session(): void
     {
         $connection = DB::connection('clickhouse');
-        $read = fn (): int => (int) $connection->select("SELECT getSetting('max_threads') AS value")[0]['value'];
+        $read = fn (): int => (int) $connection->select("SELECT getSetting('max_threads') AS value")[0]->value;
         $outside = $read();
 
         $inside = $connection->session(function (Connection $connection) use ($read): int {
@@ -216,7 +216,7 @@ class SessionTest extends TestCase
                 fn (Connection $connection): int => $this->codeOf(fn () => $connection->select('SELECT count() FROM session_test_rows'))
             );
 
-            return [$inner, $connection->select('SELECT toString(count()) AS rows FROM session_test_rows')];
+            return [$inner, Rows::asArrays($connection->select('SELECT toString(count()) AS rows FROM session_test_rows'))];
         });
 
         $this->assertSame([60, [['rows' => '1']]], $counts);
@@ -345,7 +345,7 @@ class SessionTest extends TestCase
             $this->assertSame($node, $connection->getClient());
             $counts = [];
             for ($query = 0; $query < 5; $query++) {
-                $counts[] = $connection->select('SELECT toString(count()) AS rows FROM session_test_rows')[0]['rows'];
+                $counts[] = $connection->select('SELECT toString(count()) AS rows FROM session_test_rows')[0]->rows;
             }
 
             return $counts;

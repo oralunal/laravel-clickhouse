@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Oralunal\LaravelClickHouse\QueryBuilder as Builder;
 use PHPUnit\Framework\Attributes\DataProvider;
+use stdClass;
 
 /**
  * The Laravel query methods of the query builder, run on the server: operators and booleans in lower case, groups
@@ -67,7 +68,7 @@ class LaravelCompatibilityTest extends TestCase
      */
     private function ids(Builder $query): array
     {
-        return array_map(fn (array $row): int => (int) $row['id'], $query->select('id')->orderBy('id')->get()->all());
+        return array_map(fn (stdClass $row): int => (int) $row->id, $query->select('id')->orderBy('id')->get()->all());
     }
 
     /**
@@ -304,7 +305,7 @@ class LaravelCompatibilityTest extends TestCase
      */
     public function test_a_laravel_expression_is_written_as_raw_sql(): void
     {
-        $this->assertSame([['c' => '3']], $this->events()->select(DB::raw('toString(count()) AS c'))->get()->all());
+        $this->assertSame([['c' => '3']], $this->events()->select(DB::raw('toString(count()) AS c'))->get()->map(Rows::asArray(...))->all());
         $this->assertSame([1], $this->ids($this->events()->where(DB::raw('a + 1'), 2)));
         $this->assertSame([2], $this->ids($this->events()->where('a', DB::raw('b'))));
         $this->assertSame([1, 3], $this->ids($this->events()->where(DB::raw('nd'), null)));
@@ -315,7 +316,7 @@ class LaravelCompatibilityTest extends TestCase
         );
         $this->assertSame(
             [['x' => 7]],
-            $this->events()->withExpression('w', DB::raw('SELECT 7 AS x'))->select('x')->from('w')->get()->all()
+            $this->events()->withExpression('w', DB::raw('SELECT 7 AS x'))->select('x')->from('w')->get()->map(Rows::asArray(...))->all()
         );
     }
 }

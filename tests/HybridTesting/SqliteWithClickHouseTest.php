@@ -127,12 +127,12 @@ class SqliteWithClickHouseTest extends TestCase
     private function assertStartsEmptyAndWrite(): void
     {
         $this->assertSame(0, DB::table('hybrid_users')->count());
-        $this->assertSame(0, (int) DB::connection('clickhouse')->select('SELECT count() AS c FROM hybrid_events')[0]['c']);
+        $this->assertSame(0, (int) DB::connection('clickhouse')->select('SELECT count() AS c FROM hybrid_events')[0]->c);
 
         DB::table('hybrid_users')->insert(['name' => 'Ada']);
         DB::connection('clickhouse')->table('hybrid_events')->insert(['id' => 1, 'user_id' => 1]);
 
         $this->assertSame(1, DB::table('hybrid_users')->count());
-        $this->assertSame(1, (int) DB::connection('clickhouse')->select('SELECT count() AS c FROM hybrid_events')[0]['c']);
+        $this->assertSame(1, (int) DB::connection('clickhouse')->select('SELECT count() AS c FROM hybrid_events')[0]->c);
     }
 }
