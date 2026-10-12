@@ -76,6 +76,8 @@ Event::flushBuffer(); // One INSERT
 | `Model::flushAllBuffers(silent: false)` | Sends the buffers of all models |
 
 - The rows are inserted as given, as `insert()` inserts them. Casts and mutators do not apply.
+- An array with an integer key is a list of rows, also with keys such as those of `array_filter()` or rows keyed by an
+  id. An array with only string keys is one row.
 - All rows of a buffer must have the same keys, in any order. `buffer()` refuses a row with other keys, or without keys,
   and buffers no row of that call:
 

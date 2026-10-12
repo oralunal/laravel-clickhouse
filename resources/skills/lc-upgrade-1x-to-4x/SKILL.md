@@ -48,8 +48,17 @@ is unclear.
   (migrations, seeders, factories), `routes/`, `tests/`, `bootstrap/`, any
   other directory that holds PHP code, such as `src/`, `modules/` or
   `packages/`, and non-PHP files that name classes, such as `phpstan.neon`,
-  `psalm.xml`, `rector.php` or IDE helper files. Exclude `vendor/`,
-  `node_modules/`, `storage/`, `bootstrap/cache/` and `.git/`.
+  `psalm.xml`, `rector.php`, `phpunit.xml`, `.env*` or IDE helper files.
+  Exclude `vendor/`, `node_modules/`, `storage/`, `bootstrap/cache/`, `.git/`
+  and the installed upgrade skills (the `lc-upgrade-*` directories of the
+  agents).
+- Search with `rg -U -P -e '<pattern>'` (or `grep -rPzo`), so that a pattern
+  can span the lines of a chain and start with `->`; add `--hidden
+  --no-ignore` for `.env*` files. A name can be escaped in a string, as in
+  `'Tinderbox\\ClickhouseBuilder\\Query\\Expression'`: the patterns below
+  match one or more backslashes with `\\+`.
+- Leave the installed upgrade skills and the changelog entries that describe
+  the past as they are.
 - Never run `migrate:fresh`, `db:wipe`, `migrate:rollback` or any statement
   that changes data or tables of a real ClickHouse database.
 - When a change needs a decision only the user can make, stop and ask. The
@@ -58,8 +67,11 @@ is unclear.
 
 ## Step 1: Assess
 
-1. Read `composer.json` and run `composer show 'oralunal/*'` to see the
-   required and installed versions.
+1. Find the version that the application uses now. Read `composer.json` and
+   run `composer show 'oralunal/*'`. When 4.x is already installed, read the
+   version before the update from the last commit: `git show HEAD:composer.lock`
+   (search for `oralunal/phpclickhouse-laravel`). Note the exact 1.x version:
+   steps 8 and 9 have notes for some of them.
    - `oralunal/phpclickhouse-laravel` 1.x, or 2.0.0 (tagged before the schema
      builder and the enum base class were bundled): do every step.
    - `oralunal/phpclickhouse-laravel` 2.0.1 or later: stop. Tell the user to run
@@ -67,38 +79,52 @@ is unclear.
    - `oralunal/laravel-clickhouse` 3.x: stop. Tell the user to run
      `/lc-upgrade-3x-to-4x` instead.
    - `oralunal/laravel-clickhouse` 4.x is already installed (4.x on top of 1.x
-     code): do step 1's searches, then every step from step 3 on for what they
-     find.
+     code): do step 1's searches, steps 2.2 and 2.3, then every step from step
+     3 on for what they find. If the searches find none of the 1.x names
+     (`Tinderbox\+ClickhouseBuilder`, `PhpClickHouseSchemaBuilder`,
+     `MyCLabs\+Enum`, the helpers) and the old lock file shows 2.0.1 or later,
+     stop and tell the user to run `/lc-upgrade-2x-to-4x` instead.
 2. Check `git status`. If the tree has uncommitted changes that are not yours,
    tell the user and suggest committing them or working on a new branch before
    you continue.
-3. Run the test suite once (`php artisan test`, `vendor/bin/pest` or
-   `vendor/bin/phpunit`, whichever the project uses) and record the result as
-   the baseline. Tests that already failed before the upgrade are not yours to
-   fix. Mention them in the final report.
+3. Record the result of the test suite before the upgrade as the baseline
+   (`php artisan test`, `vendor/bin/pest` or `vendor/bin/phpunit`, whichever
+   the project uses). Tests that already failed before the upgrade are not
+   yours to fix. Mention them in the final report.
+   - Before step 2, run the suite once.
+   - When 4.x is already installed, a run now is no baseline: the 1.x code no
+     longer loads. Ask the user for a result from before the update, such as a
+     saved output or the last CI run. If there is none and the user agrees,
+     run the suite on a worktree of the last commit that still requires
+     `oralunal/phpclickhouse-laravel`: `git worktree add ../lc-baseline <commit>`,
+     then `composer install` and the test command in `../lc-baseline`, then
+     `git worktree remove ../lc-baseline`. Otherwise say in the report that
+     there is no baseline.
 4. Search for every pattern below and keep the list of matches. You will work
    through it in the next steps. The patterns are PCRE and work with
    `rg`/`grep -P` or your search tool; search `*.php` files and the non-PHP
    files named in the rules, plus `composer.json` for the last one.
 
-   - `Tinderbox\\ClickhouseBuilder`: query builder classes, enums, exceptions
+   - `Tinderbox\\+ClickhouseBuilder`: query builder classes, enums, exceptions
      and the old Laravel integration.
-   - `Tinderbox\\Clickhouse\\`: the Tinderbox HTTP client (`TempTable`,
+   - `Tinderbox\\+Clickhouse\\+`: the Tinderbox HTTP client (`TempTable`,
      `File`, `Client`, …).
    - `PhpClickHouseSchemaBuilder`: schema builder classes, mostly in
      migrations.
    - `PhpClickHouseLaravel`: the package's own classes, such as `BaseModel`
      and `Migration`, in any file, also in escaped strings such as
      `'PhpClickHouseLaravel\\BaseModel'`.
-   - `MyCLabs\\Enum`: the enum base class.
-   - `(^|[^\w>:$\\])(raw|tp|array_flatten)\(`: calls to the formerly global
-     `raw()`, `tp()` and `array_flatten()` helpers.
+   - `MyCLabs\\+Enum`: the enum base class.
+   - `(^|[^\w>:$\\])\\?(raw|tp|array_flatten)\(`: calls to the formerly global
+     `raw()`, `tp()` and `array_flatten()` helpers, also written as `\raw(`.
    - `into_memory_table\(|file_from\(|->addFile\(|->getFiles\(|->getValues\(`:
      removed helpers and builder methods.
    - `(where|orWhere|preWhere|orPreWhere|having|orHaving)(Global)?(Not)?In\(`:
      `IN` conditions to inspect in step 7.
-   - `oralunal/phpclickhouse-laravel|oralunal/clickhouse-builder|glushkovds/php-clickhouse-schema-builder|myclabs/php-enum|the-tinderbox/clickhouse-php-client`:
+   - `oralunal/phpclickhouse-laravel|oralunal/clickhouse-builder|the-tinderbox/clickhouse-builder|glushkovds/clickhouse-builder|glushkovds/php-clickhouse-schema-builder|myclabs/php-enum|the-tinderbox/clickhouse-php-client`:
      direct requirements in `composer.json`.
+   - `DB::connection\(\s*['"](?!clickhouse['"])` and `DB::table\(`: queries on
+     ClickHouse connections other than `clickhouse`, for step 8.
 
    `raw(` preceded by `->`, `::` or `$`, such as `DB::raw()` or
    `$query->raw()`, is a method call, not the helper. The pattern already
@@ -106,12 +132,24 @@ is unclear.
 
 ## Step 2: Switch the dependencies
 
-1. Remove the 1.x packages and require 4.x:
+1. If `bootstrap/providers.php` or `config/app.php` lists
+   `Tinderbox\ClickhouseBuilder\Integrations\Laravel\ClickhouseServiceProvider`,
+   delete that line first. The class no longer exists after the switch, so the
+   app, and the `artisan` scripts that Composer runs, cannot boot while it is
+   listed. The package's own provider is auto-discovered.
+
+2. Remove the 1.x packages and require 4.x:
 
    ```bash
-   composer remove oralunal/phpclickhouse-laravel oralunal/clickhouse-builder glushkovds/php-clickhouse-schema-builder --no-update
+   composer remove oralunal/phpclickhouse-laravel oralunal/clickhouse-builder the-tinderbox/clickhouse-builder glushkovds/clickhouse-builder glushkovds/php-clickhouse-schema-builder --no-update
    composer require oralunal/laravel-clickhouse:^4.0 --with-all-dependencies
    ```
+
+   `myclabs/php-enum` and `the-tinderbox/clickhouse-php-client` are no longer
+   installed with the package. If step 1 found application code that uses
+   `MyCLabs\Enum` for its own enums, or the `Tinderbox\Clickhouse\` client
+   directly, add that package to the same `composer require` line, for example
+   `composer require oralunal/laravel-clickhouse:^4.0 myclabs/php-enum --with-all-dependencies`.
 
    `composer remove` only warns about a package that `composer.json` does not
    list. `oralunal/laravel-clickhouse` conflicts with
@@ -120,16 +158,9 @@ is unclear.
    project itself, update its `composer.json` too. If it names a third-party
    package, stop and ask the user.
 
-2. `myclabs/php-enum` and `the-tinderbox/clickhouse-php-client` are no longer
-   installed with the package. If step 1 found application code that uses
-   `MyCLabs\Enum` for its own enums, or the `Tinderbox\Clickhouse\` client
-   directly, require that package explicitly, for example
-   `composer require myclabs/php-enum`. Otherwise do nothing.
-
-3. If `bootstrap/providers.php` or `config/app.php` lists
-   `Tinderbox\ClickhouseBuilder\Integrations\Laravel\ClickhouseServiceProvider`,
-   delete that line. The class no longer exists, so the app cannot boot while
-   it is listed. The package's own provider is auto-discovered.
+3. When 4.x was already installed before this skill ran, check the two
+   points above now: delete the provider line, and require `myclabs/php-enum`
+   or `the-tinderbox/clickhouse-php-client` when the application uses them.
 
 The `artisan` scripts that Composer runs may fail with a class-not-found error
 for a 1.x class until steps 3 and 4 are done, and for a class that 4.0 removes,
@@ -148,27 +179,35 @@ values that hold class names.
 | `PhpClickHouseSchemaBuilder\` | `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\` |
 | `PhpClickHouseLaravel\` | `Oralunal\LaravelClickHouse\` |
 
-Leave `Tinderbox\ClickhouseBuilder\Integrations\…` for step 6: those classes
-have no counterpart with the same name. To replace the rest across the project
-and keep the backslash style of each occurrence (Perl works the same on Linux
-and macOS):
+Leave `Tinderbox\ClickhouseBuilder\Integrations\…` and
+`Tinderbox\ClickhouseBuilder\Query\Builder` for step 6: those classes have no
+counterpart with the same name. To replace the rest across the project and
+keep the backslash style of each occurrence (Perl works the same on Linux and
+macOS):
 
 ```bash
 grep -rlIE 'Tinderbox\\+ClickhouseBuilder|PhpClickHouseSchemaBuilder|PhpClickHouseLaravel' . \
     --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=storage \
-    --exclude-dir=.git --exclude-dir=cache --exclude=composer.lock \
+    --exclude-dir=.git --exclude-dir='lc-upgrade-*' --exclude-dir='plc-upgrade-*' \
+    --exclude=composer.lock --exclude='CHANGELOG*' \
+  | grep -v '^\./bootstrap/cache/' \
   | xargs perl -pi -e '
-      s/Tinderbox(\\+)ClickhouseBuilder(\\+)(?!Integrations)/Oralunal$1LaravelClickHouse$1ClickhouseBuilder$2/g;
+      s/Tinderbox(\\+)ClickhouseBuilder(\\++)(?!Integrations|Query\\+Builder\b)/Oralunal$1LaravelClickHouse$1ClickhouseBuilder$2/g;
       s/PhpClickHouseSchemaBuilder(\\+)/Oralunal$1LaravelClickHouse$1ClickhouseSchemaBuilder$1/g;
       s/PhpClickHouseLaravel(\\+)/Oralunal$1LaravelClickHouse$1/g;
     '
 ```
 
 Then search for the three old prefixes again. What remains is the
-`Integrations` classes of step 6, or text not followed by a backslash, such as
-a mention in a comment. Change a mention when it names a namespace. Leave text
-that deliberately refers to the old names, such as a changelog entry, and list
-it in the report.
+`Integrations` and `Query\Builder` classes of step 6, or text not followed by a
+backslash, such as a mention in a comment. Change a mention when it names a
+namespace. Leave text that deliberately refers to the old names, such as a
+changelog entry, and list it in the report. Check `git diff -- '*.md'` and
+restore the lines that describe the past.
+
+1.0.0 told users to list `PhpClickHouseLaravel\ClickhouseServiceProvider` in
+`bootstrap/providers.php`. The replacement above renames it; keep it or delete
+it, since the package's provider is auto-discovered.
 
 Migration files are the most common place for `PhpClickHouseSchemaBuilder`,
 especially closures typed as `fn (MergeTree $table) => …` passed to
@@ -199,7 +238,9 @@ call means, and leave the calls that are not the package's alone in step 9.
 
 ## Step 5: Refresh Laravel's caches
 
-1. Run `php artisan package:discover` and `php artisan optimize:clear`.
+1. Run `php artisan package:discover` and
+   `php artisan optimize:clear --except=cache`, which leaves the application
+   cache as it is.
 
    If they or any other artisan command fail with
    `Class "Tinderbox\ClickhouseBuilder\Integrations\Laravel\ClickhouseServiceProvider" not found`
@@ -230,6 +271,7 @@ This package never sent their files to ClickHouse, so they could not work in
 | `into_memory_table()`, `file_from()` | Same as above |
 | `Tinderbox\ClickhouseBuilder\Query\Builder` (Tinderbox-client builder) | `Model::query()` or `DB::connection('clickhouse')->table(...)` |
 | `Tinderbox\ClickhouseBuilder\Integrations\Laravel\Connection` / `Builder` | `Oralunal\LaravelClickHouse\Connection` / `Oralunal\LaravelClickHouse\QueryBuilder` |
+| `Tinderbox\ClickhouseBuilder\Integrations\Laravel\ClickhouseServiceProvider` in `bootstrap/providers.php` or `config/app.php` | delete the line (step 2.1) |
 
 If you find any of these, explain what the code tried to do and propose the
 replacement. Then **ask the user before changing it**: the right fix depends on
@@ -246,8 +288,9 @@ only when that same builder had added a file with that name through
 and a string throws a `TypeError`. `havingIn()` no longer exists: use
 `havingRaw()`, as the `lc-upgrade-3x-to-4x` skill shows.
 
-For each match from step 1 whose second argument is a string (a literal or a
-variable holding one) rather than an array or a closure:
+For each match from step 1 whose second argument is not an array, a
+collection or a closure, such as a string or a number (`whereIn('id', 5)` gave
+`IN 5`):
 
 - **The same builder called `addFile()` with that name** (step 6): the string
   named a temporary table. Handle it together with the `addFile()` call from
@@ -255,28 +298,54 @@ variable holding one) rather than an array or a closure:
   equivalent is a sub-query closure, such as
   `->whereIn('id', fn ($q) => $q->select('id')->from('table_name'))`, or
   `->whereRaw('id in table_name')`.
-- **Anything else:** the string was one value. Write it as a list,
-  `->whereIn('id', [$value])`, which gives the same rows. If the string looks
-  like a table name, the code was probably already wrong in 1.x: list it in
-  the report as a possible existing bug.
+- **Anything else:** the value was one value. Write it as a list,
+  `->whereIn('id', [$value])`, which gives the same rows. When a variable can
+  hold one value or an array, as `$request->query()` can, write
+  `Arr::wrap($value)` instead (`Illuminate\Support\Arr`): `[$value]` would
+  nest an array. If the string looks like a table name, the code was probably
+  already wrong in 1.x: list it in the report as a possible existing bug.
 
-## Step 8: Tell the user about the `migrate:fresh` change
+## Step 8: Tell the user about the connection and `migrate:fresh` changes
 
-Check `config/database.php` and `.env` (`DB_CONNECTION`). If the default
-connection is not a ClickHouse connection (`driver` is not `clickhouse`), but
-some migrations set `protected $connection` to a ClickHouse connection, then
-since 2.0 `migrate:fresh` also empties those ClickHouse databases. So does
-the `RefreshDatabase` test trait. `db:wipe` empties only the connection it is
-given. In 1.x they were left untouched.
+**Queries of other connections.** In 1.x and 2.0.0, `table()` and `query()` of
+a ClickHouse connection with `fix_default_query_builder` on ran on the
+`clickhouse` connection, whatever connection the code named. So did
+`DB::table()` when the default connection is a ClickHouse connection with
+another name, and the `migrations` table of such a connection, as with
+`migrate --database=<name>`. 4.x runs them on the connection that the code
+names. In 1.0.0 the option was off unless the connection set it; from 1.1.0, a
+connection defined in `config/clickhouse.php` (the packaged or a published
+file) had it on unless it set it off, and a connection defined only in
+`config/database.php` had it off unless it set it on. For the matches of the
+last search of step 1 whose connection had the option on, tell the user which
+reads and writes now go to another server or database. If the `migrations`
+table is on such a connection, read both `migrations` tables (read only) and
+tell the user before anyone runs `migrate`: copy the rows from the `migrations`
+table of `clickhouse`, or `migrate` runs every migration again.
+
+**`migrate:fresh`, `db:wipe` and `RefreshDatabase`.** Check
+`config/database.php` and `.env` (`DB_CONNECTION`):
+- If the default connection is a ClickHouse connection, `migrate:fresh`,
+  `db:wipe` and the `RefreshDatabase` trait failed on it in 1.x, which had no
+  `dropAllTables()`. 4.x drops every table, view, materialized view and
+  dictionary of its database, on every node.
+- If the default connection is not a ClickHouse connection, but some
+  migrations use a ClickHouse connection, then since 2.0.1 `migrate:fresh`
+  also empties those ClickHouse databases, and so does `RefreshDatabase`.
+  `db:wipe` empties only the connection it is given. In 1.x they were left
+  untouched. A migration that extends the package's `Migration` without
+  `$connection` used the `clickhouse` connection.
 
 Do not change code for this. Instead:
 
 1. Find where `migrate:fresh` runs: the `RefreshDatabase` /
    `DatabaseMigrations` traits in `tests/`, `composer.json` scripts, CI
    workflows and deploy scripts.
-2. Check which ClickHouse database the testing environment uses: look at
-   `phpunit.xml`, `.env.testing` and the CI environment variables, for example
-   `CLICKHOUSE_DATABASE`.
+2. Check which ClickHouse servers and databases the testing environment
+   uses: look at `phpunit.xml`, `.env.testing` and the CI environment
+   variables, for example `CLICKHOUSE_HOST`, `CLICKHOUSE_DATABASE` and the
+   nodes of `cluster`. A test environment that sets only the database name
+   still empties that database on the hosts of `.env`.
 3. Tell the user which ClickHouse databases will be emptied in those places.
    If any of them looks shared or important, for example the same database as
    local development or production, warn them clearly and suggest a dedicated
@@ -286,6 +355,13 @@ Do not change code for this. Instead:
    database, `<database>_test_<token>` (for example `analytics_test_1`),
    rather than the configured one. The ClickHouse user of the test
    environment must be allowed to create and drop databases.
+5. Version notes, to tell the user:
+   - 1.0.0 to 1.4.x: `Schema::drop()` and `Schema::dropIfExists()` sent
+     nothing on a ClickHouse connection. 4.x drops the table, also in the
+     `down()` of a rollback, a reset or a refresh.
+   - 1.1.0 to 1.3.x: the package did not read a published
+     `config/clickhouse.php`. 4.x reads it, below `config/database.php`: check
+     its values, which now apply.
 
 Before you go on, check the move: `composer dump-autoload` and
 `php artisan package:discover` must finish without errors, or fail only with a
@@ -304,7 +380,11 @@ also ships it as
 Follow its rules, then its step 1 items 4 and 5 (the ClickHouse connections
 and the code that uses them), and then every step from its step 3 on. Skip its
 steps 1.1 to 1.3 and 2: the version check, the `git status` check, the baseline
-and the dependency are done. Its verification and report replace a separate
+and the dependency are done; the baseline is the result of step 1.3 of this
+skill. For its step 1.4, the rule for `fix_default_query_builder` is the one of
+step 8 of this skill. Its step 6.3 also covers 1.x tables: `createMergeTree()`
+with `engine()` made a table that is not replicated. Its verification and
+report replace a separate
 verification and report of this skill: add to its report the package changes
 of step 2, the files of steps 3 and 4, every question of steps 6 and 7 with the
 decision taken, every old-namespace mention you left on purpose, what step 5

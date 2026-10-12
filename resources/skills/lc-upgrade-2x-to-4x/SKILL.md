@@ -9,9 +9,14 @@ You are upgrading this Laravel application from `oralunal/phpclickhouse-laravel`
 2.x to `oralunal/laravel-clickhouse` 4.x. It is done in two parts:
 
 1. **The rename (this skill, steps 1 to 5).** 3.0 renamed the Composer package
-   and the namespace prefix, and nothing else:
+   and the namespace prefix:
    - `oralunal/phpclickhouse-laravel` → `oralunal/laravel-clickhouse`;
    - `PhpClickHouseLaravel\` → `Oralunal\LaravelClickHouse\`.
+
+   3.0 also fixed one bug: on a connection with `cluster` nodes,
+   `createMergeTree()` lost the replication when its callback called
+   `engine()`, so such a 2.x table is not replicated. The `lc-upgrade-3x-to-4x`
+   skill compares the tables of each migration with production (its step 6).
 
    The rename gives the 3.x names. Most of these classes no longer exist in
    4.0, so step 6 rewrites the code that uses them:
@@ -44,8 +49,14 @@ is unclear.
 - Search the whole project, not just `app/`. Include `config/`, `database/`
   (migrations, seeders, factories), `routes/`, `tests/`, `bootstrap/`, and
   non-PHP files that name classes, such as `phpstan.neon`, `psalm.xml`,
-  `rector.php` or IDE helper files. Exclude `vendor/`, `node_modules/`,
-  `storage/`, `bootstrap/cache/` and `.git/`.
+  `rector.php`, `phpunit.xml`, `.env*` or IDE helper files. Exclude `vendor/`,
+  `node_modules/`, `storage/`, `bootstrap/cache/`, `.git/` and the installed
+  upgrade skills (the `lc-upgrade-*` directories of the agents).
+- Search with `rg -U -P -e '<pattern>'` (or `grep -rPzo`), so that a pattern
+  can span the lines of a chain and start with `->`; add `--hidden
+  --no-ignore` for `.env*` files.
+- Leave the installed upgrade skills and the changelog entries that describe
+  the past as they are.
 - Never run `migrate:fresh`, `db:wipe`, `migrate:rollback` or any statement
   that changes data or tables of a real ClickHouse database.
 - When a change needs a decision only the user can make, stop and ask. The
@@ -54,22 +65,34 @@ is unclear.
 
 ## Step 1: Assess
 
-1. Read `composer.json` and run `composer show 'oralunal/*'` to see the
-   required and installed versions.
-   - `oralunal/phpclickhouse-laravel` 2.x: do every step.
-   - `oralunal/phpclickhouse-laravel` 1.x: stop. Tell the user to run
-     `/lc-upgrade-1x-to-4x` instead.
+1. Find the version that the application uses now. Read `composer.json` and
+   run `composer show 'oralunal/*'`. When 4.x is already installed, read the
+   version before the update from the last commit: `git show HEAD:composer.lock`
+   (search for `oralunal/phpclickhouse-laravel`).
+   - `oralunal/phpclickhouse-laravel` 2.0.1 or 2.0.2: do every step.
+   - `oralunal/phpclickhouse-laravel` 2.0.0 or 1.x: stop. Tell the user to run
+     `/lc-upgrade-1x-to-4x` instead: 2.0.0 still required the separate schema
+     builder and enum packages, which that skill replaces.
    - `oralunal/laravel-clickhouse` 3.x: stop. Tell the user to run
      `/lc-upgrade-3x-to-4x` instead.
-   - `oralunal/laravel-clickhouse` 4.x is already installed: do step 1's
-     searches, then every step from step 3 on for what they find.
+   - `oralunal/laravel-clickhouse` 4.x is already installed, with 2.x code: do
+     step 1's searches, then every step from step 3 on for what they find.
 2. Check `git status`. If the tree has uncommitted changes that are not yours,
    tell the user and suggest committing them or working on a new branch before
    you continue.
-3. Run the test suite once (`php artisan test`, `vendor/bin/pest` or
-   `vendor/bin/phpunit`, whichever the project uses) and record the result as
-   the baseline. Tests that already failed before the upgrade are not yours to
-   fix. Mention them in the final report.
+3. Record the result of the test suite before the upgrade as the baseline
+   (`php artisan test`, `vendor/bin/pest` or `vendor/bin/phpunit`, whichever
+   the project uses). Tests that already failed before the upgrade are not
+   yours to fix. Mention them in the final report.
+   - Before step 2, run the suite once.
+   - When 4.x is already installed, a run now is no baseline: the 2.x code no
+     longer loads. Ask the user for a result from before the update, such as a
+     saved output or the last CI run. If there is none and the user agrees,
+     run the suite on a worktree of the last commit that still requires
+     `oralunal/phpclickhouse-laravel`: `git worktree add ../lc-baseline <commit>`,
+     then `composer install` and the test command in `../lc-baseline`, then
+     `git worktree remove ../lc-baseline`. Otherwise say in the report that
+     there is no baseline.
 4. Search for every pattern below and keep the list of matches. The patterns
    are PCRE and work with `rg`/`grep -P` or your search tool.
 
@@ -78,10 +101,19 @@ is unclear.
      in strings, JSON, YAML or NEON, and grouped imports such as
      `use PhpClickHouseLaravel\{BaseModel, Migration};`.
    - `oralunal/phpclickhouse-laravel`: the requirement in `composer.json`
-     (and in the `composer.json` of any local package in the project).
-   - `Tinderbox\\ClickhouseBuilder|PhpClickHouseSchemaBuilder\\`: 1.x code. If
-     this finds anything, stop and tell the user to run `/lc-upgrade-1x-to-4x`
-     instead.
+     (and in the `composer.json` of any local package in the project), and an
+     `extra.laravel.dont-discover` entry, which step 3 renames to
+     `oralunal/laravel-clickhouse`.
+   - `Tinderbox\\+ClickhouseBuilder`: 1.x code. If this finds anything, stop
+     and tell the user to run `/lc-upgrade-1x-to-4x` instead.
+   - `PhpClickHouseSchemaBuilder\\+`: imports of the separate schema builder
+     package that 2.0.0 required, in old migrations. On 2.0.1 or 2.0.2, rename
+     them in step 3 as well, to `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\`,
+     and remove `glushkovds/php-clickhouse-schema-builder` from `composer.json`
+     in step 2.
+   - `MyCLabs\\+Enum`: the application's own enums on `myclabs/php-enum`. If
+     `composer.json` does not require that library, add it to the
+     `composer require` of step 2, or ask the user to make them native enums.
 
 ## Step 2: Switch the dependency
 
@@ -112,16 +144,23 @@ escaped backslashes, `PhpClickHouseLaravel\\` becomes
 To replace them across the project (Perl works the same on Linux and macOS):
 
 ```bash
-grep -rlI 'PhpClickHouseLaravel' . \
+grep -rlIE 'PhpClickHouseLaravel|PhpClickHouseSchemaBuilder' . \
     --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=storage \
-    --exclude-dir=.git --exclude-dir=cache --exclude=composer.lock \
-  | xargs perl -pi -e 's/PhpClickHouseLaravel(\\+)/Oralunal$1LaravelClickHouse$1/g'
+    --exclude-dir=.git --exclude-dir='lc-upgrade-*' --exclude-dir='plc-upgrade-*' \
+    --exclude=composer.lock --exclude='CHANGELOG*' \
+  | grep -v '^\./bootstrap/cache/' \
+  | xargs perl -pi -e '
+      s/PhpClickHouseSchemaBuilder(\\+)/Oralunal$1LaravelClickHouse$1ClickhouseSchemaBuilder$1/g;
+      s/PhpClickHouseLaravel(\\+)/Oralunal$1LaravelClickHouse$1/g;'
 ```
 
 Then search for `PhpClickHouseLaravel` again. What remains is not followed by
 a backslash, such as a mention in a comment or in documentation. Change it when
 it names the package's namespace. Leave text that deliberately refers to the
-old name, such as a changelog entry, and list it in the report.
+old name, such as a changelog entry, and list it in the report. Check
+`git diff -- '*.md'` and restore the lines that describe the past.
+In `composer.json`, rename `oralunal/phpclickhouse-laravel` in
+`extra.laravel.dont-discover` to `oralunal/laravel-clickhouse` by hand.
 
 `bootstrap/providers.php` and `config/app.php` normally do not list the
 package's service provider, because it is auto-discovered. If one of them
@@ -130,7 +169,9 @@ renames it to `Oralunal\LaravelClickHouse\ClickhouseServiceProvider`; keep it.
 
 ## Step 4: Refresh Laravel's caches
 
-1. Run `php artisan package:discover` and `php artisan optimize:clear`.
+1. Run `php artisan package:discover` and
+   `php artisan optimize:clear --except=cache`, which leaves the application
+   cache as it is.
 
    If they fail with
    `Class "PhpClickHouseLaravel\ClickhouseServiceProvider" not found`,
@@ -147,6 +188,11 @@ renames it to `Oralunal\LaravelClickHouse\ClickhouseServiceProvider`; keep it.
    Tell the user what you found, and that a deploy of this upgrade should let
    the queues drain first and clear the application cache afterwards if any
    such values exist.
+
+3. Parallel tests. Since 2.0.2, `php artisan test --parallel` gives each test
+   process its own database on the secondary ClickHouse connections, named
+   `<database>_test_<token>`. On 2.0.1, tell the user that the ClickHouse user
+   of the tests needs permission to create and drop databases.
 
 ## Step 5: Check the rename
 
@@ -168,7 +214,9 @@ also ships it as
 Follow its rules, then its step 1 items 4 and 5 (the ClickHouse connections
 and the code that uses them), and then every step from its step 3 on. Skip its
 steps 1.1 to 1.3 and 2: the version check, the `git status` check, the baseline
-and the dependency are done. Its verification and report replace a separate
+and the dependency are done; the baseline is the result of step 1.3 of this
+skill. Its step 1.4 applies to 2.x as written: the packaged config turned
+`fix_default_query_builder` on for the connection named `clickhouse` only. Its verification and report replace a separate
 verification and report of this skill: add to its report the package and
 namespace change, the files of step 3, every `PhpClickHouseLaravel` mention
 you left on purpose, and what step 4 found about serialized values, cache and

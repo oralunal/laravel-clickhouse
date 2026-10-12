@@ -60,6 +60,24 @@ class BufferedInsertTest extends TestCase
         $this->assertSame([[1, 'x'], [2, 'y'], [3, 'z']], $this->rowsOf(Example::class));
     }
 
+    /**
+     * An array of rows whose keys are not 0, 1, 2, ..., such as the result of array_filter() or rows keyed by an id,
+     * is a list of rows, as in 3.x, and not one row whose columns are its keys.
+     */
+    public function testBufferReadsRowsWithOtherIntegerKeysAsRows(): void
+    {
+        Example::buffer(array_filter([
+            ['f_int' => 1, 'f_string' => 'x'],
+            ['f_int' => 0, 'f_string' => 'skipped'],
+            ['f_int' => 2, 'f_string' => 'y'],
+        ], fn (array $row): bool => $row['f_int'] > 0));
+        Example::buffer([20 => ['f_int' => 3, 'f_string' => 'z']]);
+        $this->assertSame(3, Example::bufferCount());
+
+        Example::flushBuffer();
+        $this->assertSame([[1, 'x'], [2, 'y'], [3, 'z']], $this->rowsOf(Example::class));
+    }
+
     public function testBufferIgnoresEmptyArray(): void
     {
         Example::buffer([]);
