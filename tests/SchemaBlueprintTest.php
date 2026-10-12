@@ -600,7 +600,7 @@ class SchemaBlueprintTest extends TestCase
 
     /**
      * Changing a Nullable column that holds NULL into a type without NULL
-     * would leave a mutation that makes every query of the table fail, so it
+     * would leave a mutation that makes every query that reads the column fail, so it
      * throws before the blueprint sends anything.
      */
     public function testChangeRefusesToDropNullWhileTheColumnHoldsNull(): void
@@ -622,7 +622,7 @@ class SchemaBlueprintTest extends TestCase
                 $this->assertSame(
                     'The column [note] of the table [' . self::CHANGED . '] holds NULL values, so its type cannot change'
                     . " from Nullable(String) to String: ClickHouse would fail to convert them in a mutation, and every later"
-                    . ' query of the table would fail until the mutation is killed. Replace the NULL values first, or keep'
+                    . ' query that reads the column would fail until the mutation is killed. Replace the NULL values first, or keep'
                     . ' the column nullable(). Rows removed by a lightweight DELETE count too until a merge rewrites their'
                     . ' parts; ALTER TABLE `' . self::CHANGED . '` APPLY DELETED MASK removes them.',
                     $exception->getMessage(),

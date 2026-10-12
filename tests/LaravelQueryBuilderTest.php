@@ -588,7 +588,8 @@ class LaravelQueryBuilderTest extends TestCase
     }
 
     /**
-     * With union_default_mode set, union() sends a bare union, which follows that mode.
+     * With union_default_mode set, union() sends a bare union, which follows that mode. unionDistinct() still sends
+     * union distinct.
      */
     public function testUnionFollowsTheUnionDefaultModeOfTheConnection(): void
     {
@@ -596,6 +597,8 @@ class LaravelQueryBuilderTest extends TestCase
             ->table(self::ROWS)->select('id')->where('id', 1);
 
         $this->assertSame([1, 1], $this->ids($query()->union($query())));
+        $this->assertSame([1], $this->ids($query()->unionDistinct($query())));
+        $this->assertStringContainsString(' union distinct ', $query()->unionDistinct($query())->toSql());
     }
 
     /**

@@ -113,7 +113,8 @@ Parallel::getRows([
 ```
 
 `count()`, `exists()` and `paginate()` send their queries one after the other. In a batch, select the count and the page yourself.
-For a query that `count()` counts in a sub-query, such as a grouped query, count a sub-query: `DB::connection('clickhouse')->query()->fromSub($query, 'q')->selectRaw('count() as total')`.
+For a query that `count()` counts in a sub-query, such as a grouped query, count a sub-query: `DB::connection('clickhouse')->query()->fromSub($query(), 'q')->selectRaw('count() as total')`.
+Pass the query, not the closure: `fromSub()` calls a closure with a new query and ignores what it returns.
 See [Which rows count() counts](/query-builder/reading-results#which-rows-count-counts).
 
 ## Limits

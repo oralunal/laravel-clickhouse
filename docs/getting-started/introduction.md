@@ -11,7 +11,7 @@ The connection works with Laravel's own APIs: the `DB` facade, Laravel's query b
 | Item | Version |
 | --- | --- |
 | PHP | 8.5 or later |
-| Laravel | 13 or later |
+| Laravel | 13 |
 | ClickHouse | 24.8 or later |
 
 The test suite runs on ClickHouse 24.8, 26.3 and 26.8. Older versions are not tested.
@@ -38,8 +38,8 @@ Newer versions return some results differently. See [ClickHouse versions](/refer
 ## Credits
 
 The package is a fork of [glushkovds/phpclickhouse-laravel](https://github.com/glushkovds/phpclickhouse-laravel).
-Versions 1.x to 3.x bundled code from these MIT-licensed projects. Version 4 uses Laravel's own query builder and
-schema builder instead, and bundles none of them:
+Version 1.x required these MIT-licensed projects through Composer, and versions 2.x and 3.x bundled their code (2.0.0 only the query builder).
+Version 4 uses Laravel's own query builder and schema builder instead, and bundles none of them:
 
 | Project | Used in |
 | --- | --- |

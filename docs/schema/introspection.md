@@ -34,7 +34,7 @@ When ClickHouse is not the default connection, use `Schema::connection('clickhou
 | `getTables()` | The tables, with the database as `schema`, `total_bytes` as `size`, the comment and the engine. No views, materialized views, `.inner` tables or dictionaries. The `size` of a `Merge` table is `NULL`. |
 | `getViews()` | The views and materialized views, with their `SELECT` as `definition` |
 | `hasTable()` | `true` for a table only. Use `hasView()` for a view and `hasDictionary()` for a dictionary. |
-| `getColumns()` | The full type, such as `LowCardinality(Nullable(String))`, as `type` and `type_name`. `default` is the `DEFAULT` expression. `MATERIALIZED` columns have a `stored` generation. `ALIAS` columns have a `virtual` generation. |
+| `getColumns()` | The full type, such as `LowCardinality(Nullable(String))`, as `type` and `type_name`. `default` is the `DEFAULT` or `EPHEMERAL` expression. `MATERIALIZED` columns have a `stored` generation. `ALIAS` columns have a `virtual` generation. |
 | `getIndexes()` | The primary key, with the name `primary`, then the data-skipping indexes |
 | `getForeignKeys()`, `hasForeignKey()` | `[]` and `false`. ClickHouse has no foreign keys. |
 

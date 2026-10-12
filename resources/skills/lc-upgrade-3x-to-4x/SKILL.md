@@ -49,10 +49,13 @@ before you write a call to it.
   other directory that holds PHP code, such as `src/`, `modules/` or
   `packages/`. Exclude `vendor/`, `node_modules/`, `storage/`,
   `bootstrap/cache/` and `.git/`. The search patterns below are PCRE and work
-  with `rg`/`grep -P` or your search tool.
+  with `rg`/`grep -P` or your search tool. In the tables, `\|` is the markdown
+  escape of `|`: remove the backslash before you search.
 - Never run `migrate:fresh`, `db:wipe`, `migrate:rollback`, `migrate` or any
   statement that changes data or tables of a real ClickHouse database. Reading
-  is fine. `php artisan migrate --pretend` sends nothing and is fine.
+  is fine. `php artisan migrate --pretend` changes nothing once the migrations
+  table exists, and is fine; when the table does not exist, `migrate` creates
+  it first, so ask the user before you run it then.
 - When a change needs a decision only the user can make, stop and ask. The
   steps below say when. Never guess what data a write is meant to change.
 - Do not commit unless the user asks you to.
@@ -174,7 +177,6 @@ For every class that extends `BaseModel`:
    | `::insertBulk\(` without columns | positional rows in the table's column order | ask the user for the column names, then as above |
    | `::prepareAndInsert(Assoc\|Bulk)?\(`, `prepare(Assoc)?FromRequest` | rows prepared by the model's hook | map the rows with the hook's code, then `Event::insert()` |
    | `->getRows\(` | `Event::where(...)->getRows()` | `Event::where(...)->toBase()->get()->all()` (arrays, as before) |
-   | `->getCollection\(` | `Event::where(...)->getCollection()` | `Event::where(...)->toBase()->get()` |
    | `::getClient\(\)`, `->getThisClient\(` | `Event::getClient()` | `(new Event())->getConnection()->getClient()` |
    | `resolveConnection\(` | `$event->resolveConnection()` | `$event->getConnection()` |
    | `\$tableForInserts`, `getTableForInserts\(` | inserts go to another table | `DB::connection($model->getConnectionName())->table('<that table>')->insert($rows)` |
@@ -189,7 +191,7 @@ For every class that extends `BaseModel`:
    - `Event::flushBuffer()` returned a `Statement` or `null`; it returns
      `true`, or `false` when nothing is buffered.
    - `Event::optimize()` returned a `Statement`; it returns a `bool`.
-   - `Event::truncate()` returned a `Statement`; it returns nothing.
+   - `Event::truncate()` returned a `Statement`; it returns the Eloquent builder.
    - `insertAssoc()` and `insertBulk()` returned a `Statement`; `insert()`
      returns a `bool`. Replace `->isError()` checks on these results: a
      failure throws.
@@ -199,9 +201,10 @@ For every class that extends `BaseModel`:
    PHP `bool` is still written as `1` or `0`. For each model with a `boolean`
    cast whose rows reach `insert()` or `buffer()`, check where the values come
    from. If a value can be another truthy or falsy value, such as `'yes'` or
-   `2`, propose `(int) (bool) $value` and **ask the user**. To apply every
-   cast and mutator, a row can be built with
-   `(new Event())->forceFill($row)->getAttributes()`.
+   `2`, propose `(int) (bool) $value` and **ask the user**.
+   `(new Event())->forceFill($row)->getAttributes()` applies the mutators and
+   the date, JSON, enum and class casts, but not the `boolean`, `int` or
+   `float` casts.
 
 ## Step 5: Queries on the package builder
 
@@ -229,7 +232,6 @@ and Laravel's `Illuminate\Database\Query\Builder`.
    | `->get\(\)\s*->\s*(rawData\|totals\|extremes\|statistics\|countAll\|info\|summary\|isError)\(` | `->get()->totals()` | `->getStatement()->totals()` |
    | `->format\(` | `->format('CSV')->get()->rawData()` | `->getStatement('CSV')->rawData()` |
    | `->getRows\(` | `->getRows()` | `->get()->all()` |
-   | `->getCollection\(` | `->getCollection()` | `->get()` |
    A `get()` whose result is iterated with `foreach` still works: a
    collection of arrays, or of models on a model query. A `get()` whose result
    is passed on or type-hinted as `Statement` must change: ask the user which
@@ -250,7 +252,8 @@ and Laravel's `Illuminate\Database\Query\Builder`.
    | `(^\|[^\w>:$\\])array_flatten\(` | `array_flatten($array)` | `Arr::flatten($array)` (`Illuminate\Support\Arr`) |
    `select(raw('a + 1 as b'))` can also be `selectRaw('a + 1 as b')`. A raw
    string that holds a `?` outside quotes, such as a ternary `a ? b : c`, is
-   now read as a placeholder: write `??`.
+   read as a placeholder in a query with bindings: write `??`, which is always
+   sent as `?`.
 5. **Clauses with another signature.**
    | Search | 3.x | 4.x |
    | --- | --- | --- |
@@ -260,7 +263,6 @@ and Laravel's `Illuminate\Database\Query\Builder`.
    | `->orderByAsc\(` | `->orderByAsc('n')` | `->orderBy('n')` |
    | joins with a `USING` list: `Join\([^,]+,\s*\[` | `->anyLeftJoin('users', ['id'])` | `->anyLeftJoin('users', 'events.id', '=', 'users.id')` |
    | `->(leftJoin\|innerJoin\|rightJoin\|fullJoin\|join)\(` with a strictness or `GLOBAL` argument | `->leftJoin('users', 'ANY', ['id'], true)` | `->join('users', 'events.id', '=', 'users.id', 'global any left')` |
-   | `->crossJoin\([^)]*,` | `->crossJoin('t', false, 'x')` | `->crossJoin('t as x')`, or `->crossJoinSub($query, 'x')` |
    | `JoinClause`, `ArrayJoinClause` closures | `->join(fn (JoinClause $j) => ...)` | the method of the join kind with an on-clause: `anyLeftJoin`, `allInnerJoin`, `asofJoin`, … (and their `…Sub` forms) |
    | `From` closures, `->from\(\s*(fn\|function)` | `->from(fn (From $f) => $f->remote($host, $db, $t, $user, $pass))` | `->fromRaw('remote(?, ?, ?, ?, ?)', [$host, $db, $t, $user, $pass])`; `merge()` → `fromRaw('merge(?, ?)', [...])` |
    | `->as\(`, `->alias\(` after `from($query)` | `->from($query)->as('s')` | `->fromSub($query, 's')` |
@@ -268,7 +270,7 @@ and Laravel's `Illuminate\Database\Query\Builder`.
    | `->whereDict\(`, `->orWhereDict\(`, `->addSelectDict\(` | `->whereDict('users', 'name', $id, 'Ann')` | `->select('*')->selectRaw('dictGetString(?, ?, ?) as name', ['users', 'name', $id])->where('name', 'Ann')` |
    | `->(or)?having(Not)?In\(`, `having(Not)?BetweenColumns` | `->havingIn('c', [1, 2])` | `->havingRaw('c in (?, ?)', [1, 2])` |
    | `asyncWithQuery\|toAsyncSqls\|toAsyncQueries\|getAsyncQueries` | queries meant to run together | `Oralunal\LaravelClickHouse\Parallel::getRows([$query, $other])`, or `Parallel::get()` for statements |
-   | `getQueryFor(Count\|Exists\|Page)\|getQueryToSend\|getQueryClient\|getCountQuery\|setSourcesTable\|followConnectionOptions` | | `count()`, `exists()`, `forPage()`, `selectRaw('count() as c')`; ask the user where the intent is unclear |
+   | `getCountQuery\|setSourcesTable` | | `count()`, `exists()`, `forPage()`, `selectRaw('count() as c')`; ask the user where the intent is unclear |
 6. **Operators and enums.** Laravel's `where()` does not know `in`,
    `between` or `is null` as operators: it compares with the string, as in
    `where "id" = 'in'`. Search, ignoring case,
@@ -311,10 +313,13 @@ and Laravel's `Illuminate\Database\Query\Builder`.
       search `->delete\(\s*(true|false)` on `DB::connection(...)->table()` and
       `->query()` chains, and write `->delete(lightweight: true)` (or
       `false`). `QueryBuilder::delete(true)` throws, because Laravel's first
-      parameter is `$id`. On a model query, `Event::where(...)->delete(true)`
-      is unchanged.
-    - `update($values, $partition)` and `delete(lightweight: …, partition: …)`
-      take a partition as before.
+      parameter is `$id`. 3.x had no lightweight deletes and ignored an
+      argument of `delete()`: on a model query, `Event::where(...)->delete(true)`
+      now sends a lightweight `DELETE FROM`. Search `->delete\(\s*true` on model
+      queries, tell the user, and write `->delete()` to keep the 3.x
+      `ALTER TABLE ... DELETE` unless the user wants the lightweight delete.
+    - 4.x adds a partition argument: `update($values, $partition)` and
+      `delete(lightweight: …, partition: …)`.
 11. **`settings()`.** Calls now add up instead of replacing each other, and
     `null` removes a name. Search `->settings\(` and fix a chain that relied on
     the last call replacing the others.
@@ -333,8 +338,8 @@ uses it, **including the ones that already ran**: a fresh install, CI and
 2. `static::write($sql)` becomes
    `DB::connection($this->connection)->statementOnEveryNode($sql)`. It sends
    the statement to every node of the connection, as `write()` did. It takes
-   no bindings, and reads a `?` outside quotes as a placeholder: write `??`
-   for a question mark. For `write($sql, $bindings)`, write each value into
+   no bindings and sends a `?` as written; a `??` outside quotes is sent as
+   `?`. For `write($sql, $bindings)`, write each value into
    the SQL with `DB::connection($this->connection)->escape($value)`, or use
    `statement($sql, $bindings)`, which runs on the active node only: ask the
    user which one when the connection lists several nodes.
@@ -354,12 +359,18 @@ uses it, **including the ones that already ran**: a fresh install, CI and
    | `->nullable()`, `->default()`, `->comment()` | the same modifiers |
    | `engine(Engine::REPLACING_MERGE_TREE, 'v')`, `engine('X', ...)` | `engine('ReplacingMergeTree(v)')` |
    | `orderBy(...)`, `partition('…')`, `settings([...])`, `ifNotExists()` | `orderBy(...)`, `partitionBy('…')`, `settings([...])`, `ifNotExists()` |
-   | `ttl('d', 'INTERVAL 1 DAY')` | `ttl('d + INTERVAL 1 DAY')` |
-   | `onCluster(...)`, `getEngine()->replicated()`, `dbName()` | nothing: the connection's `cluster_name` and `cluster` decide; `withoutOnCluster()` or `replicated(false)` opt out |
+   | `ttl('d', '1 DAY')` | `ttl('d + INTERVAL 1 DAY')` |
+   | `onCluster(...)`, `getEngine()->replicated()`, `dbName()` | nothing: the connection's `cluster_name` and `cluster` decide; `withoutOnCluster()` or `replicated(false)` opt out. See the note below. |
+   On a connection that lists its nodes in `cluster` but has no
+   `cluster_name`, `createMergeTree()` created a replicated table on every
+   node; `Schema::create()` creates a table that is not replicated, on the
+   active node only. Tell the user, and propose `cluster_name`, or keeping the
+   `CREATE TABLE` with `statementOnEveryNode()`.
    Always call `orderBy()` with the sorting key that the old table had. Remove
    escaping that was added by hand for `createMergeTree()`, such as
    `->comment("it\\'s")`: the schema builder escapes values itself.
-4. Run `php artisan migrate --pretend` (it sends nothing) and compare each
+4. Run `php artisan migrate --pretend` (it changes nothing once the
+   migrations table exists) and compare each
    `CREATE TABLE` with the one that the old migration wrote, or with
    `SHOW CREATE TABLE` if the user lets you read the database. Show the user
    every difference: a fresh run should create the tables that production
@@ -424,8 +435,9 @@ uses it, **including the ones that already ran**: a fresh install, CI and
    result with `DB::connection('<name>')->selectStatement($sql, $bindings)->rawData()`.
 2. **Placeholders.** Search `#@\?`: a hand-written `#@?` marker is not a
    binding; write `?`. A query that mixes `?` with smi2 placeholders (`:0`,
-   `{0}`, `:name`) or query parameters (`{name:Type}`) throws before it is
-   sent. Use one kind of placeholder per query.
+   `{0}`) or query parameters (`{name:Type}`) throws before it is sent. With
+   `:name`, the `?` reaches ClickHouse and fails there. Use one kind of
+   placeholder per query.
 3. **Quoted table names.** Search `` ->(table|from)\(\s*['"]` `` and
    `` DB::table\(\s*['"]` ``: a name that already has backticks is quoted again
    and fails. Pass it without them.
@@ -457,7 +469,8 @@ user. **Ask before you change any of them.**
    guard, such as returning early when `$ids === []`.
 2. **Mutations with clauses that ClickHouse ignores.** `delete()` and
    `update()` throw, and send nothing, for a query with a join, `GROUP BY`,
-   `HAVING`, `LIMIT`, `LIMIT ... BY`, a set operation, `SETTINGS`, `FINAL`,
+   `HAVING`, `LIMIT`, `LIMIT ... BY`, a set operation, a setting other than
+   the mutation settings (`QueryGrammar::MUTATION_SETTINGS`), `FINAL`,
    `SAMPLE`, `ARRAY JOIN`, `WITH`, a select list with aliases or expressions,
    or an `ORDER BY` that defines an alias, calls `arrayJoin()` or limits rows.
    In 3.x some of these changed rows that the query did not select. Show the
@@ -543,11 +556,11 @@ production has.
    out aggregates of grouped queries and of queries with select aliases.
 2. **Model queries return models.** `Event::where(...)->get()` returns an
    Eloquent collection and `first()` a model, where 3.x returned arrays from
-   `getRows()` and `first()`. Check the callers of the chains that step 4 did
-   not rewrite to `toBase()`.
+   `getRows()`. Check the callers of the chains that step 4 did not rewrite
+   to `toBase()`.
 3. **`value($column)`** on a query with a select list returns the first
-   selected column, as in Laravel; 3.x read the column by its name. Search
-   `->value\(` on queries that call `select(`.
+   selected column, as in Laravel. Search `->value\(` on queries that call
+   `select(`.
 4. **Tests.** Tests that assert 3.x SQL, statements or row arrays must assert
    4.x's: update them to the 4.x behavior and say which ones.
 
@@ -568,7 +581,8 @@ Run all of these and fix what they report:
 4. Every search of steps 1.5 and 4 to 12 again. What remains must be a case
    you decided to leave, with the user's answer where you asked.
 5. `php artisan migrate:status` and `php artisan migrate --pretend`. These
-   load the migration files and send nothing. If the database cannot be
+   load the migration files and change nothing once the migrations table
+   exists. If the database cannot be
    reached, run `php -l database/migrations/*.php` instead and say so in the
    report.
 6. Run the test suite and compare it with the baseline from step 1. Every

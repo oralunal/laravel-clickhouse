@@ -58,7 +58,8 @@ class Event extends Model
 
 $event = Event::create(['type' => 'click']);
 $event->getKey(); // '01a1302e-f0b9-73b2-ba69-1d24a005db21'
-// insert into "events" ("id", "type", ...) values ('01a1302e-f0b9-73b2-ba69-1d24a005db21', 'click', ...)
+// insert into "events" ("created_at", "id", "type", "updated_at")
+//   values ('2024-01-02 03:04:05', '01a1302e-f0b9-73b2-ba69-1d24a005db21', 'click', '2024-01-02 03:04:05')
 ```
 
 - `Schema::create()` with `$table->uuid('id')` gives a `UUID` column, and `$table->ulid('id')` a `FixedString(26)` column.

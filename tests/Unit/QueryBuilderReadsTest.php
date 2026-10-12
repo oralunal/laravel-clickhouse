@@ -92,8 +92,8 @@ class QueryBuilderReadsTest extends TestCase
     }
 
     /**
-     * ClickHouse 26.8 answered exists of a query that selects arrayJoin() of an empty array with 1, so such a query is
-     * selected from.
+     * ClickHouse 26.3 and 26.8 answered exists of a query that selects arrayJoin() of an empty array with 1, so such a
+     * query is selected from.
      */
     public function test_exists_selects_from_a_query_that_calls_array_join(): void
     {

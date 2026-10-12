@@ -28,6 +28,9 @@ defaults. A connection in `config/database.php` overrides both. See [Installatio
 | `cluster` | | | List of nodes. It replaces `host` and `port`. See [Clusters](/advanced/clusters). |
 | `cluster_name` | | | Cluster name of the server config, for `ON CLUSTER`. See [Clusters](/advanced/clusters). |
 
+The connection passes its config to the smi2 client, so the client's own options work too: `sslCA`, the CA file of an
+HTTPS server, `auth_method`, `curl_options` and `readonly`.
+
 The options `datetime_precision`, `insert_format` and `use_on_cluster` are off by default.
 Without them, the package writes dates with seconds, inserts in `Values` and sends mutations to the active node.
 

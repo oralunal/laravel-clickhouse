@@ -59,13 +59,13 @@ Each method takes the arguments of Laravel's `join()`, and its `Sub` form the ar
 | Method | SQL | Returns |
 | --- | --- | --- |
 | `innerJoin()`, `innerJoinSub()` | `inner join`, as `join()` | Rows that have a match |
-| `anyInnerJoin()`, `allInnerJoin()`, `anyInnerJoinSub()`, `allInnerJoinSub()` | `any inner join`, `all inner join` | Rows that have a match, one or all |
+| `anyInnerJoin()`, `allInnerJoin()`, `anyInnerJoinSub()`, `allInnerJoinSub()` | `any inner join`, `all inner join` | `any`: one row for each key that both sides have; the other matching rows are left out. `all`: each pair of matching rows. For each left row that has a match, use `semiLeftJoin()`. |
 | `anyLeftJoin()`, `allLeftJoin()`, `anyLeftJoinSub()`, `allLeftJoinSub()` | `any left join`, `all left join` | Left rows, with one match or all matches |
 | `anyRightJoin()`, `allRightJoin()`, `anyRightJoinSub()`, `allRightJoinSub()` | `any right join`, `all right join` | Right rows, with one match or all matches |
 | `fullJoin()`, `fullJoinSub()` | `full join` | All rows of both sides |
 | `semiLeftJoin()`, `semiRightJoin()`, `semiLeftJoinSub()`, `semiRightJoinSub()` | `semi left join`, `semi right join` | Left or right rows that have a match |
 | `antiLeftJoin()`, `antiRightJoin()`, `antiLeftJoinSub()`, `antiRightJoinSub()` | `anti left join`, `anti right join` | Left or right rows without a match |
-| `asofJoin()`, `asofLeftJoin()`, `asofJoinSub()`, `asofLeftJoinSub()` | `asof join`, `asof left join` | Each left row with its closest match |
+| `asofJoin()`, `asofLeftJoin()`, `asofJoinSub()`, `asofLeftJoinSub()` | `asof join`, `asof left join` | `asof join`: each left row that has a match, with its closest match. `asof left join`: also the left rows without a match. |
 
 ```php
 $query->select('my_table.id', 'users.name')->anyLeftJoin('users', 'my_table.user_id', '=', 'users.id');
@@ -89,7 +89,7 @@ $query->allInnerJoin('users', fn ($join) => $join
 //   on "my_table"."user_id" = "users"."id" and "my_table"."tenant" = "users"."tenant"
 ```
 
-An ASOF join matches one condition by the closest value. It needs one inequality in its conditions:
+An ASOF join matches one condition by the closest value. Its conditions need one equality or more and one inequality:
 
 ```php
 DB::connection('clickhouse')->table('events', 'e')
@@ -175,12 +175,14 @@ DB::connection('clickhouse')->table('my_table')->select('user_id')->where('event
 | Method | Keyword |
 | --- | --- |
 | `unionAll()` | `union all` |
-| `union()`, `unionDistinct()` | `union distinct`. With `union_default_mode` in the connection `settings`, `union()` writes a bare `union`. |
+| `union()`, `unionDistinct()` | `union distinct`. With `union_default_mode` in the connection `settings`, `union()` writes a bare `union`, which follows that mode. `unionDistinct()` always writes `union distinct`. |
 | `intersect()`, `intersectDistinct()` | `intersect`, `intersect distinct` |
 | `except()`, `exceptDistinct()` | `except`, `except distinct` |
 
 - Each method takes a builder, or a closure that gets a new builder. Each operand is in parentheses.
-- `intersect()` and `except()` keep the duplicate rows of the first query. The `Distinct` forms return each row one time.
+- `intersect()` and `except()` keep duplicate rows. ClickHouse 24.8 returns each copy of a row of the first query that the second query returns (`intersect()`) or does not return (`except()`).
+  ClickHouse 26.3 and 26.8 count the copies: a row that the first query returns 3 times and the second 2 times is returned 2 times by `intersect()` and 1 time by `except()`.
+  The `Distinct` forms return each row one time.
 - `orderBy()`, `limit()` and `offset()` after a set operation apply to the whole operation. The grammar selects from the operation:
   `$a->unionAll($b)->orderBy('x')->limit(10)` gives `select * from ((...) union all (...)) order by "x" asc limit 10`.
   Call them before the set operation for the first query only.
@@ -207,7 +209,7 @@ $a->except($b->unionAll($c));
 
 ### INTERSECT and EXCEPT in sub-queries
 
-ClickHouse leaves out the columns of the queries that `INTERSECT` and `EXCEPT` compare when the outer query does not read them.
+ClickHouse 24.8 leaves out the columns of the queries that `INTERSECT` and `EXCEPT` compare when the outer query does not read them. 26.3 and 26.8 compare all columns.
 Then a count or an existence check compares fewer columns than `get()`, and gets another answer. On ClickHouse 24.8, the count of an `EXCEPT` that returns two rows was `0`.
 
 `count()`, the other aggregates, `exists()` and `whereExists()` add `where not ignore(*)` to a query that holds `INTERSECT` or `EXCEPT`. Then ClickHouse reads all columns:

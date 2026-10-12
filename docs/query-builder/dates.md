@@ -49,12 +49,13 @@ ClickHouse compares a `DateTime64(6)` value exactly with the column. Checked on 
 | --- | --- |
 | `DateTime64(6)` | Kept, in inserts, conditions, `update()` and `delete()`. `where('d6', $at)` finds the row that the same `$at` inserted. |
 | `DateTime64(3)` | Cut to milliseconds in an insert. A condition compares the microseconds, so `where('d3', $at)` does not find that row. Cut the date: `where('d3', $at->copy()->startOfMillisecond())`. |
-| `DateTime` | A condition does not match the whole second: `where('dt', $at)` finds no row, and `where('dt', '<', $at)` finds the row of `03:04:05`. An insert depends on the server, see below. |
-| `Date`, `Date32` | As at `second`. Give `$date->format('Y-m-d')`. |
+| `DateTime` | A condition does not match the whole second: `where('dt', $at)` finds no row, and `where('dt', '<', $at)` finds the row of `03:04:05`. In `whereIn()`, such a date fails with `TYPE_MISMATCH` on all versions: give whole seconds. An insert depends on the server, see below. |
+| `Date`, `Date32` | A date with a sub-second part is compared with the day at midnight, without an error: `where('d', $at)` finds no row. In `whereIn()` it fails with `TYPE_MISMATCH`. A whole second fails with `TYPE_MISMATCH`, as at `second`. Give `$date->format('Y-m-d')`, or use `whereDate()`. |
 
 An insert into a `DateTime` column writes the sub-second part as a string literal.
 The settings `date_time_input_format` and, on 26.x only, `cast_string_to_date_time_mode` control if ClickHouse refuses or cuts it.
-24.8 and 26.3 use `basic`, which refuses it with `CANNOT_PARSE_TEXT`. 26.8 uses `best_effort`, which cuts it to the second.
+24.8 and 26.3 use `basic`, which refuses it: `CANNOT_PARSE_TEXT` in a `Values` insert, `CANNOT_PARSE_INPUT_ASSERTION_FAILED` in a `JSONEachRow` insert.
+26.8 uses `best_effort`, which cuts it to the second in both formats.
 See [ClickHouse versions](/reference/clickhouse-versions#dates-with-a-sub-second-part).
 
 On a connection that also writes `DateTime` columns:
@@ -81,11 +82,11 @@ At `second`, the default, the package removes the sub-second part. To compare a 
 Each method has `or`, `preWhere` and `orPreWhere` forms, such as `orWhereDate()` and `preWhereYear()`.
 
 - `whereDate()` uses `toDate32()`. It works on `Date`, `Date32`, `DateTime` and `DateTime64` columns, and keeps dates before 1970 and after 2149. It can use the primary key.
-- `whereTime()` compares the time of day to the second, as text, in the time zone of the column. Laravel pads each part: `'7:8'` becomes `'07:08:00'`. Another string, such as `'10:20 am'`, is compared as text. `formatDateTime()` cannot use the primary key.
+- `whereTime()` compares the time of day to the second, as text, in the time zone of the column. The package pads each part: `'7:8'` becomes `'07:08:00'`. Another string, such as `'10:20 am'`, is compared as text. `formatDateTime()` cannot use the primary key.
 - `whereDay()`, `whereMonth()` and `whereYear()` compare with an integer: `whereDay('created_at', '05')` gives `= 5`, and `whereDay('created_at', 5.5)` gives `= 5`.
 - A `DateTimeInterface` value gives its parts in its own time zone.
-- With `null`, the condition is `= null` and matches no row, as on the other drivers of Laravel. Use `whereNull()`.
-- In a join closure, Laravel's `JoinClause` writes `whereDay()` and `whereMonth()` with padded text, such as `'05'`, which fails with `TYPE_MISMATCH`.
+- With `null`, the condition matches no row, as on the other drivers of Laravel: `whereDay()` and `whereMonth()` give `= 0`, and the other methods `= null`. Use `whereNull()`.
+- In a join closure, Laravel's `JoinClause` writes `whereDay()` and `whereMonth()` with padded text, such as `'05'`, which fails with `TYPE_MISMATCH`, and does not pad a time.
 
 ## Model dates
 

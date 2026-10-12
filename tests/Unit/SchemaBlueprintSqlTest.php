@@ -1195,7 +1195,7 @@ class SchemaBlueprintSqlTest extends TestCase
                 fn (SchemaBlueprint $table) => $table->vectorIndex('embedding'),
                 'ClickHouse has no vector similarity index for vectorIndex() (index [visits_embedding_vectorindex] of the'
                 . ' table [visits]) on this server: it needs the setting enable_vector_similarity_index, which ClickHouse'
-                . ' 26.3 and later turn on.',
+                . ' 25.8 and later turn on.',
             ],
             'index() of a vector column on a server without vector similarity indexes' => [
                 fn (SchemaBlueprint $table) => $table->vector('embedding', 3)->index(),

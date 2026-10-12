@@ -83,5 +83,6 @@
    ```
 
 The priority, from highest: the `connections` of `config/database.php`, then `config/clickhouse.php`, then the packaged defaults.
+The packaged defaults apply to the `clickhouse` connection only. Give a new connection all its options, at least `database`.
 
 To query two connections at the same time, see [Parallel queries](/advanced/parallel-queries).

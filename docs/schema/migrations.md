@@ -117,7 +117,9 @@ See [The schema builder on a cluster](/advanced/clusters#the-schema-builder-on-a
 
 `php artisan migrate --pretend` logs the statements of the schema builder, of `statement()` and of `statementOnEveryNode()` under the name of the migration, and sends nothing.
 
-`change()` and `dropIndex()` of the schema builder read the server when they compile, also with `--pretend`. See [Change a column](/schema/schema-builder#change-a-column).
+`change()`, `dropIndex()`, `dropFullText()`, `dropVectorIndex()` and `dropMorphs()` of the schema builder read the server when they compile, also with `--pretend`.
+So do `time()`, `timeTz()`, `fullText()` and `vectorIndex()`, which read `system.settings`, and, in `Schema::table()`, an `index()` without a type when `default_index_type` is set.
+See [Change a column](/schema/schema-builder#change-a-column).
 
 ## Migration commands
 

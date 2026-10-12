@@ -60,8 +60,8 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
      *
      * When the clauses include LIMIT or OFFSET, the message adds that the given methods leave a LIMIT on the
      * query they run on and, for an update with a LIMIT, that the given method that adds a LIMIT itself cannot
-     * update an existing row. When they include SETTINGS, it names the refused settings and the settings that a
-     * mutation takes (see QueryGrammar::MUTATION_SETTINGS).
+     * update an existing row. When they include SETTINGS, it names the refused settings, the settings that are not in
+     * QueryGrammar::MUTATION_SETTINGS.
      *
      * @param string $statement The statement that was refused: delete or update
      * @param string[] $clauses The clauses the query uses, such as ['JOIN', 'LIMIT']
@@ -96,9 +96,11 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
         }
 
         if (in_array('SETTINGS', $clauses, true)) {
-            $message .= ' A mutation ignores ' . ($refusedSettings === [] ? 'such settings' : 'the settings '
-                . Arr::join($refusedSettings, ', ', ' and ')) . ', which change the rows that a SELECT reads. It only'
-                . ' takes the settings that change how it runs, such as mutations_sync and lightweight_deletes_sync.';
+            $message .= ' A mutation only takes the settings that change how it runs, such as mutations_sync and'
+                . ' lightweight_deletes_sync (see QueryGrammar::MUTATION_SETTINGS), and the package refuses '
+                . ($refusedSettings === [] ? 'the others' : 'the settings ' . Arr::join($refusedSettings, ', ', ' and '))
+                . '. ClickHouse ignores a setting that changes which rows a SELECT reads, such as limit, in a mutation,'
+                . ' which then changes every row that the conditions match.';
         }
 
         return new self($message);
