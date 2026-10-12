@@ -38,7 +38,8 @@ See [Read results](/query-builder/reading-results).
 ## Updates and deletions
 
 ClickHouse changes rows with mutations. ClickHouse runs a mutation in the background, unless the `mutations_sync`
-setting waits for it.
+setting waits for it: `Event::where('user_id', 1)->settings('mutations_sync', 2)->update([...])`. See
+[Mutation settings](/query-builder/writing-data#mutation-settings).
 
 | Call | SQL |
 | --- | --- |

@@ -299,6 +299,37 @@ class QueryBuilderClickHouseSqlTest extends TestCase
         );
     }
 
+    /**
+     * A mutation sends the settings that change how it runs after its statement, and refuses the settings that change
+     * which rows a SELECT reads, which a mutation ignores.
+     */
+    public function test_a_mutation_sends_its_settings_and_refuses_the_settings_that_select_rows(): void
+    {
+        $delete = $this->query()->where('a', 1)->settings(['lightweight_deletes_sync' => 2, 'log_comment' => "it's"]);
+        $delete->lightweightDelete = true;
+        $this->assertSame(
+            "delete from \"t\" where \"a\" = ? settings lightweight_deletes_sync=2, log_comment='it\\'s'",
+            $delete->getGrammar()->compileDelete($delete)
+        );
+
+        $update = $this->query()->onCluster('c1')->where('a', 1)->settings('mutations_sync', 2);
+        $update->partition = 202401;
+        $this->assertSame(
+            'alter table "t" on cluster \'c1\' update "b" = ? in partition 202401 where "a" = ? settings mutations_sync=2',
+            $update->getGrammar()->compileUpdate($update, ['b' => 2])
+        );
+
+        $refused = $this->query()->where('a', 1)->settings(['mutations_sync' => 2, 'limit' => 1, 'additional_table_filters' => new Expression("{'t': 'b > 2'}")]);
+
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage(
+            'A mutation ignores the settings limit and additional_table_filters, which change the rows that a SELECT'
+            . ' reads. It only takes the settings that change how it runs, such as mutations_sync and'
+            . ' lightweight_deletes_sync.'
+        );
+        $refused->getGrammar()->compileDelete($refused);
+    }
+
     public function test_a_mutation_joins_the_prewhere_conditions_to_the_where_conditions(): void
     {
         $query = $this->query()->preWhere('a', 1)->where('b', 2);

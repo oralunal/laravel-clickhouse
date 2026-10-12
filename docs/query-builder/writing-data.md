@@ -82,7 +82,7 @@ It throws a `QueryException` and sends nothing, because the mutation could chang
 | `final()`, `sample()` | `->final()->delete()` |
 | A select alias or expression | `->select('id as x')` |
 | An order that defines an alias, calls `arrayJoin()`, or limits the rows with a raw `LIMIT`, `LIMIT ... BY`, `OFFSET` or `FETCH` | `->orderBy('a as b')` |
-| `settings()` | `->settings([...])->delete()` |
+| A setting that changes which rows a select reads, such as `limit`, `offset` or `additional_table_filters` | `->settings(['limit' => 1])->delete()` |
 
 ```php
 $query->where('field_two', '<', 0)->orderBy('created_at')->limit(2)->delete(lightweight: false);
@@ -102,7 +102,7 @@ DB::connection('clickhouse')->table('my_table')->whereIn('id', $ids)->delete(lig
 ```
 
 - The mutation ignores a select list of plain columns and another order.
-- For settings of a mutation, such as `mutations_sync`, use the connection `settings`.
+- A mutation sends the settings that change how it runs. See [Mutation settings](#mutation-settings).
 - Raw SQL in `fromRaw()`, such as a table function, is no table. ClickHouse refuses the mutation with `SYNTAX_ERROR`.
 - For a long list of keys, increase `max_query_size` (256 KiB by default) in the connection `settings`.
   Do not give the query as a sub-query, as in `whereIn('id', $query)`, when its rows depend on other rows of the table.
@@ -140,7 +140,7 @@ KILL MUTATION WHERE database = 'default' AND table = 'my_table';
 
 ClickHouse refuses a lightweight delete on a table with projections, unless `lightweight_mutation_projection_mode` is `drop`. `delete(lightweight: false)` works on such tables.
 
-- On 24.8, it is a query setting. Put it in the connection `settings`.
+- On 24.8, it is a query setting: `->settings('lightweight_mutation_projection_mode', 'drop')->delete(lightweight: true)`, or the connection `settings`.
 - From 24.9, it is a table setting. Set it on the table:
 
   ```sql
@@ -171,6 +171,30 @@ ClickHouse reads a float in a mutation as `Float64` and cuts it at the scale of 
 `update(['price' => 19.99])` stores `19.98` in a `Decimal(10, 2)` column. `round()` does not help.
 Give a numeric string, such as `'19.99'`, or an int, such as `(int) round(0.29 * 100)`.
 :::
+
+## Mutation settings
+
+`settings()` of a `delete()` or an `update()` goes after the statement, for the settings that change how the mutation runs or how long the call waits for it:
+
+```php
+$query->where('id', 123)->settings('mutations_sync', 2)->update(['field_one' => 'new_val']);
+// alter table "my_table" update "field_one" = 'new_val' where "id" = 123 settings mutations_sync=2
+
+$query->where('id', 123)->settings('lightweight_deletes_sync', 2)->delete(lightweight: true);
+// delete from "my_table" where "id" = 123 settings lightweight_deletes_sync=2
+```
+
+- `mutations_sync = 2` makes the call return when the mutation is done on all replicas, and `1` when it is done on this server.
+- A mutation takes these settings: `mutations_sync`, `alter_sync`, `replication_alter_partitions_sync`, `lightweight_deletes_sync`, `lightweight_delete_mode`, `lightweight_mutation_projection_mode`, `enable_lightweight_delete`, `allow_experimental_lightweight_delete`, `allow_nondeterministic_mutations`, `mutations_execute_subqueries_on_initiator`, `mutations_execute_nondeterministic_on_initiator`, `mutations_max_literal_size_to_replace`, `distributed_ddl_task_timeout`, `distributed_ddl_output_mode`, `log_comment`, `max_query_size`, `max_ast_depth`, `max_ast_elements`, `max_expanded_ast_elements` and `max_parser_depth`. `QueryGrammar::MUTATION_SETTINGS` lists them.
+- ClickHouse ignores the other settings in a mutation, such as `limit`, `offset` or `additional_table_filters`, which change the rows that a select reads. The mutation would then change every row that the conditions match. The package refuses them and sends nothing:
+
+  ```text
+  Cannot delete with a query that uses SETTINGS: ... A mutation ignores the settings limit, which change the rows
+  that a SELECT reads. It only takes the settings that change how it runs, such as mutations_sync and
+  lightweight_deletes_sync.
+  ```
+
+- The connection `settings` go with every query, mutations included.
 
 ## Partitions
 

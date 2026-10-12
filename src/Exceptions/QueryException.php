@@ -60,8 +60,8 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
      *
      * When the clauses include LIMIT or OFFSET, the message adds that the given methods leave a LIMIT on the
      * query they run on and, for an update with a LIMIT, that the given method that adds a LIMIT itself cannot
-     * update an existing row. When they include SETTINGS, it adds that settings() only apply to SELECT queries,
-     * and that mutation settings go in the connection's settings.
+     * update an existing row. When they include SETTINGS, it names the refused settings and the settings that a
+     * mutation takes (see QueryGrammar::MUTATION_SETTINGS).
      *
      * @param string $statement The statement that was refused: delete or update
      * @param string[] $clauses The clauses the query uses, such as ['JOIN', 'LIMIT']
@@ -69,13 +69,15 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
      *                                         they run on, such as ['chunk()', 'paginate()']
      * @param string|null $methodThatAddsALimit A method of the query's builder that adds a LIMIT itself before
      *                                          it updates, such as 'updateOrInsert()'
+     * @param string[] $refusedSettings The settings of settings() that the mutation would ignore
      * @return self
      */
     public static function cannotMutateWithClauses(
         string $statement,
         array $clauses,
         array $methodsThatLeaveALimit = [],
-        ?string $methodThatAddsALimit = null
+        ?string $methodThatAddsALimit = null,
+        array $refusedSettings = []
     ): self {
         $ignoredClauses = count($clauses) === 1 ? 'this clause' : 'these clauses';
         $effect = $statement === 'delete' ? 'remove' : 'change';
@@ -94,8 +96,9 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
         }
 
         if (in_array('SETTINGS', $clauses, true)) {
-            $message .= ' Settings from settings() only apply to SELECT queries; put mutation settings, such as'
-                . " mutations_sync, in the connection's settings.";
+            $message .= ' A mutation ignores ' . ($refusedSettings === [] ? 'such settings' : 'the settings '
+                . Arr::join($refusedSettings, ', ', ' and ')) . ', which change the rows that a SELECT reads. It only'
+                . ' takes the settings that change how it runs, such as mutations_sync and lightweight_deletes_sync.';
         }
 
         return new self($message);

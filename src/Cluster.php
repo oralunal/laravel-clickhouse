@@ -221,29 +221,35 @@ class Cluster
     /**
      * Read the retry_on option: which failed requests a client with retries sends again.
      *
-     * A missing option, null or a blank string means 'any', which sends every failed request again, as in
-     * 3.0.0. 'unsent' sends only requests that never reached the server. Letter case and surrounding spaces do
-     * not matter. The option is checked also when retries is 0, so that a typo shows at once.
+     * A missing option, null or a blank string means 'reads', which sends every failed read again, and a write
+     * only when it never reached the server. 'any' sends every failed request again, as in 3.0.0, and 'unsent'
+     * only the requests that never reached the server. Letter case and surrounding spaces do not matter. The
+     * option is checked also when retries is 0, so that a typo shows at once.
      *
      * @param array<string, mixed> $config
-     * @return string CurlerRollingWithRetries::RETRY_ON_ANY or CurlerRollingWithRetries::RETRY_ON_UNSENT
+     * @return string A RETRY_ON_ constant of CurlerRollingWithRetries
      * @throws InvalidArgumentException For any other value
      */
     protected static function parseRetryOn(array $config): string
     {
         $value = $config['retry_on'] ?? null;
         if ($value === null || (is_string($value) && trim($value) === '')) {
-            return CurlerRollingWithRetries::RETRY_ON_ANY;
+            return CurlerRollingWithRetries::RETRY_ON_READS;
         }
 
-        $policies = [CurlerRollingWithRetries::RETRY_ON_ANY, CurlerRollingWithRetries::RETRY_ON_UNSENT];
+        $policies = [
+            CurlerRollingWithRetries::RETRY_ON_READS,
+            CurlerRollingWithRetries::RETRY_ON_ANY,
+            CurlerRollingWithRetries::RETRY_ON_UNSENT,
+        ];
         $retryOn = is_string($value) ? strtolower(trim($value)) : null;
         if (in_array($retryOn, $policies, true)) {
             return $retryOn;
         }
 
         throw new InvalidArgumentException(sprintf(
-            "The [retry_on] option of the ClickHouse connection must be '%s' or '%s', [%s] given.",
+            "The [retry_on] option of the ClickHouse connection must be '%s', '%s' or '%s', [%s] given.",
+            CurlerRollingWithRetries::RETRY_ON_READS,
             CurlerRollingWithRetries::RETRY_ON_ANY,
             CurlerRollingWithRetries::RETRY_ON_UNSENT,
             static::describeOptionValue($value)

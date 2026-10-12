@@ -11,11 +11,15 @@ use InvalidArgumentException;
 /**
  * The curler of a client whose connection sets retries: a request that does not get HTTP 200 is sent again.
  *
- * The retry_on policy decides which failed requests are sent again. With 'any', every one is, as in 3.0.0. A
- * request that reached the server may still run there after it failed on the client, for example an INSERT
- * that timed out on the client, so a retry can write its rows twice (ClickHouse 24.8 checked: with retries 2,
- * one INSERT that timed out stored its rows three times). With 'unsent', only requests that never reached
- * the server are sent again: refused connections, failed DNS lookups and connect timeouts.
+ * The retry_on policy decides which failed requests are sent again. A request that reached the server may still
+ * run there after it failed on the client, for example an INSERT that timed out on the client, so sending a write
+ * again can write its rows twice (ClickHouse 24.8 checked: with retries 2, one INSERT that timed out stored its
+ * rows three times):
+ * - 'reads', the default: a read is sent again after any failure, and a write only when it never reached the
+ *   server (see isRead() and reachedTheServer());
+ * - 'any': every failed request is sent again, as in 3.0.0;
+ * - 'unsent': only requests that never reached the server are sent again: refused connections, failed DNS lookups
+ *   and connect timeouts.
  */
 class CurlerRollingWithRetries extends CurlerRolling
 {
@@ -23,6 +27,11 @@ class CurlerRollingWithRetries extends CurlerRolling
      * Send every request that does not get HTTP 200 again.
      */
     public const RETRY_ON_ANY = 'any';
+
+    /**
+     * Send a read that does not get HTTP 200 again, and a write only when it never reached the server.
+     */
+    public const RETRY_ON_READS = 'reads';
 
     /**
      * Send a request again only when it never reached the server.
@@ -35,11 +44,11 @@ class CurlerRollingWithRetries extends CurlerRolling
     protected $retries = 0;
 
     /**
-     * Which failed requests are sent again: RETRY_ON_ANY or RETRY_ON_UNSENT.
+     * Which failed requests are sent again: RETRY_ON_READS, RETRY_ON_ANY or RETRY_ON_UNSENT.
      *
      * @var string
      */
-    protected string $retryOn = self::RETRY_ON_ANY;
+    protected string $retryOn = self::RETRY_ON_READS;
 
     /** @inheritDoc */
     public function execOne(CurlerRequest $request, bool $auto_close = false): int
@@ -75,7 +84,7 @@ class CurlerRollingWithRetries extends CurlerRolling
     /**
      * Get which failed requests are sent again.
      *
-     * @return string RETRY_ON_ANY or RETRY_ON_UNSENT
+     * @return string RETRY_ON_READS, RETRY_ON_ANY or RETRY_ON_UNSENT
      */
     public function getRetryOn(): string
     {
@@ -83,8 +92,8 @@ class CurlerRollingWithRetries extends CurlerRolling
     }
 
     /**
-     * Set which failed requests are sent again: RETRY_ON_ANY (every one) or RETRY_ON_UNSENT (only requests
-     * that never reached the server).
+     * Set which failed requests are sent again: RETRY_ON_READS (every read, and the writes that never reached the
+     * server), RETRY_ON_ANY (every one) or RETRY_ON_UNSENT (only requests that never reached the server).
      *
      * @param string $retryOn
      * @return void
@@ -92,9 +101,10 @@ class CurlerRollingWithRetries extends CurlerRolling
      */
     public function setRetryOn(string $retryOn): void
     {
-        if (!in_array($retryOn, [self::RETRY_ON_ANY, self::RETRY_ON_UNSENT], true)) {
+        if (!in_array($retryOn, [self::RETRY_ON_READS, self::RETRY_ON_ANY, self::RETRY_ON_UNSENT], true)) {
             throw new InvalidArgumentException(sprintf(
-                "The retry policy must be '%s' or '%s', [%s] given.",
+                "The retry policy must be '%s', '%s' or '%s', [%s] given.",
+                self::RETRY_ON_READS,
                 self::RETRY_ON_ANY,
                 self::RETRY_ON_UNSENT,
                 $retryOn
@@ -127,7 +137,26 @@ class CurlerRollingWithRetries extends CurlerRolling
      */
     public function mayRetry(CurlerRequest $request): bool
     {
-        return $this->getRetryOn() === self::RETRY_ON_ANY || !$this->reachedTheServer($request);
+        return match ($this->getRetryOn()) {
+            self::RETRY_ON_ANY => true,
+            self::RETRY_ON_READS => $this->isRead($request) || !$this->reachedTheServer($request),
+            default => !$this->reachedTheServer($request),
+        };
+    }
+
+    /**
+     * Determine if a request only reads: every request except those that the smi2 client sends with readonly=0 in
+     * the URL, which are its writes, such as write(), the inserts and the mutations. A read has readonly=2, or no
+     * readonly at all for a read-only user, whose requests cannot write.
+     *
+     * @param CurlerRequest $request
+     * @return bool
+     */
+    protected function isRead(CurlerRequest $request): bool
+    {
+        parse_str((string) parse_url((string) $request->getUrl(), PHP_URL_QUERY), $parameters);
+
+        return ($parameters['readonly'] ?? null) !== '0';
     }
 
     /**

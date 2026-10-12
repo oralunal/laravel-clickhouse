@@ -371,7 +371,7 @@ See [the guide](/reference/helpers#exceptions).
 ```php
 static cannotCreateTemporaryTableOutsideSession(string $table): Exceptions\QueryException
 static cannotDeleteWithoutWhere(): Exceptions\QueryException
-static cannotMutateWithClauses(string $statement, array $clauses, array $methodsThatLeaveALimit = [], ?string $methodThatAddsALimit = null): Exceptions\QueryException
+static cannotMutateWithClauses(string $statement, array $clauses, array $methodsThatLeaveALimit = [], ?string $methodThatAddsALimit = null, array $refusedSettings = []): Exceptions\QueryException
 static cannotReachTemporaryTable(string $statement, string $table, string $alternative): Exceptions\QueryException
 static cannotRunAsynchronouslyInSession(): Exceptions\QueryException
 static cannotUpdateEmptyValues(): Exceptions\QueryException
@@ -462,6 +462,7 @@ See [the guide](/advanced/timeouts-and-retries#retries).
 
 ```php
 const RETRY_ON_ANY = 'any';
+const RETRY_ON_READS = 'reads';
 const RETRY_ON_UNSENT = 'unsent';
 
 execOne(ClickHouseDB\Transport\CurlerRequest $request, bool $auto_close = false): int
@@ -491,6 +492,8 @@ normalizeValue(mixed $value): mixed
 Class `Oralunal\LaravelClickHouse\QueryGrammar`, extends `Illuminate\Database\Query\Grammars\Grammar`, uses `Concerns\SubstitutesBindings`.
 
 ```php
+const MUTATION_SETTINGS = [/* 20 values */];
+
 compileDelete(Illuminate\Database\Query\Builder $query)
 compileExists(Illuminate\Database\Query\Builder $query)
 compileInsert(Illuminate\Database\Query\Builder $query, array $values)

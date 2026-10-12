@@ -11,7 +11,8 @@ use Oralunal\LaravelClickHouse\CurlerRollingWithRetries;
  * Retries and timeouts of a connection's client against the server.
  *
  * An INSERT that times out on the client keeps running on the server and still writes its rows. With
- * retry_on 'any' the client sends it again, so it writes them once per attempt; with 'unsent' it is sent once.
+ * retry_on 'any' the client sends it again, so it writes them once per attempt; with 'reads', the default, and
+ * 'unsent' it is sent once. A SELECT that times out is sent again under 'reads' and 'any'.
  */
 class RetriesTest extends TestCase
 {
@@ -21,7 +22,7 @@ class RetriesTest extends TestCase
 
         $config = $app['config'];
         $base = $config->get('database.connections.clickhouse');
-        foreach (['any', 'unsent'] as $policy) {
+        foreach (['reads', 'any', 'unsent'] as $policy) {
             $config->set(
                 "database.connections.clickhouse-retry-{$policy}",
                 ['retries' => 2, 'retry_on' => $policy, 'timeout_query' => 1] + $base
@@ -47,7 +48,7 @@ class RetriesTest extends TestCase
 
     public function test_the_connection_gives_its_client_the_retry_policy(): void
     {
-        foreach (['any', 'unsent'] as $policy) {
+        foreach (['reads', 'any', 'unsent'] as $policy) {
             $curler = DB::connection("clickhouse-retry-{$policy}")->getClient()->transport()->getCurler();
 
             $this->assertInstanceOf(CurlerRollingWithRetries::class, $curler);
@@ -59,6 +60,17 @@ class RetriesTest extends TestCase
     public function test_any_sends_an_insert_that_timed_out_on_the_client_again(): void
     {
         $this->assertSame(3, $this->rowsOfAnInsertThatTimesOut(DB::connection('clickhouse-retry-any')->getClient()));
+    }
+
+    public function test_reads_does_not_send_an_insert_that_reached_the_server_again(): void
+    {
+        $this->assertSame(1, $this->rowsOfAnInsertThatTimesOut(DB::connection('clickhouse-retry-reads')->getClient()));
+    }
+
+    public function test_reads_sends_a_select_that_timed_out_again(): void
+    {
+        $this->assertSame(3, $this->attemptsOfASelectThatTimesOut(DB::connection('clickhouse-retry-reads')->getClient()));
+        $this->assertSame(1, $this->attemptsOfASelectThatTimesOut(DB::connection('clickhouse-retry-unsent')->getClient()));
     }
 
     public function test_unsent_does_not_send_an_insert_that_reached_the_server_again(): void
@@ -81,6 +93,33 @@ class RetriesTest extends TestCase
         }
 
         $this->assertLessThan(2.0, microtime(true) - $start);
+    }
+
+    /**
+     * Run a SELECT that takes longer than the client's timeout_query of 1 second, and count how often the server
+     * started it, from system.query_log.
+     *
+     * @param Client $client
+     * @return int
+     */
+    private function attemptsOfASelectThatTimesOut(Client $client): int
+    {
+        $marker = 'retries_select_' . bin2hex(random_bytes(8));
+
+        try {
+            $client->select("SELECT sleep(1.5) SETTINGS max_execution_time = 0, log_comment = '{$marker}'")->rows();
+            $this->fail('The SELECT did not time out on the client.');
+        } catch (QueryException $exception) {
+            $this->assertSame(CURLE_OPERATION_TIMEDOUT, $exception->getCode());
+        }
+
+        $node = DB::connection('clickhouse')->getClient();
+        usleep(1_000_000);
+        $node->write('SYSTEM FLUSH LOGS');
+
+        return (int) $node->select(
+            "SELECT count() AS c FROM system.query_log WHERE type = 'QueryStart' AND log_comment = '{$marker}'"
+        )->fetchOne('c');
     }
 
     /**

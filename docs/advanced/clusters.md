@@ -21,7 +21,7 @@ Replace `host` and `port` with a `cluster` list of nodes:
     'timeout_connect' => env('CLICKHOUSE_TIMEOUT_CONNECT', 2),
     'timeout_query' => env('CLICKHOUSE_TIMEOUT_QUERY', 2),
     'retries' => env('CLICKHOUSE_RETRIES', 0),
-    'retry_on' => env('CLICKHOUSE_RETRY_ON', 'any'),
+    'retry_on' => env('CLICKHOUSE_RETRY_ON', 'reads'),
 ],
 ```
 
@@ -170,7 +170,7 @@ Then the table keeps all inserts, synchronous or asynchronous, on 24.8, 26.3 and
 
 ::: warning
 An `ON CLUSTER` statement waits for all hosts, up to `distributed_ddl_task_timeout` (180 seconds). The packaged `timeout_query` is 2 seconds.
-Increase `timeout_query` for migrations, and set `retry_on` to `unsent`.
+Increase `timeout_query` for migrations. Keep `retry_on` at `reads` or `unsent`, which do not send a statement that reached the server again.
 When one host fails, the statement throws, as in `There was an error on [clickhouse02:9000]: ...`. The other hosts keep the change.
 :::
 

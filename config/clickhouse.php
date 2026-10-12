@@ -43,11 +43,12 @@ return [
         'timeout_query'   => env('CLICKHOUSE_TIMEOUT_QUERY', 2),
         'https'           => (bool) env('CLICKHOUSE_HTTPS', false),
         'retries'         => env('CLICKHOUSE_RETRIES', 0),
-        // Which failed requests the retries send again: 'any' sends every one,
-        // 'unsent' only those that never reached the server. With 'any', a
-        // write that timed out on the client can run twice
-        // (see https://laravel-clickhouse.oralunal.com/advanced/timeouts-and-retries#retries).
-        'retry_on'        => env('CLICKHOUSE_RETRY_ON', 'any'),
+        // Which failed requests the retries send again: 'reads' sends every
+        // read again and a write only when it never reached the server,
+        // 'any' sends every one, and 'unsent' only those that never reached
+        // the server. With 'any', a write that timed out on the client can
+        // run twice (see https://laravel-clickhouse.oralunal.com/advanced/timeouts-and-retries#retries).
+        'retry_on'        => env('CLICKHOUSE_RETRY_ON', 'reads'),
         // ClickHouse settings sent with every query of the connection, such as
         // 'output_format_json_quote_64bit_integers' => 1, which returns 64-bit
         // integers as strings on 25.8 and later as 24.8 does, or
@@ -105,7 +106,7 @@ return [
     //     'timeout_query'   => 2,
     //     'https'           => false,
     //     'retries'         => 0,
-    //     'retry_on'        => 'any',
+    //     'retry_on'        => 'reads',
     //     'use_lightweight_delete' => (bool) env('CLICKHOUSE2_USE_LIGHTWEIGHT_DELETE', false),
     //     'datetime_precision' => env('CLICKHOUSE2_DATETIME_PRECISION', 'second'),
     //     'insert_format' => env('CLICKHOUSE2_INSERT_FORMAT', 'Values'),
