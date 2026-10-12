@@ -49,7 +49,7 @@ class SchemaBlueprintSqlTest extends TestCase
     public function test_laravel_columns_with_their_modifiers(): void
     {
         $this->assertSame(
-            ['CREATE TABLE `events` (`id` Int64, `name` Nullable(String) DEFAULT \'x\' COMMENT \'it\\\'s\','
+            ['CREATE TABLE `events` (`id` UInt64, `name` Nullable(String) DEFAULT \'x\' COMMENT \'it\\\'s\','
                 . ' `created_at` Nullable(DateTime), `updated_at` Nullable(DateTime)) ENGINE = MergeTree() ORDER BY (`id`)'],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
@@ -60,8 +60,7 @@ class SchemaBlueprintSqlTest extends TestCase
     }
 
     /**
-     * Laravel's migration repository creates its table this way. Without
-     * exact_integer_types it gets the columns of 3.0.0.
+     * Laravel's migration repository creates its table this way.
      */
     public function test_the_migrations_table(): void
     {
@@ -72,12 +71,8 @@ class SchemaBlueprintSqlTest extends TestCase
         };
 
         $this->assertSame(
-            ['CREATE TABLE `migrations` (`id` Int32, `migration` String, `batch` Int32) ENGINE = MergeTree() ORDER BY (`id`)'],
-            $this->compileCreate($migrations, table: 'migrations')
-        );
-        $this->assertSame(
             ['CREATE TABLE `migrations` (`id` UInt32, `migration` String, `batch` Int32) ENGINE = MergeTree() ORDER BY (`id`)'],
-            $this->compileCreate($migrations, ['exact_integer_types' => true], 'migrations')
+            $this->compileCreate($migrations, table: 'migrations')
         );
     }
 
@@ -350,7 +345,7 @@ class SchemaBlueprintSqlTest extends TestCase
     public function test_engines_outside_the_merge_tree_family_get_no_sorting_key(): void
     {
         $this->assertSame(
-            ["CREATE TABLE `events` (`id` Int64) ENGINE = Memory SETTINGS min_rows_to_keep=0 COMMENT 'cache'"],
+            ["CREATE TABLE `events` (`id` UInt64) ENGINE = Memory SETTINGS min_rows_to_keep=0 COMMENT 'cache'"],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
                 $table->primary('id');
@@ -368,7 +363,7 @@ class SchemaBlueprintSqlTest extends TestCase
     public function test_a_clause_set_by_name_is_written_for_every_engine(): void
     {
         $this->assertSame(
-            ['CREATE TABLE `events` (`id` Int64) ENGINE = Log ORDER BY (`id`)'],
+            ['CREATE TABLE `events` (`id` UInt64) ENGINE = Log ORDER BY (`id`)'],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
                 $table->engine('Log');
@@ -376,7 +371,7 @@ class SchemaBlueprintSqlTest extends TestCase
             })
         );
         $this->assertSame(
-            ["CREATE TABLE `events` (`id` Int64) ENGINE = S3('https://bucket/{_partition_id}.csv', 'CSV') PARTITION BY id % 4"],
+            ["CREATE TABLE `events` (`id` UInt64) ENGINE = S3('https://bucket/{_partition_id}.csv', 'CSV') PARTITION BY id % 4"],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
                 $table->engine("S3('https://bucket/{_partition_id}.csv', 'CSV')");
@@ -419,11 +414,11 @@ class SchemaBlueprintSqlTest extends TestCase
     public function test_the_engine_option_of_the_connection(): void
     {
         $this->assertSame(
-            ['CREATE TABLE `events` (`id` Int64) ENGINE = ReplacingMergeTree ORDER BY (`id`)'],
+            ['CREATE TABLE `events` (`id` UInt64) ENGINE = ReplacingMergeTree ORDER BY (`id`)'],
             $this->compileCreate(fn (SchemaBlueprint $table) => $table->id(), ['engine' => 'ReplacingMergeTree'])
         );
         $this->assertSame(
-            ['CREATE TABLE `events` (`id` Int64) ENGINE = Memory'],
+            ['CREATE TABLE `events` (`id` UInt64) ENGINE = Memory'],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
                 $table->engine('Memory');
@@ -431,7 +426,7 @@ class SchemaBlueprintSqlTest extends TestCase
             "the blueprint's engine wins"
         );
         $this->assertSame(
-            ['CREATE TABLE `events` (`id` Int64) ENGINE = MergeTree() ORDER BY (`id`)'],
+            ['CREATE TABLE `events` (`id` UInt64) ENGINE = MergeTree() ORDER BY (`id`)'],
             $this->compileCreate(fn (SchemaBlueprint $table) => $table->id(), ['engine' => '  ']),
             'a blank engine counts as not set'
         );
@@ -459,7 +454,7 @@ class SchemaBlueprintSqlTest extends TestCase
                 $table->settings(['ttl_only_drop_parts' => true]);
                 $table->comment("Visits, it's \\ deduplicated");
                 $table->ifNotExists();
-            }, ['exact_integer_types' => true], 'visits')
+            }, table: 'visits')
         );
     }
 
@@ -489,7 +484,7 @@ class SchemaBlueprintSqlTest extends TestCase
     public function test_indexes_with_a_type_go_into_the_column_list(): void
     {
         $this->assertSame(
-            ['CREATE TABLE `visits` (`id` Int64, `url` String, `country` String,'
+            ['CREATE TABLE `visits` (`id` UInt64, `url` String, `country` String,'
                 . ' INDEX `visits_url_index` `url` TYPE bloom_filter(0.01) GRANULARITY 4,'
                 . ' INDEX `visits_country_id_index` (`country`, `id`) TYPE minmax,'
                 . ' INDEX `visits_lower_url` lower(url) TYPE ngrambf_v1(3, 256, 2, 0) GRANULARITY 2)'
@@ -540,7 +535,7 @@ class SchemaBlueprintSqlTest extends TestCase
     public function test_column_positions_are_ignored_in_create(): void
     {
         $this->assertSame(
-            ['CREATE TABLE `events` (`id` Int64, `name` String, `email` String) ENGINE = MergeTree() ORDER BY (`id`)'],
+            ['CREATE TABLE `events` (`id` UInt64, `name` String, `email` String) ENGINE = MergeTree() ORDER BY (`id`)'],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
                 $table->string('name')->first();
@@ -568,7 +563,7 @@ class SchemaBlueprintSqlTest extends TestCase
         Builder::defaultTimePrecision(3);
 
         $this->assertSame(
-            ['CREATE TABLE `events` (`id` Int64, `created_at` Nullable(DateTime64(3)), `updated_at` Nullable(DateTime64(3)),'
+            ['CREATE TABLE `events` (`id` UInt64, `created_at` Nullable(DateTime64(3)), `updated_at` Nullable(DateTime64(3)),'
                 . ' `seen_at` DateTime64(3) DEFAULT now64(3), `day` DateTime) ENGINE = MergeTree() ORDER BY (`id`)'],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
@@ -588,7 +583,7 @@ class SchemaBlueprintSqlTest extends TestCase
         $blueprint->index('name', null, 'set(100)');
 
         $this->assertSame(
-            ['CREATE TABLE `events` (`id` Int64, `name` LowCardinality(Nullable(String)), INDEX `events_name_index` `name` TYPE set(100))'
+            ['CREATE TABLE `events` (`id` UInt64, `name` LowCardinality(Nullable(String)), INDEX `events_name_index` `name` TYPE set(100))'
                 . ' ENGINE = MergeTree() ORDER BY (`id`)'],
             $blueprint->toSql()
         );
@@ -926,7 +921,7 @@ class SchemaBlueprintSqlTest extends TestCase
     public function test_the_default_index_type_only_applies_to_the_merge_tree_family(): void
     {
         $this->assertSame(
-            ['CREATE TABLE `visits` (`id` Int64, `owner_type` String, `owner_id` Int64, INDEX `visits_set` `id` TYPE set(100))'
+            ['CREATE TABLE `visits` (`id` UInt64, `owner_type` String, `owner_id` UInt64, INDEX `visits_set` `id` TYPE set(100))'
                 . ' ENGINE = Memory'],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
@@ -936,7 +931,7 @@ class SchemaBlueprintSqlTest extends TestCase
             }, ['default_index_type' => 'minmax'], 'visits')
         );
         $this->assertSame(
-            ['CREATE TABLE `visits` (`id` Int64, `url` String) ENGINE = Log'],
+            ['CREATE TABLE `visits` (`id` UInt64, `url` String) ENGINE = Log'],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
                 $table->string('url')->index();
@@ -985,17 +980,17 @@ class SchemaBlueprintSqlTest extends TestCase
         };
 
         $this->assertSame(
-            ['ALTER TABLE `visits` ADD COLUMN `url` String, ADD COLUMN `owner_type` String, ADD COLUMN `owner_id` Int64'],
+            ['ALTER TABLE `visits` ADD COLUMN `url` String, ADD COLUMN `owner_type` String, ADD COLUMN `owner_id` UInt64'],
             $this->compileTable($typeless, table: 'visits')
         );
         $this->assertSame(
-            ['ALTER TABLE `visits` ADD COLUMN `url` String, ADD COLUMN `owner_type` String, ADD COLUMN `owner_id` Int64'],
+            ['ALTER TABLE `visits` ADD COLUMN `url` String, ADD COLUMN `owner_type` String, ADD COLUMN `owner_id` UInt64'],
             $this->compileTable($typeless, ['default_index_type' => ' '], 'visits'),
             'a blank type counts as not set'
         );
         $this->assertSame(
             [
-                'ALTER TABLE `visits` ADD COLUMN `url` String, ADD COLUMN `owner_type` String, ADD COLUMN `owner_id` Int64',
+                'ALTER TABLE `visits` ADD COLUMN `url` String, ADD COLUMN `owner_type` String, ADD COLUMN `owner_id` UInt64',
                 'ALTER TABLE `visits` ADD INDEX `visits_owner_type_owner_id_index` (`owner_type`, `owner_id`) TYPE bloom_filter',
                 'ALTER TABLE `visits` ADD INDEX `visits_lower_url` lower(url) TYPE bloom_filter GRANULARITY 3',
                 'ALTER TABLE `visits` ADD INDEX `visits_url_index` `url` TYPE bloom_filter',
@@ -1003,7 +998,7 @@ class SchemaBlueprintSqlTest extends TestCase
             $this->compileTable($typeless, ['default_index_type' => 'bloom_filter'], 'visits')
         );
         $this->assertSame(
-            ['CREATE TABLE `visits` (`id` Int64, `owner_type` String, `owner_id` Int64,'
+            ['CREATE TABLE `visits` (`id` UInt64, `owner_type` String, `owner_id` UInt64,'
                 . ' INDEX `visits_owner_type_owner_id_index` (`owner_type`, `owner_id`) TYPE minmax, INDEX `visits_set` `id` TYPE set(100))'
                 . ' ENGINE = MergeTree() ORDER BY (`id`)'],
             $this->compileCreate(function (SchemaBlueprint $table) {
@@ -1026,7 +1021,7 @@ class SchemaBlueprintSqlTest extends TestCase
     public function test_constraints_that_clickhouse_does_not_have_send_nothing(): void
     {
         $this->assertSame(
-            ['CREATE TABLE `posts` (`id` Int64, `user_id` Int64, `email` String) ENGINE = MergeTree() ORDER BY (`id`)'],
+            ['CREATE TABLE `posts` (`id` UInt64, `user_id` UInt64, `email` String) ENGINE = MergeTree() ORDER BY (`id`)'],
             $this->compileCreate(function (SchemaBlueprint $table) {
                 $table->id();
                 $table->foreignId('user_id')->constrained()->cascadeOnDelete();
@@ -1035,7 +1030,7 @@ class SchemaBlueprintSqlTest extends TestCase
             }, table: 'posts')
         );
         $this->assertSame(
-            ['ALTER TABLE `posts` ADD COLUMN `team_id` Int64', 'ALTER TABLE `posts` DROP COLUMN `user_id`'],
+            ['ALTER TABLE `posts` ADD COLUMN `team_id` UInt64', 'ALTER TABLE `posts` DROP COLUMN `user_id`'],
             $this->compileTable(function (SchemaBlueprint $table) {
                 $table->foreignId('team_id')->constrained();
                 $table->foreign('team_id')->references('id')->on('teams');

@@ -38,10 +38,7 @@
     "autoload": {
         "psr-4": {
             "Oralunal\\LaravelClickHouse\\": "src/"
-        },
-        "files": [
-            "src/ClickhouseBuilder/functions.php"
-        ]
+        }
     },
     "autoload-dev": {
         "psr-4": {

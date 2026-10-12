@@ -14,9 +14,9 @@
 |
 | Add as many connections as you need. For a cluster, replace the `host`
 | and `port` pair with a `cluster` array of nodes, and optionally set
-| `cluster_name` so that Migration::createMergeTree() and Laravel's schema
-| builder emit ON CLUSTER '<name>', and the schema builder creates
-| replicated tables (see https://laravel-clickhouse.oralunal.com/advanced/clusters).
+| `cluster_name` so that Laravel's schema builder emits ON CLUSTER '<name>'
+| and creates replicated tables
+| (see https://laravel-clickhouse.oralunal.com/advanced/clusters).
 |
 | Anything you set here overrides the packaged defaults. Entries in your
 | config/database.php `connections` array outrank both. An option with a
@@ -53,10 +53,6 @@ return [
         // integers as strings on 25.8 and later as 24.8 does, or
         // 'async_insert' => 0 (see https://laravel-clickhouse.oralunal.com/reference/clickhouse-versions).
         'settings'        => [],
-        // DB::connection('clickhouse')->table() returns the package's query
-        // builder when true, and Laravel's own query builder, with ClickHouse
-        // SQL, when false (see https://laravel-clickhouse.oralunal.com/query-builder/laravel-query-builder).
-        'fix_default_query_builder' => true,
         // delete() without an argument sends a lightweight DELETE FROM when
         // true, an ALTER TABLE ... DELETE mutation when false
         // (see https://laravel-clickhouse.oralunal.com/query-builder/writing-data#deletions).
@@ -64,10 +60,6 @@ return [
         // The engine of the tables that Schema::create() creates without
         // $table->engine(); null means MergeTree().
         'engine' => env('CLICKHOUSE_ENGINE'),
-        // When true, Schema::create() gives each integer column its own width
-        // and unsigned() a UInt type: tinyInteger() is Int8, id() is UInt64.
-        // False keeps the types of 3.0.0 (see https://laravel-clickhouse.oralunal.com/schema/schema-builder#integer-types).
-        'exact_integer_types' => (bool) env('CLICKHOUSE_EXACT_INTEGER_TYPES', false),
         // The type of a data-skipping index that Schema::create() or
         // Schema::table() adds without one, such as the index of morphs(),
         // on a table of the MergeTree family: 'minmax' or 'bloom_filter', for
@@ -114,7 +106,6 @@ return [
     //     'https'           => false,
     //     'retries'         => 0,
     //     'retry_on'        => 'any',
-    //     'fix_default_query_builder' => true,
     //     'use_lightweight_delete' => (bool) env('CLICKHOUSE2_USE_LIGHTWEIGHT_DELETE', false),
     //     'datetime_precision' => env('CLICKHOUSE2_DATETIME_PRECISION', 'second'),
     //     'insert_format' => env('CLICKHOUSE2_INSERT_FORMAT', 'Values'),

@@ -45,13 +45,15 @@ The package trims `cluster_name`, so `' company_cluster '` gives `ON CLUSTER 'co
 ## Change the active node
 
 ```php
-$row = new MyTable();
-echo $row->getThisClient()->getConnectHost();
+$connection = DB::connection('clickhouse');
+echo $connection->getClient()->getConnectHost();
 // clickhouse01
-$row->resolveConnection()->getCluster()->slideNode();
-echo $row->getThisClient()->getConnectHost();
+$connection->getCluster()->slideNode();
+echo $connection->getClient()->getConnectHost();
 // clickhouse02
 ```
+
+`getClient()` returns the smi2 client of the active node. The queries of the connection, of its query builders and of its models go to that node.
 
 `slideNode()` tries the next nodes in turn and skips a node that does not answer. If no other node answers, it stays on the current node.
 While `session()` runs, `slideNode()` throws a `LogicException`, because the session exists on the active node only.
@@ -70,27 +72,25 @@ While `session()` runs, `slideNode()` throws a `LogicException`, because the ses
 
 ## Statements on all nodes
 
-- `Migration::write()` and `createMergeTree()` run on all nodes, one after the other. If a node does not answer, the migration throws.
-- `DB::connection('clickhouse')->statementOnEveryNode($sql)` sends a statement to all nodes, one after the other, and logs it one time. It stops at the first node that fails.
+`DB::connection('clickhouse')->statementOnEveryNode($sql)` sends a statement to all nodes of the `cluster` list, one after the other, and logs it one time.
+It stops at the first node that fails. It takes no bindings. On a connection without `cluster`, it sends the statement to the one node.
 
-With `cluster_name`, add `ifNotExists()` to `createMergeTree()`. The first node creates the table on all nodes with `ON CLUSTER`, and the next nodes send the same statement:
-
-```php
-static::createMergeTree('my_table', fn (MergeTree $table) => $table
-    ->ifNotExists()
-    ->columns([...])
-    ->orderBy('id')
-);
-```
+Use it in a migration for SQL that each node must run, such as a table that each node keeps for itself.
+With `cluster_name`, the schema builder sends `ON CLUSTER` instead. See [The schema builder on a cluster](#the-schema-builder-on-a-cluster).
 
 ## Replicated tables with a fixed path
 
 ```php
-return new class extends \Oralunal\LaravelClickHouse\Migration
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration
 {
-    public function up()
+    protected $connection = 'clickhouse';
+
+    public function up(): void
     {
-        static::write("
+        DB::connection($this->connection)->statementOnEveryNode(<<<'SQL'
             CREATE TABLE my_table (
                 id UInt32,
                 created_at DateTime,
@@ -99,15 +99,17 @@ return new class extends \Oralunal\LaravelClickHouse\Migration
             )
             ENGINE = ReplicatedMergeTree('/clickhouse/tables/default.my_table', '{replica}')
             ORDER BY (id)
-        ");
+            SQL);
     }
 
-    public function down()
+    public function down(): void
     {
-        static::write('DROP TABLE my_table SYNC');
+        DB::connection($this->connection)->statementOnEveryNode('DROP TABLE my_table SYNC');
     }
 };
 ```
+
+Each node creates its replica of the table, with the `{replica}` macro of its server.
 
 Drop a table with a fixed replica path with `SYNC`. Without it, an `Atomic` database removes the replica after
 `database_atomic_delay_before_drop_table_sec` (480 seconds). A new `CREATE` before then fails with `REPLICA_ALREADY_EXISTS`.

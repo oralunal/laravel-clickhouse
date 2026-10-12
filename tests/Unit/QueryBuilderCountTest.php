@@ -8,7 +8,7 @@ use Closure;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Expression;
 use Oralunal\LaravelClickHouse\Connection;
-use Oralunal\LaravelClickHouse\Grammar;
+use Oralunal\LaravelClickHouse\LiteralGrammar;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 use Oralunal\LaravelClickHouse\QueryGrammar;
 use Oralunal\LaravelClickHouse\QueryProcessor;
@@ -34,7 +34,7 @@ class QueryBuilderCountTest extends TestCase
         $connection = $this->createStub(Connection::class);
         $connection->method('getConfig')->willReturn(null);
         $connection->method('getTablePrefix')->willReturn('');
-        $connection->method('newBuilderGrammar')->willReturnCallback(fn (): Grammar => new Grammar());
+        $connection->method('newLiteralGrammar')->willReturnCallback(fn (): LiteralGrammar => new LiteralGrammar());
         $connection->method('select')->willReturnCallback(function (string $sql, array $bindings = []) use (&$selects, $rows): array {
             $selects[] = [$sql, $bindings];
 
@@ -57,6 +57,11 @@ class QueryBuilderCountTest extends TestCase
                 fn (QueryBuilder $query) => $query->select('id as x')->where('x', 3),
                 sprintf($count, 'select "id" as "x" from "t7" where "x" = ?'),
                 [3],
+            ],
+            'withAlias(), whose expression ClickHouse runs only when a name reads it' => [
+                fn (QueryBuilder $query) => $query->withAlias('tag', new Expression('arrayJoin(tags)'))->select('tag'),
+                sprintf($count, 'with arrayJoin(tags) as "tag" select "tag" from "t7"'),
+                [],
             ],
             'selectRaw() with arrayJoin()' => [
                 fn (QueryBuilder $query) => $query->selectRaw('arrayJoin(tags) as tag'),

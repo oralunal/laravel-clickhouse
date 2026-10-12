@@ -11,15 +11,15 @@ Schema::create('events', function (SchemaBlueprint $table) {
     $table->string('name')->nullable()->default('x')->comment("it's");
     $table->timestamps();
 });
-// CREATE TABLE `events` (`id` Int64, `name` Nullable(String) DEFAULT 'x' COMMENT 'it\'s',
+// CREATE TABLE `events` (`id` UInt64, `name` Nullable(String) DEFAULT 'x' COMMENT 'it\'s',
 //   `created_at` Nullable(DateTime), `updated_at` Nullable(DateTime)) ENGINE = MergeTree() ORDER BY (`id`)
 ```
 
-- In a migration, the `Schema` facade uses the connection of the migration. Extend `Oralunal\LaravelClickHouse\Migration`, whose connection is `clickhouse`, or set `protected $connection`.
+- In a migration, the `Schema` facade uses the connection of the migration. Set `protected $connection` on the migration. See [Migrations](/schema/migrations).
 - In other code, use `Schema::connection('clickhouse')` when ClickHouse is not the default connection.
 - The callback gets `Oralunal\LaravelClickHouse\SchemaBlueprint`: Laravel's `Blueprint` with ClickHouse methods. Declare this type so that your editor knows the methods.
 - With a `cluster_name`, the statements go `ON CLUSTER`. See [Clusters](/advanced/clusters#the-schema-builder-on-a-cluster).
-- In a [session](/advanced/sessions#temporary-tables), `$table->temporary()` creates a temporary table.
+- In a [session](/advanced/sessions#temporary-tables), `$table->temporary()` creates a temporary table. `Schema::hasTemporaryTable()`, `Schema::dropTemporary()` and `Schema::dropTemporaryIfExists()` find and drop it.
 
 The statement has this layout. The parts in brackets appear when the blueprint sets them:
 
@@ -75,24 +75,23 @@ All names are in backticks. A column name is one identifier: `n.a` is `` `n.a` `
 
 ### Integer types
 
-By default, the integer methods give the types of 3.x, and `unsigned()` does nothing. With `exact_integer_types`, each method gets its own width, and `unsigned()` gives a `UInt` type:
+Each integer method gets the ClickHouse type of its width. `unsigned()` and the unsigned methods give a `UInt` type:
 
-| Laravel column method | Default | With `exact_integer_types` |
-| --- | --- | --- |
-| `tinyInteger()` | `Int16` | `Int8` |
-| `unsignedTinyInteger()`, `tinyIncrements()` | `Int16` | `UInt8` |
-| `smallInteger()` | `Int16` | `Int16` |
-| `unsignedSmallInteger()`, `smallIncrements()` | `Int32` | `UInt16` |
-| `mediumInteger()`, `integer()` | `Int32` | `Int32` |
-| `unsignedMediumInteger()`, `mediumIncrements()`, `unsignedInteger()`, `increments()` | `Int32` | `UInt32` |
-| `bigInteger()` | `Int64` | `Int64` |
-| `unsignedBigInteger()`, `id()`, `bigIncrements()`, `foreignId()` | `Int64` | `UInt64` |
-
-Set `'exact_integer_types' => true` (`CLICKHOUSE_EXACT_INTEGER_TYPES=true`) in a new project.
+| Laravel column method | ClickHouse type |
+| --- | --- |
+| `tinyInteger()` | `Int8` |
+| `unsignedTinyInteger()`, `tinyIncrements()` | `UInt8` |
+| `smallInteger()` | `Int16` |
+| `unsignedSmallInteger()`, `smallIncrements()` | `UInt16` |
+| `mediumInteger()`, `integer()` | `Int32` |
+| `unsignedMediumInteger()`, `mediumIncrements()`, `unsignedInteger()`, `increments()` | `UInt32` |
+| `bigInteger()` | `Int64` |
+| `unsignedBigInteger()`, `id()`, `bigIncrements()`, `foreignId()` | `UInt64` |
 
 ::: warning
-In an existing project, the option changes the tables that you create after you set it. ClickHouse wraps a value that does not fit the narrower type, without an error:
-`200` in an `Int8` column reads as `-56`, and `-1` in a `UInt32` column reads as `4294967295`.
+3.x gave `Int16` to `tinyInteger()`, `Int32` to `integer()` and `unsignedInteger()`, and `Int64` to `id()`.
+The tables that exist keep their types. A new migration that adds a column, or creates a table, gets the exact type.
+ClickHouse wraps a value that does not fit the type, without an error: `200` in an `Int8` column reads as `-56`, and `-1` in a `UInt32` column reads as `4294967295`.
 :::
 
 ClickHouse has no auto-increment. `id()` and the `increments()` methods create an integer column. A row without a value gets `0`.
@@ -119,7 +118,7 @@ ClickHouse has no auto-increment. `id()` and the `increments()` methods create a
 | `codec('ZSTD(3)')` | `CODEC(ZSTD(3))` |
 | `ttl('created_at + INTERVAL 1 DAY')` | The column TTL `TTL created_at + INTERVAL 1 DAY` |
 | `timezone('UTC')` | The time zone of a date-time type: `DateTime('UTC')`, `DateTime64(3, 'UTC')` |
-| `unsigned()` | A `UInt` type with `exact_integer_types` |
+| `unsigned()` | A `UInt` type on an integer column. Other columns ignore it. |
 
 - `default()` writes each value as a literal:
 
@@ -162,7 +161,7 @@ Schema::create('visits', function (SchemaBlueprint $table) {
     $table->comment('Page visits, deduplicated by version');
     $table->index('url', null, 'bloom_filter(0.01)')->granularity(4);
 });
-// CREATE TABLE `visits` (`id` Int64, `version` Int64, `visited_at` DateTime, `url` String,
+// CREATE TABLE `visits` (`id` UInt64, `version` UInt64, `visited_at` DateTime, `url` String,
 //   `country` LowCardinality(String), INDEX `visits_url_index` `url` TYPE bloom_filter(0.01) GRANULARITY 4)
 //   ENGINE = ReplacingMergeTree(version) PARTITION BY toYYYYMM(visited_at)
 //   PRIMARY KEY (`id`, intHash32(id)) ORDER BY (`id`, intHash32(id), `visited_at`)
@@ -181,6 +180,8 @@ Schema::create('visits', function (SchemaBlueprint $table) {
 | `settings(['index_granularity' => 8192])` | `SETTINGS index_granularity=8192`. Another call adds its settings. `null` removes a setting. |
 | `comment('...')` | `COMMENT '...'` |
 | `ifNotExists()` | `CREATE TABLE IF NOT EXISTS` |
+| `replicated()`, `replicated(false)` | A replicated engine of the MergeTree family on any connection, or the engine as given. Without the call, a connection with a `cluster_name` and `cluster` nodes gives a replicated engine. |
+| `withoutOnCluster()` | No `ON CLUSTER` on a connection with a `cluster_name`. The statements go to the active node. |
 
 - `primary()` with a `DB::raw()` column needs a name as the second argument.
 - `settings()` writes values as the query builder's [`settings()`](/query-builder/basics#settings) does.
@@ -224,7 +225,7 @@ $table->rawIndex('lower(url)', 'visits_lower_url')->algorithm('ngrambf_v1(3, 256
       $table->id();
       $table->morphs('commentable');
   });
-  // CREATE TABLE `comments` (`id` Int64, `commentable_type` String, `commentable_id` Int64,
+  // CREATE TABLE `comments` (`id` UInt64, `commentable_type` String, `commentable_id` UInt64,
   //   INDEX `comments_commentable_type_commentable_id_index` (`commentable_type`, `commentable_id`) TYPE minmax)
   //   ENGINE = MergeTree() ORDER BY (`id`)
   ```
@@ -287,7 +288,7 @@ Schema::table('orders', function (SchemaBlueprint $table) {
 | `settings(['merge_with_ttl_timeout' => 3600])` | ``ALTER TABLE `t` MODIFY SETTING merge_with_ttl_timeout=3600`` |
 | `rename('t_old')` | ``RENAME TABLE `t` TO `t_old` `` |
 
-- ClickHouse accepts a new sorting key only when it adds columns of the same `ALTER`. `$table->unsignedInteger('shard'); $table->orderBy('id', 'shard');` sends ``ALTER TABLE `visits` ADD COLUMN `shard` Int32, MODIFY ORDER BY (`id`, `shard`)``.
+- ClickHouse accepts a new sorting key only when it adds columns of the same `ALTER`. `$table->unsignedInteger('shard'); $table->orderBy('id', 'shard');` sends ``ALTER TABLE `visits` ADD COLUMN `shard` UInt32, MODIFY ORDER BY (`id`, `shard`)``.
 - `partitionBy()` throws a `RuntimeException`. ClickHouse cannot change the partition key.
 - `ttl()` applies the new TTL to the rows of the table in a background mutation.
 - `Schema::rename('analytics.visits', 'visits_old')` sends ``RENAME TABLE `analytics`.`visits` TO `analytics`.`visits_old` ``.

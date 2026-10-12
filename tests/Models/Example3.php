@@ -2,14 +2,15 @@
 
 namespace Tests\Models;
 
-use Oralunal\LaravelClickHouse\BaseModel;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 
-/**
- * @property bool $f_bool
- * @property int $f_int
- */
-class Example3 extends BaseModel
+class Example3 extends Model
 {
     protected $table = 'examples3';
+
+    protected $guarded = [];
+
+    public $timestamps = false;
+
     protected $casts = ['f_bool' => 'boolean'];
 }

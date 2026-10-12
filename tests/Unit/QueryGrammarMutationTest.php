@@ -19,7 +19,7 @@ use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Oralunal\LaravelClickHouse\Connection;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
-use Oralunal\LaravelClickHouse\Grammar;
+use Oralunal\LaravelClickHouse\LiteralGrammar;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 use Oralunal\LaravelClickHouse\QueryGrammar;
 use Oralunal\LaravelClickHouse\QueryProcessor;
@@ -28,7 +28,7 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The grammar of Laravel's own query builder, used when fix_default_query_builder is false.
+ * The mutations that the package's QueryGrammar compiles for Laravel's query builder.
  */
 class QueryGrammarMutationTest extends TestCase
 {
@@ -42,7 +42,7 @@ class QueryGrammarMutationTest extends TestCase
         $connection = $this->createStub(Connection::class);
         $connection->method('getConfig')->willReturnCallback(fn (?string $option = null) => $config[$option] ?? null);
         $connection->method('getTablePrefix')->willReturn('');
-        $connection->method('newBuilderGrammar')->willReturnCallback(fn (): Grammar => new Grammar());
+        $connection->method('newLiteralGrammar')->willReturnCallback(fn (): LiteralGrammar => new LiteralGrammar());
         $grammar = new QueryGrammar($connection);
         $query = (new Builder($connection, $grammar, new Processor()))->from('examples');
 
@@ -63,7 +63,7 @@ class QueryGrammarMutationTest extends TestCase
         $connection = $this->createStub(Connection::class);
         $connection->method('getConfig')->willReturnCallback(fn (?string $option = null) => $config[$option] ?? null);
         $connection->method('getTablePrefix')->willReturn('');
-        $connection->method('newBuilderGrammar')->willReturnCallback(fn (): Grammar => new Grammar());
+        $connection->method('newLiteralGrammar')->willReturnCallback(fn (): LiteralGrammar => new LiteralGrammar());
         $record = function (string $sql, array $bindings = []) use (&$statements): int {
             $statements[] = [$sql, $bindings];
 
@@ -1101,7 +1101,7 @@ class QueryGrammarMutationTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->method('getConfig')->willReturnCallback(fn (?string $option = null) => $config[$option] ?? null);
         $connection->method('getTablePrefix')->willReturn('');
-        $connection->method('newBuilderGrammar')->willReturnCallback(fn (): Grammar => new Grammar());
+        $connection->method('newLiteralGrammar')->willReturnCallback(fn (): LiteralGrammar => new LiteralGrammar());
         $connection->method('getDefaultCluster')->willReturn($defaultCluster);
         $connection->method('hasTemporaryTable')->willReturn($temporaryTable);
         $connection->method('pretending')->willReturn($pretending);
@@ -1333,8 +1333,8 @@ class QueryGrammarMutationTest extends TestCase
                 'Cannot send a lightweight DELETE FROM whose where condition holds a sub-query with UNION, INTERSECT or'
                 . ' EXCEPT: ClickHouse (24.8 checked) fails such a delete and leaves its mutation behind, which blocks'
                 . ' every later mutation of the table until KILL MUTATION. Nothing was sent. Send ALTER TABLE ... DELETE'
-                . " with the same condition, with the connection's statement() or the package builder's delete(false), or"
-                . " select the keys first, and delete by them instead: whereIn('id', \$query->pluck('id')).",
+                . " with the same condition, with delete(lightweight: false) or the connection's statement(), or select"
+                . " the keys first, and delete by them instead: whereIn('id', \$query->pluck('id')).",
                 $exception->getMessage()
             );
         }

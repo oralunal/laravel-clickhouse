@@ -17,9 +17,6 @@ use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Enumerable;
 use InvalidArgumentException;
 use JsonException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Identifier;
-use Oralunal\LaravelClickHouse\Expressions\InsertArray;
 use stdClass;
 use Stringable;
 use UnitEnum;
@@ -39,13 +36,11 @@ use UnitEnum;
  *   connection's datetime_precision, as every other path does;
  * - a backed enum as its value, and any other enum as its name;
  * - a stdClass as a JSON object, so new stdClass() is an empty Map;
- * - an InsertArray as its items (see InsertArray::getItems());
  * - smi2's MapType as an object, TupleType as an array, Boolean as a boolean, and any other smi2 Type as its
  *   getValue(), a string that ClickHouse reads into numbers, decimals, dates, UUIDs and IP addresses;
  * - a collection as its items, and any other Stringable object as its string.
- * Raw SQL (this package's Expression, RawColumn and Identifier, smi2's Expression and Laravel's DB::raw())
- * cannot be sent as data and is refused, as are an Arrayable value that is not a collection, such as an Eloquent
- * model, other objects and resources.
+ * Raw SQL (smi2's Expression and Laravel's DB::raw()) cannot be sent as data and is refused, as are an Arrayable
+ * value that is not a collection, such as an Eloquent model, other objects and resources.
  */
 final class JsonEachRowEncoder
 {
@@ -183,9 +178,6 @@ final class JsonEachRowEncoder
             $value instanceof DateTimeInterface => $this->formatDateTime($value),
             $value instanceof BackedEnum => $value->value,
             $value instanceof UnitEnum => $value->name,
-            $value instanceof InsertArray => $this->normalizeArray($value->getItems(), $depth),
-            $value instanceof Expression,
-            $value instanceof Identifier,
             $value instanceof ClientExpression,
             $value instanceof LaravelExpression => throw new InvalidArgumentException(sprintf(
                 'raw SQL (%s) cannot be sent as data. Insert the value itself, or use the Values insert format.',

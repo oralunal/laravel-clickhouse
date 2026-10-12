@@ -4,13 +4,12 @@ namespace Tests\Unit\Documentation;
 
 use ReflectionClass;
 use ReflectionClassConstant;
-use ReflectionFunction;
 use ReflectionFunctionAbstract;
 use ReflectionMethod;
 use ReflectionParameter;
 
 /**
- * Builds docs/reference/api.md, the list of the public classes, constants, methods and functions of the package,
+ * Builds docs/reference/api.md, the list of the public classes, constants and methods of the package,
  * from the code, and finds the public methods that no guide page names.
  *
  * Run `composer docs:api` to write the page again after a change of the public API.
@@ -34,32 +33,12 @@ final class ApiReference
      */
     private const SECTIONS = [
         'Models' => [
-            'BaseModel' => '/models/defining-models',
-            'Concerns\\HasAttributes' => '/models/defining-models#attribute-methods',
-            'Concerns\\HasEvents' => '/models/defining-models#events',
-            'Concerns\\HasBufferedInserts' => '/models/inserting-rows',
             'Eloquent\\' => '/models/eloquent',
-            'WithClient' => '/advanced/multiple-connections',
-            'RawColumn' => '/query-builder/basics#select-columns',
         ],
         'Query builder' => [
-            'Builder' => '/query-builder/basics',
-            'BuilderMethodsFromLaravel' => '/query-builder/reading-results',
-            'ClickhouseBuilder\\Query\\BaseBuilder' => '/query-builder/basics',
-            'ClickhouseBuilder\\Query\\Column' => '/query-builder/basics#column-expressions',
-            'ClickhouseBuilder\\Query\\From' => '/query-builder/basics#sub-queries-and-table-functions',
-            'ClickhouseBuilder\\Query\\JoinClause' => '/query-builder/clickhouse-sql#join-closures',
-            'ClickhouseBuilder\\Query\\ArrayJoinClause' => '/query-builder/clickhouse-sql#array-join',
-            'ClickhouseBuilder\\Query\\Limit' => '/query-builder/basics#examine-a-query',
-            'ClickhouseBuilder\\Query\\Expression' => '/reference/helpers#functions',
-            'QueryBuilder' => '/query-builder/laravel-query-builder',
+            'QueryBuilder' => '/query-builder/basics',
         ],
         'Schema and migrations' => [
-            'Migration' => '/schema/migrations',
-            'ClickhouseSchemaBuilder\\Tables\\MergeTree' => '/schema/migrations#table-methods',
-            'ClickhouseSchemaBuilder\\AddsColumns' => '/schema/migrations#column-types',
-            'ClickhouseSchemaBuilder\\Column' => '/schema/migrations#column-types',
-            'ClickhouseSchemaBuilder\\Expression' => '/schema/migrations#column-types',
             'SchemaBuilder' => '/schema/schema-builder',
             'SchemaBlueprint' => '/schema/schema-builder',
             'SchemaColumnDefinition' => '/schema/schema-builder',
@@ -69,25 +48,13 @@ final class ApiReference
             'Connection' => '/getting-started/configuration#read-the-options',
             'Cluster' => '/advanced/clusters#change-the-active-node',
             'Parallel' => '/advanced/parallel-queries',
+            'LiteralGrammar' => '/reference/helpers#literals',
         ],
         'Enums and exceptions' => [
-            'ClickhouseBuilder\\Query\\Enums\\' => '/reference/helpers#enums',
-            'Enum\\' => '/reference/helpers#enums',
+            'Enums\\' => '/reference/helpers#enums',
             'Exceptions\\' => '/reference/helpers#exceptions',
-            'ClickhouseBuilder\\Exceptions\\' => '/reference/helpers#exceptions',
-            'ClickhouseSchemaBuilder\\Exceptions\\' => '/reference/helpers#exceptions',
         ],
         'Internal classes' => [
-            'ClickhouseBuilder\\Query\\Grammar' => null,
-            'ClickhouseBuilder\\Query\\Traits\\' => null,
-            'ClickhouseBuilder\\Query\\Identifier' => null,
-            'ClickhouseBuilder\\Query\\Tuple' => null,
-            'ClickhouseBuilder\\Query\\TwoElementsLogicExpression' => null,
-            'ClickhouseSchemaBuilder\\Element' => null,
-            'ClickhouseSchemaBuilder\\Engine' => '/schema/migrations#table-methods',
-            'ClickhouseSchemaBuilder\\Syntax' => null,
-            'ClickhouseSchemaBuilder\\TTL' => null,
-            'Grammar' => null,
             'QueryGrammar' => null,
             'SchemaGrammar' => null,
             'QueryProcessor' => null,
@@ -97,7 +64,6 @@ final class ApiReference
             'CurlerRollingInSession' => '/advanced/sessions',
             'CurlerRollingWithRetries' => '/advanced/timeouts-and-retries#retries',
             'JsonEachRowEncoder' => '/models/inserting-rows#jsoneachrow-inserts',
-            'Expressions\\' => null,
             'Concerns\\' => null,
             'ClickhouseServiceProvider' => '/getting-started/installation',
             'Console\\FreshCommand' => '/schema/migration-commands',
@@ -123,7 +89,7 @@ final class ApiReference
             '',
             '<!-- tests/Unit/Documentation/ApiReference.php writes this page. Run `composer docs:api` after a change of the public API. -->',
             '',
-            'This page lists the public classes, constants, methods and functions of the package, with their signatures.',
+            'This page lists the public classes, constants and methods of the package, with their signatures.',
             'The guide pages tell how to use them. A test makes sure that this page agrees with the code.',
             '',
             'The methods are in alphabetical order. A class lists only its own methods. The methods of a parent class or a trait of the package are under that class or trait.',
@@ -143,16 +109,6 @@ final class ApiReference
                 array_push($lines, ...self::describeClass(new ReflectionClass($class), $guide));
             }
         }
-
-        $lines[] = '## Functions';
-        $lines[] = '';
-        $lines[] = 'The functions are in the `Oralunal\\LaravelClickHouse\\ClickhouseBuilder` namespace. See [Helpers](/reference/helpers#functions).';
-        $lines[] = '';
-        $lines[] = '```php';
-        foreach (self::functions() as $function) {
-            $lines[] = 'function ' . self::signature($function);
-        }
-        $lines[] = '```';
 
         return implode("\n", $lines) . "\n";
     }
@@ -248,7 +204,7 @@ final class ApiReference
         $names = [];
 
         foreach ($files as $file) {
-            if ($file->getExtension() !== 'php' || $file->getFilename() === 'functions.php') {
+            if ($file->getExtension() !== 'php') {
                 continue;
             }
 
@@ -430,22 +386,6 @@ final class ApiReference
         }
 
         return $users;
-    }
-
-    /**
-     * Get the functions of the package.
-     *
-     * @return list<ReflectionFunction>
-     */
-    private static function functions(): array
-    {
-        $functions = array_filter(
-            get_defined_functions()['user'],
-            fn (string $name): bool => str_starts_with($name, strtolower(self::NAMESPACE))
-        );
-        sort($functions);
-
-        return array_map(fn (string $name): ReflectionFunction => new ReflectionFunction($name), array_values($functions));
     }
 
     /**

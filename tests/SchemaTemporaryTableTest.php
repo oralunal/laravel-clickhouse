@@ -7,8 +7,8 @@ namespace Tests;
 use ClickHouseDB\Exception\DatabaseException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Oralunal\LaravelClickHouse\BaseModel;
 use Oralunal\LaravelClickHouse\Connection;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use Oralunal\LaravelClickHouse\SchemaBlueprint;
 use RuntimeException;
@@ -44,8 +44,10 @@ class SchemaTemporaryTableTest extends TestCase
     {
         $connection = $this->connection();
         $connection->enableQueryLog();
-        $model = new class extends BaseModel {
+        $model = new class extends Model {
             protected $table = 'schema_temporary_ids';
+
+            public $timestamps = false;
         };
 
         $found = $connection->session(function (Connection $connection) use ($model): array {
@@ -55,10 +57,10 @@ class SchemaTemporaryTableTest extends TestCase
                 $table->string('name');
             });
             $connection->table(self::TEMPORARY)->insert([['id' => 1, 'name' => 'a']]);
-            $model::insertAssoc([['id' => 2, 'name' => 'b']]);
+            $model::insert([['id' => 2, 'name' => 'b']]);
 
             return [
-                'rows' => $model::select()->orderBy('id')->getRows(),
+                'rows' => $model::query()->orderBy('id')->get()->toArray(),
                 'table' => $connection->select(
                     "SELECT database, engine, is_temporary FROM system.tables WHERE name = '" . self::TEMPORARY . "'"
                 ),

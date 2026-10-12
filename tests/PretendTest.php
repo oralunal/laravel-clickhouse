@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Tests;
 
+use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree;
 use Oralunal\LaravelClickHouse\Connection;
-use Oralunal\LaravelClickHouse\Migration;
+use Oralunal\LaravelClickHouse\SchemaBlueprint;
 
 /**
  * DB::pretend() and php artisan migrate --pretend on a ClickHouse connection: every statement is logged and none is
@@ -23,8 +23,6 @@ class PretendTest extends TestCase
     public const CREATED = 'pretend_created';
 
     public const CLUSTER_NAME_CONNECTION = 'clickhouse-pretend-cluster-name';
-
-    private const LARAVEL_CONNECTION = 'clickhouse-pretend-laravel';
 
     private ?string $migrationPath = null;
 
@@ -126,12 +124,11 @@ class PretendTest extends TestCase
     }
 
     /**
-     * Laravel's query builder, with fix_default_query_builder set to false, sends its mutations through
-     * affectingStatement().
+     * The query builder sends its mutations through affectingStatement().
      */
-    public function test_pretended_mutations_of_laravels_query_builder_change_no_rows(): void
+    public function test_pretended_mutations_of_the_query_builder_change_no_rows(): void
     {
-        $connection = $this->laravelBuilderConnection();
+        $connection = DB::connection('clickhouse');
 
         $log = $connection->pretend(function (Connection $connection): void {
             $this->assertSame(0, $connection->table(self::TABLE)->where('v', "it's")->delete());
@@ -171,16 +168,17 @@ class PretendTest extends TestCase
         );
     }
 
-    public function test_migration_write_and_create_merge_tree_are_logged_while_pretending(): void
+    public function test_the_statements_of_a_migration_are_logged_while_pretending(): void
     {
         $migration = new class extends Migration {
             public function up(): void
             {
-                static::write('CREATE TABLE ' . PretendTest::CREATED . ' (id UInt8) ENGINE = Memory');
-                static::createMergeTree(PretendTest::CREATED, function (MergeTree $table): void {
-                    $table->columns([$table->int32('id')])->orderBy('id');
+                DB::connection('clickhouse')->statement('CREATE TABLE ' . PretendTest::CREATED . ' (id UInt8) ENGINE = Memory');
+                Schema::connection('clickhouse')->create(PretendTest::CREATED, function (SchemaBlueprint $table): void {
+                    $table->integer('id');
+                    $table->orderBy('id');
                 });
-                static::write('DROP TABLE ' . PretendTest::TABLE);
+                DB::connection('clickhouse')->statementOnEveryNode('DROP TABLE ' . PretendTest::TABLE);
             }
         };
 
@@ -220,24 +218,20 @@ class PretendTest extends TestCase
     }
 
     /**
-     * createMergeTree() creates the table ON CLUSTER the connection's cluster_name, and leaves the clause out for a
+     * The schema builder creates the table ON CLUSTER the connection's cluster_name, and leaves the clause out for a
      * blank cluster_name.
      */
-    public function test_create_merge_tree_follows_the_cluster_name_of_the_connection(): void
+    public function test_a_created_table_follows_the_cluster_name_of_the_connection(): void
     {
-        $migration = new class extends Migration {
-            protected $connection = PretendTest::CLUSTER_NAME_CONNECTION;
-
-            public function up(): void
-            {
-                static::createMergeTree(PretendTest::CREATED, function (MergeTree $table): void {
-                    $table->columns([$table->int32('id')])->orderBy('id');
-                });
-            }
+        $create = function (Connection $connection): void {
+            Schema::connection($connection->getName())->create(PretendTest::CREATED, function (SchemaBlueprint $table): void {
+                $table->integer('id');
+                $table->orderBy('id');
+            });
         };
 
-        $onCluster = $this->clusterNameConnection('company_cluster')->pretend(fn () => $migration->up());
-        $blank = $this->clusterNameConnection(' ')->pretend(fn () => $migration->up());
+        $onCluster = $this->clusterNameConnection('company_cluster')->pretend($create);
+        $blank = $this->clusterNameConnection(' ')->pretend($create);
 
         $this->assertCount(1, $onCluster);
         $this->assertStringContainsString("ON CLUSTER 'company_cluster'", $onCluster[0]['query']);
@@ -270,13 +264,18 @@ class PretendTest extends TestCase
                 }
             };
             PHP);
-        file_put_contents($this->migrationPath . '/2030_01_01_000001_pretend_package_write.php', <<<'PHP'
+        file_put_contents($this->migrationPath . '/2030_01_01_000001_pretend_statement.php', <<<'PHP'
             <?php
 
-            return new class extends \Oralunal\LaravelClickHouse\Migration {
+            use Illuminate\Database\Migrations\Migration;
+            use Illuminate\Support\Facades\DB;
+
+            return new class extends Migration {
+                protected $connection = 'clickhouse';
+
                 public function up(): void
                 {
-                    static::write('TRUNCATE TABLE pretend_rows');
+                    DB::connection($this->connection)->statementOnEveryNode('TRUNCATE TABLE pretend_rows');
                 }
             };
             PHP);
@@ -294,17 +293,6 @@ class PretendTest extends TestCase
                 ->select("SELECT migration FROM migrations WHERE migration LIKE '2030_01_01_%'")
                 ->rows()
         );
-    }
-
-    private function laravelBuilderConnection(): Connection
-    {
-        config(['database.connections.' . self::LARAVEL_CONNECTION => array_merge(
-            config('database.connections.clickhouse'),
-            ['fix_default_query_builder' => false]
-        )]);
-        DB::purge(self::LARAVEL_CONNECTION);
-
-        return DB::connection(self::LARAVEL_CONNECTION);
     }
 
     private function clusterNameConnection(string $clusterName): Connection

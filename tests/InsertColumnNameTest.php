@@ -6,28 +6,21 @@ use ClickHouseDB\Client;
 use ClickHouseDB\Exception\DatabaseException;
 use Closure;
 use Illuminate\Support\Facades\DB;
-use Oralunal\LaravelClickHouse\BaseModel;
-use Oralunal\LaravelClickHouse\Concerns\HasBufferedInserts;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 use PHPUnit\Framework\Attributes\DataProvider;
 
-class InsertColumnNameRow extends BaseModel
+class InsertColumnNameRow extends Model
 {
     protected $table = 'insert_column_names';
+
+    protected $guarded = [];
+
+    public $timestamps = false;
 }
 
 /**
- * Uses HasBufferedInserts again, so its flushBuffer() is a copy of the trait's, in which self is this class.
- */
-class InsertColumnNameRowReusingBufferedInserts extends BaseModel
-{
-    use HasBufferedInserts;
-
-    protected $table = 'insert_column_names';
-}
-
-/**
- * smi2's client writes the column names of an insert between backticks as given, so
- * every insert path escapes the backticks and backslashes in each name first.
+ * Every insert path quotes each column name, so a name with a backtick, a trailing backslash or a parenthesis stays
+ * one name.
  */
 class InsertColumnNameTest extends TestCase
 {
@@ -38,7 +31,6 @@ class InsertColumnNameTest extends TestCase
         parent::setUp();
 
         InsertColumnNameRow::clearBuffer();
-        InsertColumnNameRowReusingBufferedInserts::clearBuffer();
         $this->client()->write('DROP TABLE IF EXISTS ' . self::TABLE . ' SYNC');
         $this->client()->write(
             'CREATE TABLE ' . self::TABLE . ' (id UInt32, `tick``name` String, `ends\\\\` String, n Nested(a UInt8))'
@@ -49,7 +41,6 @@ class InsertColumnNameTest extends TestCase
     protected function tearDown(): void
     {
         InsertColumnNameRow::clearBuffer();
-        InsertColumnNameRowReusingBufferedInserts::clearBuffer();
         $this->client()->write('DROP TABLE IF EXISTS ' . self::TABLE . ' SYNC');
         parent::tearDown();
     }
@@ -61,26 +52,17 @@ class InsertColumnNameTest extends TestCase
      */
     public static function insertPathProvider(): array
     {
-        $columns = fn (array $rows): array => array_keys($rows[0]);
-        $values = fn (array $rows): array => array_map('array_values', $rows);
-
         return [
             'query builder insert()' => [fn (array $rows) => DB::connection('clickhouse')->table(self::TABLE)->insert($rows)],
-            'insertAssoc()' => [fn (array $rows) => InsertColumnNameRow::insertAssoc($rows)],
-            'prepareAndInsertAssoc()' => [fn (array $rows) => InsertColumnNameRow::prepareAndInsertAssoc($rows)],
-            'insertBulk()' => [fn (array $rows) => InsertColumnNameRow::insertBulk($values($rows), $columns($rows))],
-            'prepareAndInsertBulk()' => [fn (array $rows) => InsertColumnNameRow::prepareAndInsertBulk($values($rows), $columns($rows))],
-            'prepareAndInsert()' => [fn (array $rows) => InsertColumnNameRow::prepareAndInsert($values($rows), $columns($rows))],
-            'create()' => [fn (array $rows) => array_map(fn (array $row) => InsertColumnNameRow::create($row), $rows)],
+            'query builder JSONEachRow insert()' => [fn (array $rows) => DB::connection('clickhouse')->table(self::TABLE)->insert($rows, 'JSONEachRow')],
+            'model insert()' => [fn (array $rows) => InsertColumnNameRow::insert($rows)],
+            'forceCreate(), since mass assignment leaves out a name with a dot' => [
+                fn (array $rows) => array_map(fn (array $row) => InsertColumnNameRow::forceCreate($row), $rows),
+            ],
             'buffer() and flushBuffer()' => [function (array $rows) {
                 InsertColumnNameRow::buffer($rows);
 
                 return InsertColumnNameRow::flushBuffer();
-            }],
-            'buffer() and flushBuffer() of a model that uses the trait again' => [function (array $rows) {
-                InsertColumnNameRowReusingBufferedInserts::buffer($rows);
-
-                return InsertColumnNameRowReusingBufferedInserts::flushBuffer();
             }],
         ];
     }
@@ -136,9 +118,7 @@ class InsertColumnNameTest extends TestCase
     }
 
     /**
-     * No insert path raises a deprecation. Laravel's handler only logs one, so the test
-     * turns that handling off: prepareAndInsertAssoc() used the callable
-     * 'static::prepareAssocFromRequest', which PHP 8.5 deprecates.
+     * No insert path raises a deprecation. Laravel's handler only logs one, so the test turns that handling off.
      *
      * @param Closure(array<int, array<string, mixed>>): mixed $insert
      */

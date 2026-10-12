@@ -21,8 +21,8 @@ use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
-use Tests\Unit\ClickhouseBuilder\IntBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\StringBackedEnumFixture;
+use Tests\Fixtures\IntBackedEnumFixture;
+use Tests\Fixtures\StringBackedEnumFixture;
 
 /**
  * An Eloquent model on the connection with Laravel's query builder, whose $incrementing stays true.
@@ -36,8 +36,8 @@ class LaravelQueryBuilderRow extends Model
 }
 
 /**
- * Laravel's query builder on a ClickHouse connection, as fix_default_query_builder = false hands it out: the
- * package's QueryBuilder with the package's QueryGrammar, against the server.
+ * Laravel's query builder on a ClickHouse connection: the package's QueryBuilder with the package's QueryGrammar,
+ * against the server.
  *
  * The connection is a copy of the default connection (database and nodes), with mutations_sync = 2 so that a
  * mutation has changed the rows when it returns.
@@ -829,11 +829,7 @@ class LaravelQueryBuilderTest extends TestCase
      */
     private function connection(array $config = []): Connection
     {
-        $wanted = array_merge(
-            config('database.connections.clickhouse'),
-            ['fix_default_query_builder' => false],
-            $config
-        );
+        $wanted = array_merge(config('database.connections.clickhouse'), $config);
         $wanted['settings'] = array_merge($wanted['settings'] ?? [], ['mutations_sync' => 2], $config['settings'] ?? []);
 
         if (config('database.connections.' . self::CONNECTION) !== $wanted) {

@@ -59,21 +59,30 @@ cp -r vendor/oralunal/laravel-clickhouse/resources/skills/lc-upgrade-* .claude/s
 
 ## Changes in 4.0
 
-These changes can make 3.x code fail:
+4.0 uses Laravel's own APIs for everything that Laravel has: Eloquent models, Laravel's query builder and Laravel
+migrations. It removes the parts of 3.x that did the same work, without a deprecation period:
 
-| Change | What to do |
+| Removed | Use instead |
 | --- | --- |
-| `min()`, `max()`, `sum()`, `avg()`, `average()` and `aggregate()` quote a string as a column name. | Pass SQL with `raw()`: `sum(raw('price * qty'))`. |
-| New signatures: `Builder::insert()`, `delete()`, `update()`, `settings()`, `BaseBuilder::sample()`, `BaseModel::optimize()`, `SchemaBuilder::build()`. | Make the overrides of subclasses compatible. |
-| `BaseModel` uses `Oralunal\LaravelClickHouse\Concerns\HasAttributes`. `usesTimestamps()`, `getRelationValue()`, `relationResolver()` and `relationLoaded()` are gone. | Use `$casts` for date columns. Use accessors for computed keys. |
-| A hand-written `#@?` marker is not a binding. | Write `?`. |
-| `select()` refuses a `FORMAT` clause other than `JSON`, `JSONStrings`, `JSONCompact` and `JSONCompactStrings`. | Remove the clause, or read the result as the exception message tells. |
-| Transactions throw a `LogicException`. | Use the `DatabaseTruncation` test trait. |
+| `BaseModel` and its `insertAssoc()`, `insertBulk()`, `prepareAndInsert*()`, `getRows()`, `$insertFormat` and `$tableForInserts` | `Oralunal\LaravelClickHouse\Eloquent\Model` with `insert()`, `create()` and `buffer()`. See [Define an Eloquent model](/models/defining-models). |
+| The package's own `Builder`, `ClickhouseBuilder\*`, `RawColumn`, `raw()` and `InsertArray` | The `QueryBuilder` that `DB::connection('clickhouse')->table()` returns, `DB::raw()` and PHP arrays. See [Query builder basics](/query-builder/basics). |
+| `format()` of the builder | `getStatement($format)->rawData()`, or `selectStatement($sql)` of the connection |
+| `getQueryForCount()`, `getQueryForExists()`, `getQueryForPage()`, `asyncWithQuery()` | `count()`, `exists()`, `forPage()` and [parallel queries](/advanced/parallel-queries) |
+| `Oralunal\LaravelClickHouse\Migration` with `write()` and `createMergeTree()`, `ClickhouseSchemaBuilder\*` | Laravel migrations with `Schema::connection(...)->create()` or `DB::connection(...)->statementOnEveryNode($sql)`. See [Migrations](/schema/migrations). |
+| `Enum\Enum` and the enums of the old builder | The native enums `Enums\Format` and `Enums\DateTimePrecision` |
+| The package's `Grammar` and `newBuilderGrammar()` | `LiteralGrammar` and `newLiteralGrammar()` |
+| The option `fix_default_query_builder` | Nothing. The query builder is always the package's `QueryBuilder`. |
 
-These changes do not make code fail, but they change what a write does:
+These changes make the same code do something else:
 
-- `whereNotIn()` with an empty list matches all rows, as in Laravel. Before `delete()`, check that the list is not empty.
-- `delete()` and `update()` refuse clauses that a ClickHouse mutation ignores, such as `JOIN` and `LIMIT`.
-- The package writes floats with all digits. A float that PHP calculates is cut at the scale of a `Decimal` column. Round it first.
-- `insertAssoc()` and `buffer()` refuse a row whose keys are not the keys of the first row.
-- On a fresh database, `Schema::create()` and `Schema::table()` write all of the blueprint. 3.x wrote names and types only.
+- `tinyInteger()`, `smallInteger()`, `integer()` and `bigInteger()` create `Int8`, `Int16`, `Int32` and `Int64`, and
+  their unsigned forms `UInt8` to `UInt64`. `id()` creates a `UInt64` column. 3.x wrote wider signed types.
+- At the `microsecond` precision, a condition on a date with a sub-second part writes `toDateTime64('...', 6)`.
+  It compares the exact date. See [Dates and times](/query-builder/dates).
+- The `delete()` of the query builder takes Laravel's `$id` first. Write `delete(lightweight: true)`. A `bool` as
+  the first argument throws.
+- `min()`, `max()`, `sum()`, `avg()` and `aggregate()` are Laravel's: they drop the select list and the order.
+  `count()` and the `paginate()` total count the rows that `get()` returns.
+
+[UPGRADE.md](https://github.com/oralunal/laravel-clickhouse/blob/master/UPGRADE.md) has each step, with the code
+before and after.

@@ -47,10 +47,11 @@ On a replicated table, these statements usually take some tens of milliseconds o
 
 ## Dates with a sub-second part
 
-26.8 parses a date with `date_time_input_format` and `cast_string_to_date_time_mode` set to `best_effort`.
-So a `DateTime` column removes the sub-second part, in inserts and conditions. 24.8 and 26.3 refuse it.
+At the microsecond `datetime_precision`, an insert writes a date with a sub-second part as a string, such as `'2024-01-02 03:04:05.500000'`.
+26.8 parses it with `date_time_input_format` and `cast_string_to_date_time_mode` set to `best_effort`. So a `DateTime` column removes the sub-second part. 24.8 and 26.3 refuse it.
 
-- On 26.8, `cast_string_to_date_time_mode` set to `basic` refuses it in conditions again. `date_time_input_format` set to `basic` refuses it in JSONEachRow inserts. A `Values` insert needs both.
+- On 26.8, `date_time_input_format` set to `basic` refuses it in JSONEachRow inserts. A `Values` insert is refused when `cast_string_to_date_time_mode` is `basic` too.
+- A condition or an update writes the date as `toDateTime64('2024-01-02 03:04:05.500000', 6)`, so all versions accept it. It does not equal a value of a `DateTime` column, which has no sub-second part.
 - 24.8 does not have `cast_string_to_date_time_mode`. A connection whose `settings` have it fails on 24.8 with `UNKNOWN_SETTING`. Set it only on 26.x connections.
 
 See [Dates and times](/query-builder/dates).
@@ -77,8 +78,14 @@ They refuse a mutation with such a condition at once. See [Deletions](/query-bui
 
 ## INTERSECT and EXCEPT
 
-From 25.8, a query that reads only some columns of an `INTERSECT` or `EXCEPT` sub-query gets the correct rows.
-The package reads all columns for `exists()` and `count()`. This has no effect on the result.
+24.8 compares only the columns that the outer query reads in an `INTERSECT` or `EXCEPT` sub-query, so `count()` and `exists()` of such a query got other rows than `get()`.
+From 25.8, a query that reads only some columns gets the correct rows.
+The package adds `where not ignore(*)` to `count()`, the other aggregates, `exists()` and `whereExists()` of such a query, so that ClickHouse reads all columns on all versions. This has no effect on the result.
+
+## EXISTS with arrayJoin()
+
+With the analyzer, 26.8 answers `EXISTS` of a query that selects `arrayJoin()` of an empty array with `1`, although the query returns no row.
+The package selects from such a query in `exists()` and `whereExists()`, with `where not ignore(*)`, which gives the correct answer on all versions.
 
 ## Lightweight delete with a set operation
 

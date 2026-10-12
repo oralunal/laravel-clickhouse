@@ -3,9 +3,9 @@
 namespace Tests;
 
 use Closure;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Oralunal\LaravelClickHouse\Builder;
-use Oralunal\LaravelClickHouse\RawColumn;
+use Oralunal\LaravelClickHouse\QueryBuilder as Builder;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
@@ -13,9 +13,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
  * own, with and without settings(), also as a sub-query, and INTERSECT and EXCEPT
  * read through from(), a withExpression() name or a join.
  *
- * The client adds FORMAT JSON to the end of a query without a FORMAT clause,
- * after SETTINGS, and ClickHouse 24.8 rejects FORMAT there after a parenthesized
- * last operand. get() therefore names the JSON format itself, before SETTINGS.
+ * Laravel's grammar puts each operand of a set operation in parentheses, and the
+ * client adds FORMAT JSON after SETTINGS.
  */
 class SetOperationTest extends TestCase
 {
@@ -27,7 +26,7 @@ class SetOperationTest extends TestCase
      */
     private function values(string $values): Builder
     {
-        return DB::connection('clickhouse')->query()->select('x')->from(new RawColumn("values('x UInt8', {$values})"));
+        return DB::connection('clickhouse')->query()->select('x')->fromRaw("values('x UInt8', {$values})");
     }
 
     /**
@@ -42,7 +41,7 @@ class SetOperationTest extends TestCase
             ],
             'union all of a closure with its own union all' => [
                 fn (self $test): Builder => $test->values('1, 2')->unionAll(
-                    fn (Builder $query) => $query->select('x')->from(new RawColumn("values('x UInt8', 1, 2)"))->unionAll($test->values('1, 2'))
+                    fn (Builder $query) => $query->select('x')->fromRaw("values('x UInt8', 1, 2)")->unionAll($test->values('1, 2'))
                 ),
                 [1, 1, 1, 2, 2, 2],
             ],
@@ -64,10 +63,10 @@ class SetOperationTest extends TestCase
     #[DataProvider('nestedSetOperationProvider')]
     public function testNestedSetOperationReturnsTheSameRowsWithAndWithoutSettings(Closure $query, array $values): void
     {
-        $this->assertSame($values, $this->sortedValues($query($this)->getRows()), 'without settings');
+        $this->assertSame($values, $this->sortedValues($query($this)->get()->all()), 'without settings');
         $this->assertSame(
             $values,
-            $this->sortedValues($query($this)->settings(['max_threads' => 1])->getRows()),
+            $this->sortedValues($query($this)->settings(['max_threads' => 1])->get()->all()),
             'with settings'
         );
     }
@@ -81,13 +80,16 @@ class SetOperationTest extends TestCase
     {
         $builder = fn (): Builder => $query($this)->settings(['max_threads' => 1]);
 
-        $this->assertCount(count($values), $builder()->getRows(), 'the query itself');
+        $this->assertCount(count($values), $builder()->get()->all(), 'the query itself');
         $this->assertSame(count($values), $builder()->count());
         $this->assertSame(count($values), $builder()->paginate(2)->total());
         $this->assertTrue($builder()->exists());
     }
 
-    public function testNestedSetOperationWithSettingsIsSentWithFormatJsonBeforeTheSettings(): void
+    /**
+     * ClickHouse rejects SETTINGS after the last parenthesized query of a union, so the union is selected from.
+     */
+    public function testNestedSetOperationWithSettingsIsSentWithTheSettingsAtTheEnd(): void
     {
         $connection = DB::connection('clickhouse');
         $connection->enableQueryLog();
@@ -95,11 +97,11 @@ class SetOperationTest extends TestCase
         $this->values('1, 2, 3, 3')
             ->except($this->values('2, 3')->unionAll($this->values('3, 4')))
             ->settings(['max_threads' => 1])
-            ->getRows();
+            ->get()->all();
 
         $this->assertSame(
-            ["SELECT `x` FROM values('x UInt8', 1, 2, 3, 3) EXCEPT (SELECT `x` FROM values('x UInt8', 2, 3)"
-            . " UNION ALL SELECT `x` FROM values('x UInt8', 3, 4)) FORMAT JSON SETTINGS max_threads=1"],
+            ["select * from ((select \"x\" from values('x UInt8', 1, 2, 3, 3)) except ((select \"x\" from values('x UInt8', 2, 3))"
+            . " union all (select \"x\" from values('x UInt8', 3, 4)))) settings max_threads=1"],
             array_column($connection->getQueryLog(), 'query')
         );
     }
@@ -112,7 +114,7 @@ class SetOperationTest extends TestCase
      */
     private function pairs(string $rows): Builder
     {
-        return DB::connection('clickhouse')->query()->select('g', 'n')->from(new RawColumn("values('g String, n UInt8', {$rows})"));
+        return DB::connection('clickhouse')->query()->select('g', 'n')->fromRaw("values('g String, n UInt8', {$rows})");
     }
 
     /**
@@ -158,9 +160,9 @@ class SetOperationTest extends TestCase
         ];
 
         foreach ($orders as $label => $order) {
-            $builder = fn (): Builder => $order($connection->table($setOperation($this)));
+            $builder = fn (): Builder => $order($connection->query()->fromSub($setOperation($this), 's'));
 
-            $this->assertCount($rows, $builder()->getRows(), "the query itself, {$label}");
+            $this->assertCount($rows, $builder()->get()->all(), "the query itself, {$label}");
             $this->assertSame($rows, $builder()->count(), "count(), {$label}");
             $this->assertSame($rows, $builder()->paginate(10)->total(), "paginate()->total(), {$label}");
             $this->assertCount($rows, $builder()->paginate(10)->items(), "paginate()->items(), {$label}");
@@ -184,8 +186,9 @@ class SetOperationTest extends TestCase
             'with expression' => fn (): Builder => $connection->query()->withExpression('w', $setOperation($this))->from('w'),
             'recursive with expression' => fn (): Builder => $connection->query()->withRecursiveExpression('w', $setOperation($this))->from('w'),
             'join' => fn (): Builder => $connection->query()
-                ->from(new RawColumn("values('g String', 'a', 'b', 'c', 'd', 'e')"), 't')
-                ->allInnerJoin($setOperation($this), ['g'], false, 's'),
+                ->select('s.g', 's.n')
+                ->fromRaw("values('g String', 'a', 'b', 'c', 'd', 'e') as t")
+                ->allInnerJoinSub($setOperation($this), 's', 't.g', '=', 's.g'),
         ];
 
         foreach ($forms as $form => $query) {
@@ -196,7 +199,7 @@ class SetOperationTest extends TestCase
                 $builder = fn (): Builder => $query()->settings(['enable_analyzer' => $enableAnalyzer]);
                 $label = "{$form}, {$analyzer}";
 
-                $this->assertCount($rows, $builder()->getRows(), "the query itself, {$label}");
+                $this->assertCount($rows, $builder()->get()->all(), "the query itself, {$label}");
                 $this->assertSame($rows, $builder()->count(), "count(), {$label}");
                 $this->assertSame($rows, $builder()->paginate(10)->total(), "paginate()->total(), {$label}");
                 $this->assertCount($rows, $builder()->paginate(10)->items(), "paginate()->items(), {$label}");
@@ -219,21 +222,20 @@ class SetOperationTest extends TestCase
         foreach (['analyzer on' => 1, 'analyzer off' => 0] as $analyzer => $enableAnalyzer) {
             $this->assertSame(
                 [1, 2, 3, 4],
-                array_column($connection->table($nested())->orderBy('x')->settings(['enable_analyzer' => $enableAnalyzer])->getRows(), 'x'),
+                array_column($connection->query()->fromSub($nested(), 'n')->orderBy('x')->settings(['enable_analyzer' => $enableAnalyzer])->get()->all(), 'x'),
                 "table(), {$analyzer}"
             );
             $this->assertSame(
                 [1, 3],
-                array_column($this->values('1, 3, 5')->whereIn('x', $nested())->orderBy('x')->settings(['enable_analyzer' => $enableAnalyzer])->getRows(), 'x'),
+                array_column($this->values('1, 3, 5')->whereIn('x', $nested())->orderBy('x')->settings(['enable_analyzer' => $enableAnalyzer])->get()->all(), 'x'),
                 "whereIn(), {$analyzer}"
             );
         }
     }
 
     /**
-     * chunk() reads a set operation as a whole, SELECT * FROM (<query>) LIMIT <offset>, <count>, so it ends and reads
-     * every row once. It used to add its LIMIT to the first query: on UNION ALL it never ended, and on EXCEPT it
-     * stopped after an empty first page. With one thread, ClickHouse returns the rows in the same order on every run.
+     * chunk() pages the whole set operation, as Laravel's grammar puts the order, the limit and the offset after the
+     * last operand, so it ends and reads every row once.
      *
      * @return array<string, array{Closure(self): Builder, int[]}>
      */
@@ -264,18 +266,15 @@ class SetOperationTest extends TestCase
     {
         foreach ([1, 2, 10] as $count) {
             $pages = [];
-            $builder = $query($this)->settings(['max_threads' => 1]);
-            $sqlBefore = $builder->toSql();
-
-            $builder->chunk($count, function (array $rows, int $page) use (&$pages): void {
-                $pages[$page] = array_column($rows, 'x');
-            });
+            $query($this)->orderBy('x')->settings(['max_threads' => 1])
+                ->chunk($count, function (Collection $rows, int $page) use (&$pages): void {
+                    $pages[$page] = $rows->pluck('x')->all();
+                });
 
             $read = array_merge(...array_values($pages));
             sort($read);
             $this->assertSame($values, $read, "chunk({$count})");
             $this->assertSame(range(1, (int) ceil(count($values) / $count)), array_keys($pages), "pages of chunk({$count})");
-            $this->assertSame($sqlBefore, $builder->toSql(), "chunk({$count}) leaves the builder unchanged");
             $this->assertSame(count($values), $query($this)->count());
         }
     }
@@ -309,7 +308,7 @@ class SetOperationTest extends TestCase
     {
         $query = fn (): Builder => $this->values('3, 1, 2')->orderBy('x')->limit(1)->unionAll($this->values('10, 11'));
 
-        $this->assertSame([1, 10, 11], $this->sortedValues($query()->getRows()));
+        $this->assertSame([1, 10, 11], $this->sortedValues($query()->get()->all()));
         $this->assertSame(3, $query()->count());
         $this->assertSame(3, $query()->paginate(10)->total());
         $this->assertSame([1, 10, 11], $this->sortedValues($query()->paginate(10)->items()));

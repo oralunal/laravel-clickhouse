@@ -8,25 +8,14 @@ use ClickHouseDB\Client;
 use ClickHouseDB\Exception\DatabaseException;
 use ClickHouseDB\Exception\QueryException as ClientQueryException;
 use ClickHouseDB\Query\Degeneration\Bindings;
-use ClickHouseDB\Query\Expression\Expression as ClientExpression;
-use ClickHouseDB\Query\Expression\Raw;
 use ClickHouseDB\Query\Query;
-use ClickHouseDB\Quote\FormatLine;
 use ClickHouseDB\Statement;
 use ClickHouseDB\Transport\CurlerRequest;
 use ClickHouseDB\Transport\CurlerResponse;
-use ClickHouseDB\Type\Type as ClientType;
-use DateTimeInterface;
 use Generator;
-use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\DateTimePrecision;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Identifier;
+use Oralunal\LaravelClickHouse\Enums\Format;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
-use ReflectionProperty;
-use Stringable;
 
 /**
  * Requests that the package sends through a smi2 client where smi2's own Client methods would send or read them
@@ -38,24 +27,17 @@ use Stringable;
  * - selectIntoStream() writes the result of a SELECT into a stream and throws the error that ClickHouse wrote into
  *   it, which smi2's Client::streamRead() reports without its message.
  * - write() logs a write and leaves it out while the connection pretends.
- * - compileValuesInsert() writes the INSERT ... VALUES of the package's Values inserts, with every digit of a
- *   float, NaN and INF, and dates at the connection's datetime_precision.
- * - insertJsonEachRow() and insertJsonCompactEachRow() send rows in a JSON input format, with the INSERT head in
- *   the URL and the rows in the body.
+ * - encodeJsonEachRow() and sendInsert() send rows in the JSONEachRow input format, with the INSERT head in the URL
+ *   and the rows in the body.
  *
  * @internal The package's own helper: its public static methods are not public API and may change in any release.
  */
 final class ClientRequests
 {
     /**
-     * The input format of keyed rows: one JSON object per row.
+     * The format of keyed rows: one JSON object per row.
      */
-    private const JSON_EACH_ROW = Format::JSON_EACH_ROW;
-
-    /**
-     * The input format of positional rows: one JSON array per row.
-     */
-    private const JSON_COMPACT_EACH_ROW = Format::JSON_COMPACT_EACH_ROW;
+    private const JSON_EACH_ROW = Format::JsonEachRow->value;
 
     /**
      * The format in which smi2's Client::select() asks for the result of a query that names no format.
@@ -612,183 +594,6 @@ final class ClientRequests
     }
 
     /**
-     * Compile the INSERT that smi2's Client::insert() sends for rows and column names, byte for byte, except for
-     * the values that smi2 writes differently from the rest of the package (see prepareValuesForValuesInsert()):
-     * - a finite float is written with every digit, as the shortest text that reads back as the same float (1/3 as
-     *   0.3333333333333333, 2.0 as 2, 1e25 as 1.0E+25): smi2 writes PHP's string of the float, so the ini setting
-     *   precision is set to -1 while the rows are written, and restored afterwards, also when a value throws (the
-     *   __toString() of a Stringable value runs with that setting too);
-     * - NaN, INF and -INF are written as nan, inf and -inf;
-     * - a date with a sub-second part is written at the datetime_precision of the grammar (see
-     *   Grammar::formatDateTime()); every other date is left to smi2, which writes the same 'Y-m-d H:i:s' text;
-     * - raw SQL, this package's Expression or a Laravel database expression such as DB::raw(), is written as the
-     *   SQL it holds, as smi2 writes its own Raw expression;
-     * - a Stringable object whose value property smi2 cannot read, such as a value object with a private $value,
-     *   is written as its string.
-     * Every other value is written by smi2; a PHP bool, for example, is sent as the quoted string 'true' or 'false'.
-     * The rows are prepared and written one at a time, and a row without such a value is not copied, so the
-     * insert needs little more memory than the SQL it sends.
-     *
-     * The model inserts, the buffer flush and Builder::insert() send their Values rows with it, through write().
-     *
-     * @param Grammar $grammar A grammar of the connection, such as Connection::newBuilderGrammar() gives
-     * @param string $table A table name, quoted as one identifier when it has no backtick and no dot, as smi2 does
-     * @param array<int|string, mixed> $rows The rows; one that is not an array is left for smi2 to refuse
-     * @param array<int, string> $columns The escaped column names (see Grammar::escapeInsertColumns())
-     * @return string
-     * @throws ClientQueryException When there are no rows
-     */
-    public static function compileValuesInsert(Grammar $grammar, string $table, array $rows, array $columns): string
-    {
-        if ($rows === []) {
-            throw ClientQueryException::cannotInsertEmptyValues();
-        }
-
-        if (stripos($table, '`') === false && stripos($table, '.') === false) {
-            $table = '`' . $table . '`';
-        }
-        $sql = 'INSERT INTO ' . $table;
-        if (count($columns) !== 0) {
-            $sql .= ' (`' . implode('`,`', $columns) . '`) ';
-        }
-        $sql .= ' VALUES ';
-
-        $formatsDates = $grammar->getDateTimePrecision() !== DateTimePrecision::SECOND;
-        $precision = (string) ini_get('precision');
-        ini_set('precision', '-1');
-        try {
-            foreach ($rows as $row) {
-                if (is_array($row)) {
-                    $row = self::prepareValuesForValuesInsert($grammar, $formatsDates, $row) ?? $row;
-                }
-                $sql .= ' (' . FormatLine::Insert($row) . '), ';
-            }
-        } finally {
-            ini_set('precision', $precision);
-        }
-
-        return trim($sql, ', ');
-    }
-
-    /**
-     * Replace the values of a row, or of an array value at any depth, that smi2 would write differently from the
-     * rest of the package (see compileValuesInsert()): NaN, INF and -INF with smi2 Raw expressions of nan, inf and
-     * -inf, and objects as prepareObjectForValuesInsert() replaces them. Finite floats are left as they are.
-     *
-     * @param Grammar $grammar
-     * @param bool $formatsDates Whether the grammar writes dates with a sub-second part
-     * @param array<int|string, mixed> $values
-     * @return array<int|string, mixed>|null The values with the replacements, or null when no value is replaced,
-     *                                       so that the caller keeps the array it has without a copy
-     */
-    private static function prepareValuesForValuesInsert(Grammar $grammar, bool $formatsDates, array $values): ?array
-    {
-        $replaced = false;
-        foreach ($values as $key => $value) {
-            if (is_float($value)) {
-                if (is_finite($value)) {
-                    continue;
-                }
-                $replacement = new Raw($grammar->compileLiteral($value));
-            } elseif (is_array($value)) {
-                $replacement = self::prepareValuesForValuesInsert($grammar, $formatsDates, $value);
-            } elseif (is_object($value)) {
-                $replacement = self::prepareObjectForValuesInsert($grammar, $formatsDates, $value);
-            } else {
-                continue;
-            }
-
-            if ($replacement !== null) {
-                $values[$key] = $replacement;
-                $replaced = true;
-            }
-        }
-
-        return $replaced ? $values : null;
-    }
-
-    /**
-     * Replace an object that smi2 would write differently from the rest of the package (see compileValuesInsert()):
-     * - a date with the text of Grammar::formatDateTime() when the grammar writes dates with a sub-second part and
-     *   that text is not the 'Y-m-d H:i:s' that smi2 writes;
-     * - this package's Expression, or a Laravel database expression, with a smi2 Raw expression of its SQL;
-     * - a Stringable object whose value property is not public with its string: smi2 reads a value property
-     *   before it calls __toString(), and fails on one that is private or protected.
-     * smi2's own types and expressions, and every other object, are left to smi2. So is this package's Identifier,
-     * a name that a VALUES row cannot hold.
-     *
-     * @param Grammar $grammar
-     * @param bool $formatsDates Whether the grammar writes dates with a sub-second part
-     * @param object $value
-     * @return Raw|string|null The replacement, or null to leave the object to smi2
-     */
-    private static function prepareObjectForValuesInsert(Grammar $grammar, bool $formatsDates, object $value): Raw|string|null
-    {
-        if ($value instanceof DateTimeInterface) {
-            if (!$formatsDates) {
-                return null;
-            }
-            $text = $grammar->formatDateTime($value);
-
-            return $text === $value->format('Y-m-d H:i:s') ? null : $text;
-        }
-
-        if ($value instanceof ClientType || $value instanceof ClientExpression || $value instanceof Identifier) {
-            return null;
-        }
-
-        if ($value instanceof Expression || $value instanceof ExpressionContract) {
-            return new Raw($grammar->compileLiteral($value));
-        }
-
-        if ($value instanceof Stringable && property_exists($value, 'value')
-            && !(new ReflectionProperty($value, 'value'))->isPublic()) {
-            return (string) $value;
-        }
-
-        return null;
-    }
-
-    /**
-     * Insert keyed rows as JSONEachRow: INSERT INTO <table> (<keys of the first row>) FORMAT JSONEachRow, followed
-     * by one JSON object per row.
-     *
-     * Every row must have the first row's keys, in any order; otherwise nothing is sent. The INSERT head goes in
-     * the URL and the rows in the request body, so smi2 never substitutes bindings in the data, a retry sends
-     * the whole body again, and an error message names the head instead of carrying the data: ClickHouse (24.8
-     * checked) quotes at most about 160 bytes around a value that it cannot parse. While the connection
-     * pretends, the rows are checked and encoded as for a real insert, so that a row the real insert refuses is
-     * refused as well, then the head is logged and nothing is sent.
-     *
-     * @param Client $client
-     * @param Connection $connection The connection whose pretend mode decides
-     * @param string $table A table name, or a name with a database or backticks, written as given
-     * @param array<int|string, array<int|string, mixed>> $rows
-     * @param JsonEachRowEncoder $encoder
-     * @return Statement
-     * @throws QueryException When a row's keys differ from the first row's
-     * @throws InvalidArgumentException When a row is not an array, or a value cannot be sent as JSON
-     * @throws ClientQueryException When there are no rows, or the insert fails
-     */
-    public static function insertJsonEachRow(
-        Client $client,
-        Connection $connection,
-        string $table,
-        array $rows,
-        JsonEachRowEncoder $encoder
-    ): Statement {
-        [$columns, $body] = self::encodeJsonEachRow($rows, $encoder);
-        $head = self::compileInsertWithFormat($table, $columns, self::JSON_EACH_ROW);
-        if ($connection->pretending()) {
-            $connection->logQuery($head, [], 0.0);
-
-            return self::pretendedStatement($head);
-        }
-
-        return self::sendInsert($client, $head, $body, self::JSON_EACH_ROW);
-    }
-
-    /**
      * Check keyed rows as insertJsonEachRow() checks them, and encode them as JSONEachRow, one JSON object per line,
      * without sending anything: every row must be an array with the first row's keys, in any order, and every value
      * must be one that JSON can hold (see JsonEachRowEncoder).
@@ -808,85 +613,6 @@ final class ClientRequests
         $columns = self::verifyKeys($rows);
 
         return [$columns, $encoder->encodeRows($rows)];
-    }
-
-    /**
-     * Insert positional rows as JSONCompactEachRow: INSERT INTO <table> [(<columns>)] FORMAT JSONCompactEachRow,
-     * followed by one JSON array per row.
-     *
-     * Without columns, the values of a row go to the table's columns in their order, as in a Values insert.
-     * Every row must have as many values as the first row, and as the columns when they are given; otherwise
-     * nothing is sent. The head and the rows are sent as insertJsonEachRow() sends them, and while the
-     * connection pretends, the rows are checked and encoded as for a real insert, then the head is logged and
-     * nothing is sent.
-     *
-     * @param Client $client
-     * @param Connection $connection The connection whose pretend mode decides
-     * @param string $table A table name, or a name with a database or backticks, written as given
-     * @param array<int|string, array<int|string, mixed>> $rows
-     * @param JsonEachRowEncoder $encoder
-     * @param array<int, int|string> $columns
-     * @return Statement
-     * @throws InvalidArgumentException When a row is not an array or has another number of values, or a value
-     *                                  cannot be sent as JSON
-     * @throws ClientQueryException When there are no rows, or the insert fails
-     */
-    public static function insertJsonCompactEachRow(
-        Client $client,
-        Connection $connection,
-        string $table,
-        array $rows,
-        JsonEachRowEncoder $encoder,
-        array $columns = []
-    ): Statement {
-        self::verifyValueCounts($rows, $columns);
-        $head = self::compileInsertWithFormat($table, $columns, self::JSON_COMPACT_EACH_ROW);
-        $body = $encoder->encodeCompactRows($rows);
-        if ($connection->pretending()) {
-            $connection->logQuery($head, [], 0.0);
-
-            return self::pretendedStatement($head);
-        }
-
-        return self::sendInsert($client, $head, $body, self::JSON_COMPACT_EACH_ROW);
-    }
-
-    /**
-     * Compile the head of an insert whose rows follow in an input format: INSERT INTO <table> [(<columns>)]
-     * FORMAT <format>.
-     *
-     * Each column is quoted as one identifier, with backticks and backslashes escaped (see
-     * Grammar::escapeInsertColumns()), so a Nested name such as n.a stays one name. A table name without a
-     * backtick or a dot is quoted as one identifier too, as smi2's Client::insert() does; a name with a database
-     * or with backticks is written as given. Without columns the list is left out.
-     *
-     * @param string $table
-     * @param array<int, int|string> $columns
-     * @param string $format An input format name, such as JSONEachRow
-     * @return string
-     * @throws InvalidArgumentException When the format is not a plain name
-     */
-    public static function compileInsertWithFormat(string $table, array $columns, string $format): string
-    {
-        if (preg_match('/^[A-Za-z][A-Za-z0-9_]*\z/', $format) !== 1) {
-            throw new InvalidArgumentException("Invalid ClickHouse input format name [{$format}].");
-        }
-
-        $grammar = new Grammar();
-        if (!str_contains($table, '`') && !str_contains($table, '.')) {
-            $table = '`' . $grammar->escapeInsertColumns([$table])[0] . '`';
-        }
-
-        $sql = 'INSERT INTO ' . $table;
-        if ($columns !== []) {
-            $quoted = array_map(
-                fn (string $column): string => '`' . $column . '`',
-                $grammar->escapeInsertColumns(array_values($columns))
-            );
-            $sql .= ' (' . implode(', ', $quoted) . ')';
-        }
-
-        return $sql . ' FORMAT ' . $format;
     }
 
     /**
@@ -1149,44 +875,6 @@ final class ClientRequests
         }
 
         return array_keys($first);
-    }
-
-    /**
-     * Check that every row is an array with as many values as the first row, and as the columns when given.
-     *
-     * @param array<int|string, mixed> $rows
-     * @param array<int, int|string> $columns
-     * @return void
-     * @throws InvalidArgumentException When a row is not an array or has another number of values
-     * @throws ClientQueryException When there are no rows
-     */
-    private static function verifyValueCounts(array $rows, array $columns): void
-    {
-        if ($rows === []) {
-            throw ClientQueryException::cannotInsertEmptyValues();
-        }
-
-        $expected = $columns === [] ? null : count($columns);
-        $expectedFrom = 'the columns';
-        foreach ($rows as $index => $row) {
-            self::verifyRow($row, $index, self::JSON_COMPACT_EACH_ROW);
-            if ($expected === null) {
-                $expected = count($row);
-                $expectedFrom = 'the first row';
-                continue;
-            }
-
-            if (count($row) !== $expected) {
-                throw new InvalidArgumentException(sprintf(
-                    'Cannot insert the rows as %s: the row at index %s has %d values, and %s %d.',
-                    self::JSON_COMPACT_EACH_ROW,
-                    $index,
-                    count($row),
-                    $expectedFrom,
-                    $expected
-                ));
-            }
-        }
     }
 
     /**

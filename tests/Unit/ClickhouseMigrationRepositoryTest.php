@@ -73,25 +73,11 @@ class ClickhouseMigrationRepositoryTest extends TestCase
     }
 
     /**
-     * @return array<string, array{bool|null}>
+     * Laravel's query builder reads the rows, and the migrations come back as objects.
      */
-    public static function queryBuilderOptions(): array
+    public function test_get_last_reads_the_last_batch_with_laravels_query_builder(): void
     {
-        return [
-            'fix_default_query_builder on' => [true],
-            'fix_default_query_builder off' => [false],
-            'fix_default_query_builder left out' => [null],
-        ];
-    }
-
-    /**
-     * Laravel's query builder reads the rows whatever the connection's fix_default_query_builder option says, and
-     * the migrations come back as objects: the package Builder's get() returned smi2's Statement, which has no all().
-     */
-    #[DataProvider('queryBuilderOptions')]
-    public function test_get_last_reads_the_last_batch_with_laravels_query_builder(?bool $fixDefaultQueryBuilder): void
-    {
-        $repository = $this->repository(['fix_default_query_builder' => $fixDefaultQueryBuilder], $this->rowsOfTwoBatches());
+        $repository = $this->repository([], $this->rowsOfTwoBatches());
 
         $migrations = $repository->getLast();
 
@@ -102,10 +88,9 @@ class ClickhouseMigrationRepositoryTest extends TestCase
         ], $this->sentSql());
     }
 
-    #[DataProvider('queryBuilderOptions')]
-    public function test_get_migrations_reads_the_last_steps(?bool $fixDefaultQueryBuilder): void
+    public function test_get_migrations_reads_the_last_steps(): void
     {
-        $repository = $this->repository(['fix_default_query_builder' => $fixDefaultQueryBuilder], $this->rowsOfTwoBatches());
+        $repository = $this->repository([], $this->rowsOfTwoBatches());
 
         $migrations = $repository->getMigrations(2);
 
@@ -119,10 +104,9 @@ class ClickhouseMigrationRepositoryTest extends TestCase
         );
     }
 
-    #[DataProvider('queryBuilderOptions')]
-    public function test_get_migrations_by_batch_reads_one_batch(?bool $fixDefaultQueryBuilder): void
+    public function test_get_migrations_by_batch_reads_one_batch(): void
     {
-        $repository = $this->repository(['fix_default_query_builder' => $fixDefaultQueryBuilder], $this->rowsOfTwoBatches());
+        $repository = $this->repository([], $this->rowsOfTwoBatches());
 
         $migrations = $repository->getMigrationsByBatch(1);
 
@@ -132,7 +116,7 @@ class ClickhouseMigrationRepositoryTest extends TestCase
 
     public function test_get_ran_get_migration_batches_and_the_next_batch_number(): void
     {
-        $repository = $this->repository(['fix_default_query_builder' => true], $this->rowsOfTwoBatches());
+        $repository = $this->repository([], $this->rowsOfTwoBatches());
 
         $this->assertSame([self::FIRST, self::SECOND], $repository->getRan());
         $this->assertSame([self::FIRST => 1, self::SECOND => 2], $repository->getMigrationBatches());
@@ -273,10 +257,6 @@ class ClickhouseMigrationRepositoryTest extends TestCase
 
         return [
             'no options' => [[], "CREATE TABLE `migrations` {$columns} ENGINE = MergeTree() ORDER BY (`id`)"],
-            'exact_integer_types' => [
-                ['exact_integer_types' => true],
-                "CREATE TABLE `migrations` {$columns} ENGINE = MergeTree() ORDER BY (`id`)",
-            ],
             'an engine that merges rows' => [
                 ['engine' => 'ReplacingMergeTree()'],
                 "CREATE TABLE `migrations` {$columns} ENGINE = MergeTree() ORDER BY (`id`)",
@@ -332,24 +312,6 @@ class ClickhouseMigrationRepositoryTest extends TestCase
         $repository->createRepository();
 
         $this->assertSame([$create], $this->sentSql());
-    }
-
-    /**
-     * Without exact_integer_types, Laravel's own layout of the table compiles to the same statement, so the table
-     * is the one that 3.0.0 and the earlier releases of this version made.
-     */
-    public function test_create_repository_compiles_as_laravels_layout_does_without_exact_integer_types(): void
-    {
-        $repository = $this->repository();
-        $repository->createRepository();
-        $ours = $this->sentSql();
-
-        $laravel = new DatabaseMigrationRepository($repository->getConnectionResolver(), 'migrations');
-        $laravel->setSource('clickhouse');
-        $this->client->requests = [];
-        $laravel->createRepository();
-
-        $this->assertSame($ours, $this->sentSql());
     }
 
     /**

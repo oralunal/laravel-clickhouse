@@ -11,8 +11,8 @@ use Oralunal\LaravelClickHouse\Connection;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 
 /**
- * The ClickHouse clauses of Laravel's query builder (fix_default_query_builder = false) against the server: the SQL
- * that QueryBuilderClickHouseSqlTest checks is accepted, and returns or changes the expected rows.
+ * The ClickHouse clauses of Laravel's query builder against the server: the SQL that QueryBuilderClickHouseSqlTest
+ * checks is accepted, and returns or changes the expected rows.
  */
 class LaravelQueryBuilderClickHouseSqlTest extends TestCase
 {
@@ -228,12 +228,12 @@ class LaravelQueryBuilderClickHouseSqlTest extends TestCase
     }
 
     /**
-     * A copy of the default connection with Laravel's query builder and mutations_sync = 2, so that a mutation has
-     * changed the rows when it returns.
+     * A copy of the default connection with mutations_sync = 2, so that a mutation has changed the rows when it
+     * returns.
      */
     private function connection(): Connection
     {
-        $wanted = array_merge(config('database.connections.clickhouse'), ['fix_default_query_builder' => false]);
+        $wanted = config('database.connections.clickhouse');
         $wanted['settings'] = array_merge($wanted['settings'] ?? [], ['mutations_sync' => 2]);
 
         if (config('database.connections.' . self::CONNECTION) !== $wanted) {

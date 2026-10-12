@@ -82,8 +82,7 @@ class EloquentModelTestSqliteModel extends Model
  * and eager loads, the ClickHouse clauses of QueryBuilder on its queries, the options of its delete() and update(),
  * and Parallel::get() with Eloquent builders.
  *
- * The connection is a copy of the default connection with fix_default_query_builder on, as packaged, so that the
- * tests show that the model uses Laravel's query builder anyway, and mutations_sync = 2.
+ * The connection is a copy of the default connection with mutations_sync = 2.
  */
 class EloquentModelTest extends TestCase
 {
@@ -93,7 +92,7 @@ class EloquentModelTest extends TestCase
     {
         parent::setUp();
 
-        $config = array_merge(config('database.connections.clickhouse'), ['fix_default_query_builder' => true]);
+        $config = config('database.connections.clickhouse');
         $config['settings'] = array_merge($config['settings'] ?? [], ['mutations_sync' => 2]);
         config(['database.connections.' . self::CONNECTION => $config]);
         DB::purge(self::CONNECTION);
@@ -176,6 +175,22 @@ class EloquentModelTest extends TestCase
 
         EloquentModelTestEvent::query()->where('id', 'e3')->forceDelete(false, 202401);
         $this->assertSame(0, EloquentModelTestEvent::query()->count());
+    }
+
+    /**
+     * getStatement() reads the rows of the model's query, with its global scopes, in another format, and optimize()
+     * merges the parts of the model's table.
+     */
+    public function test_get_statement_and_optimize(): void
+    {
+        $this->insertEvents();
+
+        $this->assertSame(
+            "e1\ne2\n",
+            EloquentModelTestEvent::query()->select('id')->where('user_id', 1)->orderBy('id')->getStatement('TSV')->rawData()
+        );
+        $this->assertTrue(EloquentModelTestEvent::optimize(true));
+        $this->assertTrue(EloquentModelTestEvent::query()->optimize(false, 202401));
     }
 
     public function test_relations_and_eager_loads(): void

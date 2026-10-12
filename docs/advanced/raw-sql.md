@@ -39,19 +39,43 @@ Use `?` when you can. A query that has `?` and a `:0`, `{0}` or `{name:Type}` th
 
 ## FORMAT clauses
 
-`select()`, `scalar()`, `selectOne()`, `selectParallelly()` and Laravel's query builder read the rows of a JSON result.
+`select()`, `scalar()`, `selectOne()`, `selectParallelly()` and the query builder read the rows of a JSON result.
 A `FORMAT` clause with `JSON`, `JSONStrings`, `JSONCompact` or `JSONCompactStrings` returns rows.
 Another format throws an `Oralunal\LaravelClickHouse\Exceptions\QueryException` before the request:
 
 ```text
 Cannot read rows from a query whose FORMAT clause names CSV: select() and parallel queries read the rows
 of a JSON result (JSON, JSONStrings, JSONCompact, JSONCompactStrings). Leave the FORMAT clause out, or
-read the result in CSV with the package query builder, format('CSV')->get()->rawData(), or with the
-smi2 client, getClient()->select($sql)->rawData().
+read the result with selectStatement($sql)->rawData().
 ```
 
 The `FORMAT` clause is the word `FORMAT` and a name at the end of the query, before `SETTINGS` and `;`.
 A column, alias or table with the name `format`, as in `ORDER BY format DESC` or `SELECT * FROM format(CSV, '1')`, is not a `FORMAT` clause.
+
+`selectStatement($query, $bindings = [])` sends a query with any `FORMAT` clause as it is, and returns the smi2 `Statement`. Its `rawData()` is the output:
+
+```php
+$clickhouse->selectStatement('SELECT id FROM my_table WHERE id < ? ORDER BY id FORMAT TSV', [3])->rawData();
+// "1\n2\n"
+
+$clickhouse->selectStatement('SELECT number FROM numbers(2)')->rows();
+// [['number' => '0'], ['number' => '1']]
+```
+
+- The bindings are written as in `select()`. The query is logged one time.
+- Without a `FORMAT` clause, the result is JSON. `rows()`, `totals()`, `extremes()` and `statistics()` read it.
+- A ClickHouse error throws a `ClickHouseDB\Exception\DatabaseException` when the query runs.
+- While the connection pretends, it sends nothing and returns an empty statement.
+- The query builder has `getStatement($format)`. See [Other formats](/query-builder/reading-results#other-formats).
+
+## Table functions
+
+Read a table function, such as `remote()`, `s3()` or `merge()`, with `fromRaw()` of the query builder. Give its values as `?` bindings, which become string literals:
+
+```php
+$clickhouse->query()->fromRaw('remote(?, ?, ?, ?, ?)', ['ch-2:9000', 'analytics', 'events', 'reader', 'secret'])->get();
+// select * from remote('ch-2:9000', 'analytics', 'events', 'reader', 'secret')
+```
 
 ## Read rows one by one
 
@@ -81,8 +105,10 @@ foreach ($clickhouse->cursor('SELECT id, field_one FROM my_table WHERE field_two
 | Method | Returns |
 | --- | --- |
 | `statement()`, `insert()` | `true` |
-| `affectingStatement()` | For an `INSERT`, the `written_rows` that ClickHouse reports. For other statements, `1`. |
+| `affectingStatement()`, `update()`, `delete()` | For an `INSERT`, the `written_rows` that ClickHouse reports. For other statements, `1`. |
 | `unprepared()` | `true`. It sends the SQL as written, `?` and `??` included. |
+| `statementOnEveryNode()` | `true`. It sends a statement without bindings to all nodes of the connection, one after the other, and logs it one time. See [Clusters](/advanced/clusters#statements-on-all-nodes). |
+| `selectStatement()` | The smi2 `Statement`. See [FORMAT clauses](#format-clauses). |
 | `selectResultSets()` | Throws a `LogicException`. ClickHouse returns one result set for each query. |
 
 `written_rows` is not always the number of inserted rows:
@@ -131,29 +157,29 @@ $log = DB::connection('clickhouse')->pretend(function ($connection) {
 });
 // array_column($log, 'query'):
 // ["ALTER TABLE my_table DELETE WHERE field_one = 'it\'s'",
-//  'CREATE TABLE `events` (`id` Int64) ENGINE = MergeTree() ORDER BY (`id`)']
+//  'CREATE TABLE `events` (`id` UInt64) ENGINE = MergeTree() ORDER BY (`id`)']
 ```
 
 | Call | While the connection pretends |
 | --- | --- |
-| `select()`, `cursor()` | No rows. `Schema::hasTable()` is `false`. |
-| `statement()`, `insert()`, `unprepared()` | `true` |
+| `select()`, `cursor()`, and the reads of the query builder, such as `get()` and `count()` | No rows. `Schema::hasTable()` is `false`. |
+| `selectStatement()`, `getStatement()` | An empty statement whose `isError()` is `false` |
+| `statement()`, `insert()`, `unprepared()`, `statementOnEveryNode()` | `true` |
 | `affectingStatement()`, `update()`, `delete()` | `0` |
-| `Schema::create()`, `Schema::table()`, `Migration::write()`, `Migration::createMergeTree()` | Logged, not sent |
-| Inserts, `truncate()`, `optimize()` of models; `insert()`, `delete()`, `update()`, `truncate()`, `insertFiles()` of the package's query builder | Logged, not sent. They return a statement whose `isError()` is `false`. |
-| `buffer()` | Logs the insert at once and does not buffer the rows |
+| `Schema::create()`, `Schema::table()` | Logged, not sent |
+| `insert()`, `truncate()`, `optimize()` and `insertFiles()` of the query builder and of models | Logged, not sent |
+| `buffer()` of a model | Logs the insert at once and does not buffer the rows |
 | `flushBuffer()`, `flushAllBuffers()` | Log the insert, send nothing and keep the buffered rows |
-| Reads of the package's query builder, such as `get()` and `count()` | Sent, as in 3.x |
 | `session()` | Sends the `SELECT 1` that opens the session |
 
 ```php
 $log = DB::connection('clickhouse')->pretend(function ($connection) {
     $connection->table('my_table')->insert([['id' => 20, 'field_one' => 'p']]);
-    $connection->table('my_table')->where('id', 1)->delete(false);
+    $connection->table('my_table')->where('id', 1)->delete(lightweight: false);
 });
 // array_column($log, 'query'):
-// ["INSERT INTO `my_table` (`id`,`field_one`)  VALUES  (20,'p')",
-//  'ALTER TABLE `my_table` DELETE WHERE `id` = 1']
+// ["insert into \"my_table\" (\"field_one\", \"id\") values ('p', 20)",
+//  'alter table "my_table" delete where "id" = 1']
 ```
 
 - A JSONEachRow insert is logged without its rows. The package still checks the rows, so an incorrect row throws.

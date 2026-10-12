@@ -11,8 +11,6 @@ use ClickHouseDB\Type\Type;
 use DateTimeInterface;
 use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Identifier;
 use Stringable;
 use UnitEnum;
 
@@ -147,8 +145,8 @@ trait SubstitutesBindings
      * - a bool becomes 1 or 0, and NaN an expression of nan;
      * - a backed enum becomes its value, and a pure enum its name;
      * - raw SQL becomes an expression of the SQL that compileLiteral() writes for it, so that smi2 writes it as the
-     *   "?" placeholders do: an Expression and a Laravel database expression, such as DB::raw(), as their SQL, and an
-     *   Identifier as a quoted name. An expression of the smi2 client, such as its Raw, becomes such an expression
+     *   "?" placeholders do: a Laravel database expression, such as DB::raw(), as its SQL. An expression of the smi2
+     *   client, such as its Raw, becomes such an expression
      *   of its own SQL (see newRawSqlBindingForClient());
      * - any other Stringable object becomes its string, which smi2 then quotes;
      * - an array is made safe element by element, keeping its keys, for smi2's IN (:ids) lists.
@@ -170,9 +168,7 @@ trait SubstitutesBindings
             $value instanceof BackedEnum => $value->value,
             $value instanceof UnitEnum => $value->name,
             $value instanceof DateTimeInterface, $value instanceof Type => $value,
-            $value instanceof Expression,
-            $value instanceof ExpressionContract,
-            $value instanceof Identifier => $this->newRawSqlBindingForClient($this->compileLiteral($value)),
+            $value instanceof ExpressionContract => $this->newRawSqlBindingForClient($this->compileLiteral($value)),
             $value instanceof ClientExpression => $this->newRawSqlBindingForClient($value->getValue()),
             $value instanceof Stringable => (string) $value,
             is_array($value) => array_map($this->prepareBindingForClient(...), $value),

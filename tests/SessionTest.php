@@ -7,16 +7,18 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\LazyCollection;
 use InvalidArgumentException;
 use LogicException;
-use Oralunal\LaravelClickHouse\BaseModel;
 use Oralunal\LaravelClickHouse\Connection;
 use Oralunal\LaravelClickHouse\CurlerRollingInSession;
 use Oralunal\LaravelClickHouse\CurlerRollingWithRetries;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use RuntimeException;
 
-class SessionTemporaryRow extends BaseModel
+class SessionTemporaryRow extends Model
 {
     protected $table = 'session_test_rows';
+
+    public $timestamps = false;
 }
 
 /**
@@ -34,7 +36,7 @@ class SessionTest extends TestCase
         $config = $app['config'];
         $base = $config->get('database.connections.clickhouse');
         $config->set('database.connections.clickhouse-session-retries', ['retries' => 2] + $base);
-        $config->set('database.connections.clickhouse-session-laravel', ['fix_default_query_builder' => false] + $base);
+        $config->set('database.connections.clickhouse-session-other', $base);
     }
 
     /**
@@ -64,12 +66,12 @@ class SessionTest extends TestCase
 
         $rows = $connection->session(function (Connection $connection): array {
             $connection->statement(self::CREATE_ROWS);
-            SessionTemporaryRow::insertAssoc([['id' => 1, 'name' => 'a'], ['id' => 2, 'name' => 'b']]);
+            SessionTemporaryRow::insert([['id' => 1, 'name' => 'a'], ['id' => 2, 'name' => 'b']]);
             $connection->table('session_test_rows')->insert([['id' => 3, 'name' => 'c']]);
 
             return [
-                'model' => SessionTemporaryRow::select(['id', 'name'])->orderBy('id')->getRows(),
-                'builder' => $connection->table('session_test_rows')->where('id', '>', 1)->orderBy('id')->getRows(),
+                'model' => SessionTemporaryRow::select(['id', 'name'])->orderBy('id')->get()->toArray(),
+                'builder' => $connection->table('session_test_rows')->where('id', '>', 1)->orderBy('id')->get()->all(),
                 'select' => $connection->select('SELECT toString(count()) AS rows FROM session_test_rows'),
             ];
         });
@@ -92,14 +94,14 @@ class SessionTest extends TestCase
 
             $this->assertSame(
                 60,
-                $this->codeOf(fn () => DB::connection('clickhouse-session-laravel')->table('session_test_rows')->count())
+                $this->codeOf(fn () => DB::connection('clickhouse-session-other')->table('session_test_rows')->count())
             );
         });
     }
 
     public function test_laravels_query_builder_joins_the_session(): void
     {
-        $connection = DB::connection('clickhouse-session-laravel');
+        $connection = DB::connection('clickhouse-session-other');
 
         $count = $connection->session(function (Connection $connection): int {
             $connection->statement(self::CREATE_ROWS);
@@ -117,7 +119,7 @@ class SessionTest extends TestCase
      */
     public function test_a_lazy_reader_is_read_inside_the_callback(): void
     {
-        $connection = DB::connection('clickhouse-session-laravel');
+        $connection = DB::connection('clickhouse-session-other');
         $create = function (Connection $connection): void {
             $connection->statement(self::CREATE_ROWS);
             $connection->statement("INSERT INTO session_test_rows VALUES (1, 'a'), (2, 'b')");

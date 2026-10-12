@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace Oralunal\LaravelClickHouse\Eloquent;
 
+use ClickHouseDB\Statement;
 use Illuminate\Contracts\Database\Query\Expression as ExpressionContract;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
+use Oralunal\LaravelClickHouse\Enums\Format;
 use Oralunal\LaravelClickHouse\QueryBuilder;
 
 /**
  * The Eloquent query builder of a ClickHouse model (see Model): Eloquent's builder, whose delete(), forceDelete()
- * and update() pass the ClickHouse options to QueryBuilder. The other methods of QueryBuilder, such as final(),
- * preWhere(), settings() and the ClickHouse joins, reach it through Eloquent's forwarding.
+ * and update() pass the ClickHouse options to QueryBuilder, and whose optimize(), getStatement() and insertFiles()
+ * return what QueryBuilder returns. The other methods of QueryBuilder, such as final(), preWhere(), settings() and
+ * the ClickHouse joins, reach it through Eloquent's forwarding.
  *
  * @template TModel of EloquentModel
  *
@@ -53,6 +56,43 @@ class Builder extends EloquentBuilder
     public function forceDelete(?bool $lightweight = null, int|string|ExpressionContract|null $partition = null)
     {
         return $this->query->delete(null, $lightweight, $partition);
+    }
+
+    /**
+     * Start a merge of the parts of the model's table with OPTIMIZE TABLE (see QueryBuilder::optimize()).
+     *
+     * @param bool $final
+     * @param int|string|ExpressionContract|null $partition
+     * @return bool
+     */
+    public function optimize(bool $final = false, int|string|ExpressionContract|null $partition = null): bool
+    {
+        return $this->toBase()->optimize($final, $partition);
+    }
+
+    /**
+     * Run the query, with the global scopes of the model, and return the smi2 statement of its result in the given
+     * format (see QueryBuilder::getStatement()).
+     *
+     * @param Format|string|null $format
+     * @return Statement
+     */
+    public function getStatement(Format|string|null $format = null): Statement
+    {
+        return $this->toBase()->getStatement($format);
+    }
+
+    /**
+     * Insert the rows of files into the model's table (see QueryBuilder::insertFiles()).
+     *
+     * @param string|array<int, string> $paths
+     * @param Format|string $format
+     * @param array<int, string> $columns
+     * @return array<string, Statement>
+     */
+    public function insertFiles(string|array $paths, Format|string $format = Format::Csv, array $columns = []): array
+    {
+        return $this->toBase()->insertFiles($paths, $format, $columns);
     }
 
     /**

@@ -1,90 +1,104 @@
 # Helpers, enums and exceptions
 
-## Functions
-
-The functions are in the `Oralunal\LaravelClickHouse\ClickhouseBuilder` namespace:
-
-| Function | Does |
-| --- | --- |
-| `raw(string $sql)` | Returns an `Expression`. The query builder writes it as SQL. |
-| `tp($value, callable $callback)` | Calls the callback with the value, and returns the value |
-| `array_flatten(array $array, $depth = INF)` | Puts the values of nested arrays into one array |
-
-```php
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\array_flatten;
-use function Oralunal\LaravelClickHouse\ClickhouseBuilder\raw;
-
-MyTable::select(raw('count() AS c'));     // SELECT count() AS c FROM `my_table`
-array_flatten([1, [2, [3, 4]]]);          // [1, 2, 3, 4]
-array_flatten([1, [2, [3, 4]]], 1);       // [1, 2, [3, 4]]
-```
-
-`raw()` gives an `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression`. `getValue()` returns its SQL.
-For a column with an alias, use `new RawColumn('count()', 'total')`. See [Query builder basics](/query-builder/basics#select-columns).
-
 ## Enums
 
-The enums are in the `Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums` namespace:
+The enums are PHP backed enums in the `Oralunal\LaravelClickHouse\Enums` namespace.
 
-| Class | Values |
+### Format
+
+`Format` lists the ClickHouse formats that the package names. The value of each case is the name that ClickHouse uses:
+
+| Cases | Values |
 | --- | --- |
-| `Operator` | The operators and booleans of conditions, such as `Operator::EQUALS` (`=`), `Operator::GLOBAL_IN` (`GLOBAL IN`), `Operator::IS_NULL` and `Operator::OR` |
-| `Format` | The ClickHouse formats, such as `Format::JSON`, `Format::JSON_EACH_ROW` and `Format::CSV` |
-| `JoinType` | `INNER`, `LEFT`, `RIGHT`, `FULL`, `CROSS` and `ASOF` |
-| `JoinStrict` | `ALL`, `ANY`, `SEMI`, `ANTI` and `ASOF` |
-| `OrderDirection` | `ASC` and `DESC` |
-| `UnionType` | The keywords of the set operations, which `getUnionTypes()` returns, such as `UnionType::UNION_ALL` |
-| `DateTimePrecision` | `second` and `microsecond`, the values of the `datetime_precision` option |
-
-`Format::named('jsoneachrow')` returns the format of a name in any letter case. An unknown name throws an `UnexpectedValueException`.
-
-The enums are classes with constants, not PHP enums. They extend `Oralunal\LaravelClickHouse\Enum\Enum`, a copy of the `myclabs/php-enum` class:
+| `Format::Json`, `Format::JsonCompact`, `Format::JsonEachRow`, `Format::JsonCompactEachRow` | `JSON`, `JSONCompact`, `JSONEachRow`, `JSONCompactEachRow` |
+| `Format::Csv`, `Format::CsvWithNames`, `Format::CsvWithNamesAndTypes` | `CSV`, `CSVWithNames`, `CSVWithNamesAndTypes` |
+| `Format::Tsv`, `Format::TsvWithNamesAndTypes`, `Format::TabSeparated`, `Format::TabSeparatedRaw`, `Format::TabSeparatedWithNames`, `Format::TabSeparatedWithNamesAndTypes`, `Format::BlockTabSeparated` | `TSV`, `TSVWithNamesAndTypes`, `TabSeparated`, ... |
+| `Format::Values`, `Format::Native`, `Format::RowBinary`, `Format::Null` | `Values`, `Native`, `RowBinary`, `Null` |
+| `Format::Pretty`, `Format::PrettyCompact`, `Format::PrettyCompactMonoBlock`, `Format::PrettyNoEscapes`, `Format::PrettyCompactNoEscapes`, `Format::PrettySpace`, `Format::PrettySpaceNoEscapes` | `Pretty`, `PrettyCompact`, ... |
+| `Format::Tskv`, `Format::Vertical`, `Format::Xml` | `TSKV`, `Vertical`, `XML` |
 
 ```php
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Enums\Format;
+use Oralunal\LaravelClickHouse\Enums\Format;
 
-$format = Format::JSON_EACH_ROW();   // Or new Format('JSONEachRow'), or Format::from('JSONEachRow')
-$format->getValue();                 // 'JSONEachRow'
-$format->getKey();                   // 'JSON_EACH_ROW'
-$format->equals(Format::JSON_EACH_ROW()); // true
-json_encode($format);                // '"JSONEachRow"'
-
-Format::isValid('CSV');              // true: a value
-Format::isValidKey('JSON_EACH_ROW'); // true: a key
-Format::search('JSONEachRow');       // 'JSON_EACH_ROW', or false
-Format::keys();                      // ['BLOCK_TAB_SEPARATED', 'CSV', ...]
-Format::values();                    // ['CSV' => Format, ...]
-Format::toArray();                   // ['CSV' => 'CSV', ...]
-Format::assertValidValue('jsonl');   // Throws an UnexpectedValueException
+Format::Csv->value;              // 'CSV'
+Format::from('JSONEachRow');     // Format::JsonEachRow: the exact name
+Format::named(' jsoneachrow ');  // Format::JsonEachRow: any letter case, surrounding spaces
+Format::tryNamed('csv');         // Format::Csv
+Format::tryNamed('Parquet');     // null
+Format::named('Parquet');        // Throws a ValueError
 ```
 
-A value that is not in the enum throws an `UnexpectedValueException`.
+- `named()` and `tryNamed()` find a case by its name in any letter case. For a name of no case, `named()` throws a `ValueError` and `tryNamed()` returns `null`.
+- The methods that take a format, such as `insert()`, `insertFiles()` and `getStatement()`, take a case or a name in any letter case.
+- `Connection::getInsertFormat()` returns `Format::Values` or `Format::JsonEachRow`, from the `insert_format` option.
+
+### DateTimePrecision
+
+`DateTimePrecision` has the values of the `datetime_precision` option: `DateTimePrecision::Second` (`'second'`) and `DateTimePrecision::Microsecond` (`'microsecond'`).
+`Connection::getDateTimePrecision()` returns the case of the option. The option also takes a case: `'datetime_precision' => DateTimePrecision::Microsecond`.
+
+See [Dates and times](/query-builder/dates).
+
+## Literals
+
+`Connection::newLiteralGrammar()` returns an `Oralunal\LaravelClickHouse\LiteralGrammar`: the class that writes PHP values as ClickHouse literals, as the connection writes them.
+The query builder, the bindings of raw SQL, `escape()`, the inserts and `settings()` use it. To write one value into SQL yourself, `DB::connection('clickhouse')->escape($value)` is usually enough.
+
+```php
+use Illuminate\Support\Facades\DB;
+
+$grammar = DB::connection('clickhouse')->newLiteralGrammar();
+
+$grammar->compileLiteral("it's");                  // 'it\'s'
+$grammar->compileLiteral([1, 'a', null, true]);    // [1, 'a', null, 1]
+$grammar->compileLiteral(1 / 3);                   // 0.3333333333333333
+$grammar->compileLiteral(NAN);                     // nan
+$grammar->compileLiteral(DB::raw('now()'));        // now()
+$grammar->compileLiteral(new DateTimeImmutable('2024-01-02 03:04:05.5')); // '2024-01-02 03:04:05'
+$grammar->compileSettings(['max_threads' => 2, 'log_comment' => "it's", 'use_uncompressed_cache' => false]);
+// max_threads=2, log_comment='it\'s', use_uncompressed_cache=0
+```
+
+| Method | Returns |
+| --- | --- |
+| `compileLiteral($value)` | The literal of a value: `null`, `1` or `0` for a bool, all digits of a float, `nan`, `inf` and `-inf`, an escaped string, an array literal, a date at the precision of the grammar, the value of a backed enum, the name of a pure enum, the SQL of `DB::raw()` |
+| `compileStringLiteral($string)` | A string literal. A backslash goes before each single quote, double quote, backslash and NUL byte. |
+| `quoteString($string)` | A string literal. A backslash goes before each single quote and backslash only. |
+| `quoteIdentifier($name)` | One name in backticks, with each backtick and backslash doubled: ``` `we``ird` ```. The name is not split on dots. |
+| `escapeInsertColumns($columns)` | The column names with backticks and backslashes doubled, for a client that puts each name in backticks |
+| `compileSettings($settings)` | `name=value, ...`, without `SETTINGS`. A `null` value is left out. A name that is not a plain identifier throws an `InvalidArgumentException`. |
+| `formatDateTime($date)` | The date without quotes, in its own time zone: `Y-m-d H:i:s`, or `Y-m-d H:i:s.u` at the microsecond precision for a date with a sub-second part |
+| `hasSubSecondPart($date)` | `true` when `formatDateTime()` writes the sub-second part of the date |
+| `setDateTimePrecision($precision)`, `getDateTimePrecision()` | Set or get the `DateTimePrecision` of the dates |
+| `setLaravelGrammarResolver($resolver)` | Set the closure that returns the query grammar, which a Laravel expression such as `DB::raw()` needs |
+| `getLaravelExpressionValue($expression)` | The SQL of a Laravel expression |
+
+- `compileLiteral()` throws an `InvalidArgumentException` for a value that it cannot write, such as a collection, an Eloquent model, a closure or a resource. Give a PHP array, or `$model->getKey()`.
+- A `LiteralGrammar` that you make with `new LiteralGrammar()` writes dates with seconds and has no resolver: it throws for `DB::raw()`. Use `newLiteralGrammar()`.
 
 ## Exceptions
 
 | Exception | Cause |
 | --- | --- |
 | `Oralunal\LaravelClickHouse\Exceptions\QueryException` | The package refuses a query or a write, or a session fails. It extends the smi2 `ClickHouseDB\Exception\QueryException`. |
-| `Oralunal\LaravelClickHouse\Exceptions\ParallelQueryException` | A query of `Parallel::getRows()` fails. See [Parallel queries](/advanced/parallel-queries#errors). |
-| `Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\GrammarException` | The query builder cannot write the SQL of a query |
-| `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Exceptions\IncompleteClickHouseDDLException` | `createMergeTree()` has no column, no `ORDER BY` or no engine |
-| `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Exceptions\InvalidClickHouseDDLException` | `enum()` of `createMergeTree()` has no value, or a number that is not an integer |
-| `Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Exceptions\ClickHouseDDLException` | The parent class of the two exceptions above |
-| `Oralunal\LaravelClickHouse\ClickhouseBuilder\Exceptions\BuilderException`, `NotSupportedException` | The package does not throw them. They stay for code that catches them. |
+| `Oralunal\LaravelClickHouse\Exceptions\ParallelQueryException` | A query of `Parallel::getRows()` or `selectParallelly()` fails. It extends `QueryException`. See [Parallel queries](/advanced/parallel-queries#errors). |
 
-The static methods of the exceptions make the exceptions that the package throws:
+`ParallelQueryException::getResults()` returns the rows of the queries that succeeded, `getErrors()` the error of each query that failed, and `getStatements()` the statement of each query.
+
+The static methods of `QueryException` make the exceptions that the package throws:
 
 | Method | Cause |
 | --- | --- |
 | `QueryException::cannotDeleteWithoutWhere()`, `cannotUpdateWithoutWhere()` | `delete()` or `update()` without a condition |
-| `QueryException::cannotUpdateEmptyValues()` | `update([])` |
 | `QueryException::cannotMutateWithClauses()` | A mutation with a clause that ClickHouse ignores. See [Refused clauses](/query-builder/writing-data#refused-clauses). |
 | `QueryException::insertKeysDiffer()` | A row of a `JSONEachRow` insert has other keys than the first row |
 | `QueryException::cannotCreateTemporaryTableOutsideSession()`, `cannotReachTemporaryTable()` | A temporary table outside a session, or a statement that ClickHouse runs on a database table of the same name. See [Sessions](/advanced/sessions#temporary-tables). |
 | `QueryException::cannotRunAsynchronouslyInSession()` | An asynchronous request or `insertFiles()` in a session |
 | `QueryException::sessionNotFound()`, `sessionIsLocked()` | The ClickHouse errors `SESSION_NOT_FOUND` and `SESSION_IS_LOCKED`. See [Sessions](/advanced/sessions#errors-in-a-session). |
-| `GrammarException::ambiguousJoinKeys()` | A join with `USING` and `ON` |
-| `GrammarException::wrongJoin()`, `wrongCrossJoin()` | A join without a table, or without `USING` and `ON`. A cross join with keys or a strictness. |
-| `GrammarException::wrongFrom()` | A query without a table |
-| `GrammarException::missedTableForInsert()`, `missedWhereForDelete()` | An insert without a table, or a deletion without a condition |
-| `BuilderException::cannotDetermineAliasForColumn()`, `noTableStructureProvided()`, `NotSupportedException::transactions()` | Not used by the package |
+| `QueryException::cannotUpdateEmptyValues()` | `update([])`, before anything is sent |
+
+The package throws other errors as the smi2 client and PHP do:
+
+- a ClickHouse error is a `ClickHouseDB\Exception\DatabaseException`, with the ClickHouse code and name (`getClickHouseExceptionName()`);
+- an insert of a row without keys throws the smi2 `ClickHouseDB\Exception\QueryException` `Inserting empty values array is not supported in ClickHouse`;
+- an incorrect argument throws an `InvalidArgumentException`, and a call that a ClickHouse connection cannot do, such as `beginTransaction()`, a `LogicException`.

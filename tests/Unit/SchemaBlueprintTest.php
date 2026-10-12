@@ -39,7 +39,7 @@ class SchemaBlueprintTest extends TestCase
         });
 
         $this->assertInstanceOf(SchemaBlueprint::class, $passed);
-        $this->assertSame(['CREATE TABLE `events` (`id` Int64) ENGINE = MergeTree() ORDER BY (`id`)'], $this->statements);
+        $this->assertSame(['CREATE TABLE `events` (`id` UInt64) ENGINE = MergeTree() ORDER BY (`id`)'], $this->statements);
     }
 
     public function test_a_callback_that_type_hints_laravels_blueprint_still_works(): void
@@ -55,7 +55,7 @@ class SchemaBlueprintTest extends TestCase
         $builder->drop('events');
 
         $this->assertSame([
-            'CREATE TABLE `events` (`id` Int64) ENGINE = MergeTree() ORDER BY (`id`)',
+            'CREATE TABLE `events` (`id` UInt64) ENGINE = MergeTree() ORDER BY (`id`)',
             'ALTER TABLE `events` RENAME COLUMN `id` TO `event_id`',
             'DROP TABLE `events`',
         ], $this->statements);
@@ -73,7 +73,7 @@ class SchemaBlueprintTest extends TestCase
         });
 
         $this->assertSame(Blueprint::class, get_class($passed));
-        $this->assertSame(['CREATE TABLE `events` (`id` Int64) ENGINE = MergeTree() ORDER BY (`id`)'], $this->statements);
+        $this->assertSame(['CREATE TABLE `events` (`id` UInt64) ENGINE = MergeTree() ORDER BY (`id`)'], $this->statements);
     }
 
     public function test_order_by_adds_a_command_with_the_columns(): void

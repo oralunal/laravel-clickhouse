@@ -21,17 +21,17 @@ $names = DB::connection('clickhouse')->session(function (Connection $connection)
     $connection->table('tmp_ids')->insert([['id' => 1], ['id' => 2]]);
     $connection->statement('SET max_threads = 4');
 
-    return MyTable::query()
+    return $connection->table('my_table')
         ->whereIn('id', fn ($query) => $query->select('id')->from('tmp_ids'))
         ->orderBy('id')
         ->pluck('field_one')
         ->all();
-    // SELECT `field_one` FROM `my_table` WHERE `id` IN (SELECT `id` FROM `tmp_ids`) ORDER BY `id` ASC
+    // select "field_one" from "my_table" where "id" in (select "id" from "tmp_ids") order by "id" asc
 }, timeout: 120);
 // ['a', 'b']
 ```
 
-- All queries that the connection sends while the callback runs join the session: models, the two query builders, `Schema`, `statement()` and `select()`.
+- All queries that the connection sends while the callback runs join the session: models, the query builder, `Schema`, `statement()` and `select()`.
 - Other connections, queued jobs and other processes do not join it. A statement that goes to all nodes of a cluster joins it on the active node only.
 - After the callback, a query of the temporary table fails with `UNKNOWN_TABLE`, and the `SET` values are gone.
 - A session is not a transaction. Each statement takes effect when it runs. An exception in the callback does not undo statements.
@@ -62,7 +62,7 @@ ClickHouse runs one query of a session at a time.
 - A session id that `useSession()` of the smi2 client set comes back after the callback. `inSession()` tells if the queries carry a session id.
 - Read the rows in the callback. A lazy reader, such as the generator of `cursor()` or a `LazyCollection`, runs after the session.
   A callback that returns one throws a `LogicException`. Return `iterator_to_array($connection->cursor(...))` or `->all()`.
-- `buffer()` sends its rows at `flushBuffer()` or at the end of the request. Flush the buffer of a model of a temporary table in the callback.
+- The `buffer()` of a model sends its rows at `flushBuffer()` or at the end of the request. Flush the buffer of a model of a temporary table in the callback.
 - A load balancer must send all requests of a session to the same server.
 
 ## Temporary tables
@@ -90,14 +90,15 @@ But it runs a lightweight `DELETE FROM`, `RENAME TABLE`, `CREATE TABLE` and each
 
 In a session, the package refuses these statements when a temporary table has the name of the table:
 
-- `delete(true)`, and `delete()` with `use_lightweight_delete`;
-- `delete()`, `update()`, `truncate()` and `MyTable::optimize()` with `onCluster()` or `use_on_cluster`;
+- `delete(lightweight: true)`, and `delete()` with `use_lightweight_delete`;
+- `delete()`, `update()`, `truncate()` and `optimize()` with `onCluster()` or `use_on_cluster`;
 - on a connection with a `cluster_name`, `Schema::table()`, `drop()`, `dropIfExists()`, `dropSync()`, `dropIfExistsSync()` and `rename()`.
 
 ```text
 Cannot send DELETE FROM for my_table: the session has a temporary table named my_table, and ClickHouse
-(24.8 checked) runs a lightweight DELETE on the table my_table of the database instead. Call
-delete(false), which sends ALTER TABLE ... DELETE to the temporary table.
+(24.8 checked) runs a lightweight DELETE on the table my_table of the database instead. Send ALTER TABLE
+... DELETE, which reaches the temporary table, with the connection's statement(), such as
+statement('ALTER TABLE ... DELETE WHERE ...').
 ```
 
 - Each of these statements sends `EXISTS TEMPORARY TABLE` first.
@@ -118,8 +119,8 @@ outside the session with UNKNOWN_TABLE. ...
 Select the keys first:
 
 ```php
-MyTable::query()->whereIn('id', $connection->table('tmp_ids')->pluck('id'))->delete(false);
-// ALTER TABLE my_table DELETE WHERE `id` IN (1, 2)
+$connection->table('my_table')->whereIn('id', $connection->table('tmp_ids')->pluck('id'))->delete(lightweight: false);
+// alter table "my_table" delete where "id" in (1, 2)
 ```
 
 A mutation of a `Memory` temporary table runs in the session, so its condition can read other temporary tables.

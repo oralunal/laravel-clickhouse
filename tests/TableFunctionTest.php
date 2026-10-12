@@ -3,11 +3,10 @@
 namespace Tests;
 
 use Illuminate\Support\Facades\DB;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\From;
 
 /**
- * The table functions of From against the server: remote() with a user and a password, and merge() with a regular
- * expression that has a backslash.
+ * Table functions in fromRaw(), whose "?" bindings are written as string literals: remote() with a user and a
+ * password, and merge() with a regular expression that has a backslash.
  */
 class TableFunctionTest extends TestCase
 {
@@ -42,13 +41,13 @@ class TableFunctionTest extends TestCase
     {
         $connection = DB::connection('clickhouse');
 
-        $rows = $connection->table(fn (From $from) => $from->remote(
+        $rows = $connection->query()->fromRaw('remote(?, ?, ?, ?, ?)', [
             '127.0.0.1:9000',
             $connection->getDatabaseName(),
             'table_fn_1',
             (string) $connection->getConfig('username'),
-            (string) $connection->getConfig('password')
-        ))->orderBy('id')->getRows();
+            (string) $connection->getConfig('password'),
+        ])->orderBy('id')->get()->all();
 
         $this->assertSame([['id' => 1], ['id' => 2]], $rows);
     }
@@ -60,7 +59,7 @@ class TableFunctionTest extends TestCase
     {
         $connection = DB::connection('clickhouse');
 
-        $ids = $connection->table(fn (From $from) => $from->merge($connection->getDatabaseName(), '^table_fn_\d+$'))
+        $ids = $connection->query()->fromRaw('merge(?, ?)', [$connection->getDatabaseName(), '^table_fn_\d+$'])
             ->orderBy('id')
             ->pluck('id')
             ->all();

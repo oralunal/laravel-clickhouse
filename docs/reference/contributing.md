@@ -84,5 +84,5 @@ The root of `docs/` has the documentation of the latest version. `docs/3.x`, `do
 
 `tests/Unit/Documentation/DocumentationTest.php` makes sure that the documentation covers the public API:
 
-- [API reference](/reference/api) agrees with the code. After you add, remove or change a public class, constant, method or function, run `composer docs:api` and commit `docs/reference/api.md`.
-- A guide page names each public method, for example `` `whereDict()` ``. The internal classes, the methods with an `@internal` tag, and the methods that implement a Laravel or PHP contract are exceptions.
+- [API reference](/reference/api) agrees with the code. After you add, remove or change a public class, constant or method, run `composer docs:api` and commit `docs/reference/api.md`.
+- A guide page names each public method, for example `` `preWhere()` ``. The internal classes, the methods with an `@internal` tag, and the methods that override or implement a method of Laravel or PHP are exceptions.

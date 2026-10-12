@@ -5,8 +5,8 @@ namespace Tests;
 use Carbon\Carbon;
 use DateTime;
 use Illuminate\Support\Facades\DB;
-use Oralunal\LaravelClickHouse\Builder;
 use Oralunal\LaravelClickHouse\Connection;
+use Oralunal\LaravelClickHouse\QueryBuilder;
 use Tests\Models\Example;
 
 class BindingsTest extends TestCase
@@ -34,28 +34,29 @@ class BindingsTest extends TestCase
         parent::tearDown();
     }
 
-    public function testBindingsByModel()
+    public function testBindingsByModel(): void
     {
-        $query = Example::select()
-            ->where(function (Builder $q) {
-                $q->where('f_int', 1)
-                    ->orWhere('f_int', 2)
-                    ->orWhere('f_int', 3);
-            })
-            ->whereIn('f_int2', [10, 11]);
-        $this->assertEquals("SELECT * FROM `examples` WHERE (`f_int` = 1 OR `f_int` = 2 OR `f_int` = 3) AND `f_int2` IN (10, 11)", $query->toSql());
-    }
-
-    public function testBindingsByTableMethod()
-    {
-        $query = DB::table('examples')
+        $query = Example::query()
             ->where(function ($q) {
                 $q->where('f_int', 1)
                     ->orWhere('f_int', 2)
                     ->orWhere('f_int', 3);
             })
             ->whereIn('f_int2', [10, 11]);
-        $this->assertEquals("SELECT * FROM `examples` WHERE (`f_int` = 1 OR `f_int` = 2 OR `f_int` = 3) AND `f_int2` IN (10, 11)", $query->toSql());
+        $this->assertSame('select * from "examples" where ("f_int" = ? or "f_int" = ? or "f_int" = ?) and "f_int2" in (?, ?)', $query->toSql());
+        $this->assertSame('select * from "examples" where ("f_int" = 1 or "f_int" = 2 or "f_int" = 3) and "f_int2" in (10, 11)', $query->toRawSql());
+    }
+
+    public function testBindingsByTableMethod(): void
+    {
+        $query = DB::table('examples')
+            ->where(function (QueryBuilder $q) {
+                $q->where('f_int', 1)
+                    ->orWhere('f_int', 2)
+                    ->orWhere('f_int', 3);
+            })
+            ->whereIn('f_int2', [10, 11]);
+        $this->assertSame('select * from "examples" where ("f_int" = 1 or "f_int" = 2 or "f_int" = 3) and "f_int2" in (10, 11)', $query->toRawSql());
     }
 
     /**
@@ -201,7 +202,6 @@ class BindingsTest extends TestCase
     {
         config(['database.connections.' . self::LARAVEL_CONNECTION => array_merge(
             config('database.connections.clickhouse'),
-            ['fix_default_query_builder' => false],
             $config
         )]);
         DB::purge(self::LARAVEL_CONNECTION);

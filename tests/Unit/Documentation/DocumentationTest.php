@@ -41,16 +41,16 @@ class DocumentationTest extends TestCase
     {
         $missing = ApiReference::methodsWithoutGuide('');
 
-        $this->assertContains('ClickhouseBuilder\\Query\\BaseBuilder::where', $missing);
-        $this->assertContains('Builder::followConnectionOptions', $missing);
-        $this->assertContains('Concerns\\HasAttributes::fillJsonAttribute', $missing);
+        $this->assertContains('QueryBuilder::preWhere', $missing);
+        $this->assertContains('Eloquent\\Model::buffer', $missing);
+        $this->assertContains('Enums\\Format::named', $missing);
         $this->assertNotContains('Connection::prepareBindings', $missing);
-        $this->assertNotContains('Enum\\Enum::jsonSerialize', $missing);
+        $this->assertNotContains('QueryBuilder::where', $missing);
         $this->assertNotContains('QueryGrammar::compileSelect', $missing);
 
         $this->assertNotContains(
-            'ClickhouseBuilder\\Query\\BaseBuilder::where',
-            ApiReference::methodsWithoutGuide('Use `where()` for a condition.')
+            'QueryBuilder::preWhere',
+            ApiReference::methodsWithoutGuide('Use `preWhere()` for a condition.')
         );
     }
 }

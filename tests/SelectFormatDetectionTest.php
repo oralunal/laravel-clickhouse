@@ -7,12 +7,12 @@ namespace Tests;
 use ClickHouseDB\Exception\DatabaseException;
 use ClickHouseDB\Exception\QueryException;
 use Illuminate\Support\Facades\DB;
-use Oralunal\LaravelClickHouse\Builder;
+use Oralunal\LaravelClickHouse\QueryBuilder as Builder;
 
 /**
  * A SELECT whose SQL holds FORMAT and a format name in a value returns its rows. The smi2 client searches the whole
  * SQL for a FORMAT clause, so it read the JSON result of such a query as CSV or TabSeparated, and returned no rows or
- * threw 'Can`t find meta'. A format that the client does not know, such as XML, is read in that format.
+ * threw 'Can`t find meta'. getStatement() reads a format that the client does not know, such as XML, in that format.
  */
 class SelectFormatDetectionTest extends TestCase
 {
@@ -45,7 +45,7 @@ class SelectFormatDetectionTest extends TestCase
     {
         $query = fn (): Builder => $this->notes()->where('note', 'export as format csv please');
 
-        $this->assertSame([['id' => 1, 'note' => 'export as format csv please']], $query()->getRows());
+        $this->assertSame([['id' => 1, 'note' => 'export as format csv please']], $query()->get()->all());
         $this->assertSame(1, $query()->count());
         $this->assertTrue($query()->exists());
         $this->assertSame(1, $query()->paginate(10)->total());
@@ -58,7 +58,7 @@ class SelectFormatDetectionTest extends TestCase
     {
         $query = fn (): Builder => $this->notes()->where('note', '!=', 'format JSON x')->orderBy('id');
 
-        $this->assertSame([1, 3], array_column($query()->getRows(), 'id'));
+        $this->assertSame([1, 3], array_column($query()->get()->all(), 'id'));
         $this->assertSame(2, $query()->count());
         $this->assertSame(2, $query()->paginate(10)->total());
         $this->assertEquals(4, $query()->sum('id'));
@@ -69,11 +69,11 @@ class SelectFormatDetectionTest extends TestCase
         $connection = DB::connection('clickhouse');
         $connection->enableQueryLog();
 
-        $rows = $this->notes()->select('id')->where('note', 'export as format csv please')->settings(['max_threads' => 1])->getRows();
+        $rows = $this->notes()->select('id')->where('note', 'export as format csv please')->settings(['max_threads' => 1])->get()->all();
 
         $this->assertSame([['id' => 1]], $rows);
         $this->assertSame(
-            ["SELECT `id` FROM `sfd_notes` WHERE `note` = 'export as format csv please' FORMAT JSON SETTINGS max_threads=1"],
+            ['select "id" from "sfd_notes" where "note" = ? settings max_threads=1'],
             array_column($connection->getQueryLog(), 'query')
         );
     }
@@ -91,7 +91,7 @@ class SelectFormatDetectionTest extends TestCase
 
     public function test_a_format_that_the_client_does_not_know_is_read_in_that_format(): void
     {
-        $statement = $this->notes()->select('id')->orderBy('id')->format('xml')->get();
+        $statement = $this->notes()->select('id')->orderBy('id')->getStatement('XML');
 
         $this->assertSame('XML', $statement->getFormat());
         $this->assertStringStartsWith('<?xml', $statement->rawData());
@@ -105,7 +105,7 @@ class SelectFormatDetectionTest extends TestCase
      */
     public function test_a_format_with_one_json_value_per_line_is_read_as_text(): void
     {
-        $compact = $this->notes()->select('id')->orderBy('id')->format('JSONCompactEachRow')->get();
+        $compact = $this->notes()->select('id')->orderBy('id')->getStatement('JSONCompactEachRow');
 
         $this->assertSame('JSONCompactEachRow', $compact->getFormat());
         $this->assertSame("[1]\n[2]\n[3]\n", $compact->rawData());
@@ -116,22 +116,19 @@ class SelectFormatDetectionTest extends TestCase
             $this->assertSame('Can`t find meta', $exception->getMessage());
         }
 
-        $failed = $this->notes()->select('missing')->format('JSONCompactEachRow')->get();
         try {
-            $failed->rawData();
-            $this->fail('rawData() did not throw.');
+            $this->notes()->select('missing')->getStatement('JSONCompactEachRow');
+            $this->fail('getStatement() did not throw.');
         } catch (DatabaseException $exception) {
             $this->assertSame('UNKNOWN_IDENTIFIER', $exception->getClickHouseExceptionName());
         }
     }
 
-    public function test_an_error_of_such_a_query_is_thrown_when_its_rows_are_read(): void
+    public function test_an_error_of_such_a_query_is_thrown(): void
     {
-        $statement = $this->notes()->where('note', 'format csv')->where('missing', 1)->get();
-
         try {
-            $statement->rows();
-            $this->fail('rows() did not throw.');
+            $this->notes()->where('note', 'format csv')->where('missing', 1)->get();
+            $this->fail('get() did not throw.');
         } catch (DatabaseException $exception) {
             $this->assertSame('UNKNOWN_IDENTIFIER', $exception->getClickHouseExceptionName());
         }

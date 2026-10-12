@@ -7,10 +7,7 @@ namespace Tests;
 use ClickHouseDB\Client;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Oralunal\LaravelClickHouse\BaseModel;
-use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Column;
-use Oralunal\LaravelClickHouse\ClickhouseSchemaBuilder\Tables\MergeTree;
-use Oralunal\LaravelClickHouse\Migration;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
 use Oralunal\LaravelClickHouse\SchemaBlueprint;
 
 /**
@@ -41,21 +38,11 @@ class SchemaBlueprintTest extends TestCase
 
     private const QUOTED = "schema_blueprint it's `quoted`";
 
-    private const MERGE_TREE = "schema_blueprint_merge_tree it's";
-
     private const DECIMALS = 'schema_blueprint_decimals';
 
     private const KEY_VALUE = 'schema_blueprint_key_value';
 
-    private const MERGE_TREE_VALUES = 'schema_blueprint_merge_tree_values';
-
-    private const QUALIFIED = 'schema_blueprint_qualified';
-
-    private const HAND_QUOTED = 'schema_blueprint hand quoted';
-
     private const ENUMS = 'schema_blueprint_enums';
-
-    private const MERGE_TREE_ENUMS = 'schema_blueprint_merge_tree_enums';
 
     private const ALTERED = 'schema_blueprint_altered';
 
@@ -69,9 +56,6 @@ class SchemaBlueprintTest extends TestCase
 
     private const REPLICATED = 'schema_blueprint_replicated';
 
-    /** A copy of the clickhouse connection that maps integers to their exact types. */
-    private const EXACT = 'clickhouse-exact-integers';
-
     /** A copy of the clickhouse connection whose tables default to ReplacingMergeTree. */
     private const REPLACING = 'clickhouse-replacing-engine';
 
@@ -84,7 +68,6 @@ class SchemaBlueprintTest extends TestCase
 
         $config = $this->app['config'];
         $clickhouse = $config->get('database.connections.clickhouse');
-        $config->set('database.connections.' . self::EXACT, ['exact_integer_types' => true] + $clickhouse);
         $config->set('database.connections.' . self::REPLACING, ['engine' => 'ReplacingMergeTree'] + $clickhouse);
         $config->set('database.connections.' . self::DEFAULT_INDEX_TYPE, ['default_index_type' => 'minmax'] + $clickhouse);
 
@@ -137,8 +120,8 @@ class SchemaBlueprintTest extends TestCase
             $this->table(self::VISITS, ['engine_full'])['engine_full']
         );
         $this->assertSame([
-            ['id', 'Int64', '', '', '', ''],
-            ['version', 'Int64', '', '', '', ''],
+            ['id', 'UInt64', '', '', '', ''],
+            ['version', 'UInt64', '', '', '', ''],
             ['visited_at', "DateTime64(3, 'UTC')", 'DEFAULT', 'now64(3)', '', ''],
             ['country', 'LowCardinality(Nullable(String))', '', '', "it's the ISO code", ''],
             ['url', 'String', '', '', '', 'CODEC(ZSTD(3))'],
@@ -166,7 +149,7 @@ class SchemaBlueprintTest extends TestCase
         });
 
         $this->assertSame([
-            ['id', 'Int64', '', '', ''],
+            ['id', 'UInt64', '', '', ''],
             ['name', 'Nullable(String)', 'DEFAULT', "'it\\'s'", 'Event name'],
             ['created_at', 'Nullable(DateTime)', '', '', ''],
             ['updated_at', 'Nullable(DateTime)', '', '', ''],
@@ -174,7 +157,7 @@ class SchemaBlueprintTest extends TestCase
         $this->assertSame('id', $this->table(self::EVENTS, ['sorting_key'])['sorting_key']);
     }
 
-    public function testEveryColumnTypeWithoutExactIntegerTypes(): void
+    public function testEveryColumnType(): void
     {
         $this->createTypesTable('clickhouse');
 
@@ -182,16 +165,16 @@ class SchemaBlueprintTest extends TestCase
             'c_char' => 'FixedString(2)',
             'c_string' => 'String',
             'c_text' => 'String',
-            'c_tiny' => 'Int16',
-            'c_utiny' => 'Int16',
+            'c_tiny' => 'Int8',
+            'c_utiny' => 'UInt8',
             'c_small' => 'Int16',
-            'c_usmall' => 'Int32',
+            'c_usmall' => 'UInt16',
             'c_medium' => 'Int32',
-            'c_umedium' => 'Int32',
+            'c_umedium' => 'UInt32',
             'c_int' => 'Int32',
-            'c_uint' => 'Int32',
+            'c_uint' => 'UInt32',
             'c_big' => 'Int64',
-            'c_ubig' => 'Int64',
+            'c_ubig' => 'UInt64',
             'c_float' => 'Float64',
             'c_float24' => 'Float32',
             'c_double' => 'Float64',
@@ -222,29 +205,6 @@ class SchemaBlueprintTest extends TestCase
             'c_raw' => 'Decimal(76, 4)',
             'deleted_at' => 'Nullable(DateTime)',
         ], array_column($this->columns(self::TYPES, ['name', 'type']), 1, 0));
-
-        $this->insertAndReadBackTypes();
-    }
-
-    public function testEveryIntegerTypeWithExactIntegerTypes(): void
-    {
-        $this->createTypesTable(self::EXACT);
-
-        $this->assertSame([
-            'c_tiny' => 'Int8',
-            'c_utiny' => 'UInt8',
-            'c_small' => 'Int16',
-            'c_usmall' => 'UInt16',
-            'c_medium' => 'Int32',
-            'c_umedium' => 'UInt32',
-            'c_int' => 'Int32',
-            'c_uint' => 'UInt32',
-            'c_big' => 'Int64',
-            'c_ubig' => 'UInt64',
-        ], array_intersect_key(
-            array_column($this->columns(self::TYPES, ['name', 'type']), 1, 0),
-            array_flip(['c_tiny', 'c_utiny', 'c_small', 'c_usmall', 'c_medium', 'c_umedium', 'c_int', 'c_uint', 'c_big', 'c_ubig'])
-        ));
 
         $this->insertAndReadBackTypes();
     }
@@ -419,104 +379,15 @@ class SchemaBlueprintTest extends TestCase
         $this->assertFalse(Schema::hasTable(self::QUOTED));
     }
 
-    public function testCreateMergeTreeEscapesNamesAndValues(): void
-    {
-        $migration = new class extends Migration {
-            public function up(): void
-            {
-                static::createMergeTree("schema_blueprint_merge_tree it's", fn (MergeTree $table) => $table
-                    ->columns([
-                        $table->uInt32('id'),
-                        $table->string('my col')->default("a'b")->comment("it's \\ here"),
-                        $table->string('slash')->default('ends with \\'),
-                        $table->enum('status', ["it's", 'back\\slash']),
-                    ])
-                    ->orderBy('id'));
-            }
-        };
-
-        $migration->up();
-
-        $this->assertSame([
-            ['id', 'UInt32', '', '', ''],
-            ['my col', 'String', 'DEFAULT', "'a\\'b'", "it's \\ here"],
-            ['slash', 'String', 'DEFAULT', "'ends with \\\\'", ''],
-            ['status', "Enum8('it\\'s' = 1, 'back\\\\slash' = 2)", '', '', ''],
-        ], $this->columns(self::MERGE_TREE, ['name', 'type', 'default_kind', 'default_expression', 'comment']));
-    }
-
     /**
-     * A database name qualifies a createMergeTree() table name, and a name
-     * quoted by hand is kept, as in 3.0.0.
-     */
-    public function testCreateMergeTreeKeepsQualifiedAndHandQuotedNames(): void
-    {
-        $migration = new class extends Migration {
-            public static string $qualifiedName = '';
-
-            public function up(): void
-            {
-                static::createMergeTree(static::$qualifiedName, fn (MergeTree $table) => $table
-                    ->columns([$table->uInt32('id')])
-                    ->orderBy('id'));
-                static::createMergeTree('`schema_blueprint hand quoted`', fn (MergeTree $table) => $table
-                    ->columns([$table->uInt32('id'), $table->string('`my col`'), $table->string('n.a')])
-                    ->orderBy('id'));
-            }
-        };
-        $migration::$qualifiedName = DB::connection('clickhouse')->getDatabaseName() . '.' . self::QUALIFIED;
-
-        $migration->up();
-
-        $this->assertSame([['id']], $this->columns(self::QUALIFIED, ['name']));
-        $this->assertSame([['id'], ['my col'], ['n.a']], $this->columns(self::HAND_QUOTED, ['name']));
-    }
-
-    /**
-     * createMergeTree() sends the float default of a Decimal column as a
-     * string literal, numbers an enum with a string key by its keys, a
-     * numeric name included, and writes the settings as literals.
-     */
-    public function testCreateMergeTreeWritesDecimalDefaultsEnumsAndSettings(): void
-    {
-        $migration = new class extends Migration {
-            public function up(): void
-            {
-                static::createMergeTree('schema_blueprint_merge_tree_values', fn (MergeTree $table) => $table
-                    ->columns([
-                        $table->uInt32('id'),
-                        $table->decimal('price', 10, 2)->default(19.99),
-                        $table->enum('status', ['active' => 1, '404' => 2]),
-                    ])
-                    ->orderBy('id')
-                    ->settings(['ttl_only_drop_parts' => false, 'storage_policy' => 'default']));
-            }
-        };
-
-        $migration->up();
-        $this->client()->write('INSERT INTO ' . self::MERGE_TREE_VALUES . " (id, status) VALUES (1, '404')");
-
-        $this->assertSame(
-            ['price' => 19.99, 'status' => '404'],
-            $this->client()->select('SELECT price, status FROM ' . self::MERGE_TREE_VALUES)->rows()[0]
-        );
-        $this->assertSame("Enum8('active' = 1, '404' = 2)", $this->columns(self::MERGE_TREE_VALUES, ['type'])[2][0]);
-        $this->assertStringContainsString(
-            "SETTINGS ttl_only_drop_parts = 0, storage_policy = 'default'",
-            $this->table(self::MERGE_TREE_VALUES, ['engine_full'])['engine_full']
-        );
-    }
-
-    /**
-     * Laravel's enum() and createMergeTree()'s enum() read an array the same
-     * way. An array with a string key maps each name to its number, an
+     * enum() reads an array in one way. An array with a string key maps each name to its number, an
      * integer key (which PHP makes of a numeric string key) being a name too.
      * An array whose keys are all integers is a list of names written from
      * its values, whatever the gaps, as in 3.0.0; so ['200' => 1, '404' => 2]
      * gives the names '1' and '2', and names that are all numbers are
      * numbered with a raw type.
      */
-    public function testBothEnumMethodsReadNamesAndNumbersAlike(): void
+    public function testEnumReadsNamesAndNumbers(): void
     {
         $enums = [
             'e_unique_numbers' => array_unique([200, 404, 200, 500]),
@@ -535,59 +406,33 @@ class SchemaBlueprintTest extends TestCase
             }
             $table->rawColumn('e_raw', $rawType);
         });
-        $migration = new class extends Migration {
-            /** @var array<string, array<int|string, int|string>> */
-            public static array $enums = [];
+        $table = self::ENUMS;
+        $this->assertSame([
+            ['id', 'UInt64'],
+            ['e_unique_numbers', "Enum8('200' = 1, '404' = 2, '500' = 3)"],
+            ['e_filtered_numbers', "Enum8('200' = 1, '404' = 2)"],
+            ['e_numbered', "Enum8('active' = 1, 'inactive' = 2)"],
+            ['e_numeric_name', "Enum8('active' = 1, '200' = 2)"],
+            ['e_numeric_name_first', "Enum8('200' = 1, 'active' = 2)"],
+            ['e_numeric_names_only', "Enum8('1' = 1, '2' = 2)"],
+            ['e_raw', $rawType],
+        ], $this->columns($table, ['name', 'type']), $table);
 
-            public static string $rawType = '';
-
-            public function up(): void
-            {
-                static::createMergeTree('schema_blueprint_merge_tree_enums', fn (MergeTree $table) => $table
-                    ->columns(fn (MergeTree $table): array => [
-                        $table->uInt64('id'),
-                        ...array_map(
-                            fn (string $column, array $allowed): Column => $table->enum($column, $allowed),
-                            array_keys(static::$enums),
-                            static::$enums
-                        ),
-                        $table->column('e_raw', static::$rawType),
-                    ])
-                    ->orderBy('id'));
-            }
-        };
-        $migration::$enums = $enums;
-        $migration::$rawType = $rawType;
-        $migration->up();
-
-        foreach ([self::ENUMS, self::MERGE_TREE_ENUMS] as $table) {
-            $this->assertSame([
-                ['id', $table === self::ENUMS ? 'Int64' : 'UInt64'],
-                ['e_unique_numbers', "Enum8('200' = 1, '404' = 2, '500' = 3)"],
-                ['e_filtered_numbers', "Enum8('200' = 1, '404' = 2)"],
-                ['e_numbered', "Enum8('active' = 1, 'inactive' = 2)"],
-                ['e_numeric_name', "Enum8('active' = 1, '200' = 2)"],
-                ['e_numeric_name_first', "Enum8('200' = 1, 'active' = 2)"],
-                ['e_numeric_names_only', "Enum8('1' = 1, '2' = 2)"],
-                ['e_raw', $rawType],
-            ], $this->columns($table, ['name', 'type']), $table);
-
-            $this->client()->write(
-                "INSERT INTO {$table} VALUES (1, '500', '404', 'inactive', '200', '200', '2', '404')"
-            );
-            $this->assertSame([[
-                'e_unique_numbers' => '500',
-                'e_filtered_numbers' => '404',
-                'e_numbered' => 'inactive',
-                'e_numeric_name' => '200',
-                'e_numeric_name_first' => '200',
-                'e_numeric_names_only' => '2',
-                'e_raw' => '404',
-                'raw_number' => 2,
-            ]], $this->client()->select(
-                'SELECT ' . implode(', ', array_keys($enums)) . ", e_raw, toInt8(e_raw) AS raw_number FROM {$table}"
-            )->rows(), $table);
-        }
+        $this->client()->write(
+            "INSERT INTO {$table} VALUES (1, '500', '404', 'inactive', '200', '200', '2', '404')"
+        );
+        $this->assertSame([[
+            'e_unique_numbers' => '500',
+            'e_filtered_numbers' => '404',
+            'e_numbered' => 'inactive',
+            'e_numeric_name' => '200',
+            'e_numeric_name_first' => '200',
+            'e_numeric_names_only' => '2',
+            'e_raw' => '404',
+            'raw_number' => 2,
+        ]], $this->client()->select(
+            'SELECT ' . implode(', ', array_keys($enums)) . ", e_raw, toInt8(e_raw) AS raw_number FROM {$table}"
+        )->rows(), $table);
     }
 
     /**
@@ -606,7 +451,7 @@ class SchemaBlueprintTest extends TestCase
 
         $this->assertSame([
             ['source', 'LowCardinality(String)', 'DEFAULT', "'web'", "it's the source"],
-            ['id', 'Int64', '', '', ''],
+            ['id', 'UInt64', '', '', ''],
             ['step', 'Int32', '', '', ''],
             ['visited_at', 'DateTime', '', '', ''],
             ['referrer', 'String', '', '', ''],
@@ -665,7 +510,7 @@ class SchemaBlueprintTest extends TestCase
         });
 
         $this->assertSame(
-            [['id', 'Int64'], ['visited_at', 'DateTime'], ['source', 'String'], ['b', 'String'], ['note', 'String'], ['payload', 'Int32'], ['a', 'String']],
+            [['id', 'UInt64'], ['visited_at', 'DateTime'], ['source', 'String'], ['b', 'String'], ['note', 'String'], ['payload', 'Int32'], ['a', 'String']],
             $this->columns(self::ALTERED, ['name', 'type'])
         );
 
@@ -999,7 +844,7 @@ class SchemaBlueprintTest extends TestCase
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('email')->unique();
         });
-        $this->assertSame([['id', 'Int64'], ['user_id', 'Int64'], ['email', 'String']], $this->columns(self::CONSTRAINED, ['name', 'type']));
+        $this->assertSame([['id', 'UInt64'], ['user_id', 'UInt64'], ['email', 'String']], $this->columns(self::CONSTRAINED, ['name', 'type']));
 
         Schema::table(self::CONSTRAINED, function (SchemaBlueprint $table) {
             $table->dropUnique(['email']);
@@ -1214,7 +1059,7 @@ class SchemaBlueprintTest extends TestCase
             ['id', 'UInt64', '', '', '', ''],
             ['traffic_source', 'Nullable(String)', '', '', '', ''],
             ['at', 'DateTime', '', '', '', ''],
-            ['doubled', 'Int64', '', '', '', ''],
+            ['doubled', 'UInt64', '', '', '', ''],
             ['upper_source', 'String', '', '', '', ''],
             ['packed', 'String', '', '', '', 'CODEC(ZSTD(3))'],
             ['eph', 'String', 'EPHEMERAL', "'e'", '', ''],
@@ -1320,15 +1165,17 @@ class SchemaBlueprintTest extends TestCase
     }
 
     /**
-     * Insert a row into TYPES through a model's insertAssoc() and read it back.
+     * Insert a row into TYPES through a model's insert() and read it back.
      * The values fit both integer mappings. The UInt64 column c_ubig is
      * compared as a string, which ClickHouse 24.8 returns and 25.8 and later
      * do not.
      */
     private function insertAndReadBackTypes(): void
     {
-        $model = new class extends BaseModel {
+        $model = new class extends Model {
             protected $table = 'schema_blueprint_types';
+
+            public $timestamps = false;
         };
         $row = [
             'c_char' => 'ab',
@@ -1356,7 +1203,7 @@ class SchemaBlueprintTest extends TestCase
             'c_array' => ['a', "b'c"],
         ];
 
-        $model::insertAssoc([$row]);
+        $model::insert([$row]);
 
         $read = $this->client()->select(
             'SELECT ' . implode(', ', array_keys($row)) . ', deleted_at FROM ' . self::TYPES
@@ -1436,9 +1283,8 @@ class SchemaBlueprintTest extends TestCase
     private function dropTables(): void
     {
         foreach ([
-            self::VISITS, self::EVENTS, self::TYPES, self::KEYS, self::MEMORY, self::QUOTED, self::MERGE_TREE,
-            self::DECIMALS, self::KEY_VALUE, self::MERGE_TREE_VALUES, self::QUALIFIED, self::HAND_QUOTED,
-            self::ENUMS, self::MERGE_TREE_ENUMS, self::ALTERED, self::ALTERED_RENAMED, self::CHANGED, self::INDEXED,
+            self::VISITS, self::EVENTS, self::TYPES, self::KEYS, self::MEMORY, self::QUOTED, self::DECIMALS,
+            self::KEY_VALUE, self::ENUMS, self::ALTERED, self::ALTERED_RENAMED, self::CHANGED, self::INDEXED,
             self::CONSTRAINED, self::REPLICATED,
         ] as $table) {
             $this->client()->write('DROP TABLE IF EXISTS `' . str_replace(['\\', '`'], ['\\\\', '\\`'], $table) . '` SYNC');

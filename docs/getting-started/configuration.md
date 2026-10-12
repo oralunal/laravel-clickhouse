@@ -19,19 +19,20 @@ defaults. A connection in `config/database.php` overrides both. See [Installatio
 | `retries` | `CLICKHOUSE_RETRIES` | `0` | Number of retries of a failed request. See [Retries](/advanced/timeouts-and-retries#retries). |
 | `retry_on` | `CLICKHOUSE_RETRY_ON` | `any` | `any` or `unsent`: the failed requests that the retries send again |
 | `settings` | | `[]` | ClickHouse settings for each query of the connection |
-| `fix_default_query_builder` | | `true` | `true`: `DB::connection()->table()` returns the package's query builder. `false`: it returns [Laravel's query builder](/query-builder/laravel-query-builder). |
 | `use_lightweight_delete` | `CLICKHOUSE_USE_LIGHTWEIGHT_DELETE` | `false` | `delete()` without an argument sends a lightweight `DELETE FROM`. See [Deletions](/query-builder/writing-data#deletions). |
 | `engine` | `CLICKHOUSE_ENGINE` | `null` | Engine of a table that `Schema::create()` creates without `engine()`. `null` is `MergeTree()`. |
-| `exact_integer_types` | `CLICKHOUSE_EXACT_INTEGER_TYPES` | `false` | Integer types with their own width in `Schema::create()`. See [Column types](/schema/schema-builder#column-types). |
 | `default_index_type` | `CLICKHOUSE_DEFAULT_INDEX_TYPE` | `null` | Type of a data-skipping index that has no type, such as `minmax` |
-| `datetime_precision` | `CLICKHOUSE_DATETIME_PRECISION` | `second` | `second` or `microsecond`. See [Dates and times](/query-builder/dates). |
-| `insert_format` | `CLICKHOUSE_INSERT_FORMAT` | `Values` | `Values` or `JSONEachRow`. See [JSONEachRow inserts](/models/inserting-rows#jsoneachrow-inserts). |
+| `datetime_precision` | `CLICKHOUSE_DATETIME_PRECISION` | `second` | `second` or `microsecond`, or a `DateTimePrecision` case. See [Dates and times](/query-builder/dates). |
+| `insert_format` | `CLICKHOUSE_INSERT_FORMAT` | `Values` | `Values` or `JSONEachRow`, or a `Format` case. See [JSONEachRow inserts](/models/inserting-rows#jsoneachrow-inserts). |
 | `use_on_cluster` | `CLICKHOUSE_USE_ON_CLUSTER` | `false` | Send `delete()`, `update()`, `truncate()` and `optimize()` `ON CLUSTER`. It needs `cluster_name`. |
 | `cluster` | | | List of nodes. It replaces `host` and `port`. See [Clusters](/advanced/clusters). |
 | `cluster_name` | | | Cluster name of the server config, for `ON CLUSTER`. See [Clusters](/advanced/clusters). |
 
 The options `datetime_precision`, `insert_format` and `use_on_cluster` are off by default.
-Without them, the package writes dates, inserts and mutations as 3.x did.
+Without them, the package writes dates with seconds, inserts in `Values` and sends mutations to the active node.
+
+`DB::connection('clickhouse')->table()` and `query()` return the package's `QueryBuilder`, Laravel's query builder with
+the ClickHouse clauses. No option changes it. See [Query builder basics](/query-builder/basics).
 
 ## Validation
 
@@ -44,10 +45,16 @@ The [datetime_precision] option of the ClickHouse connection [clickhouse] must b
 
 `use_on_cluster` without `cluster_name` also throws.
 
-::: warning
-Write `datetime_precision` and `insert_format` as strings in config files.
-`php artisan config:cache` cannot write an enum instance into the cached config.
-:::
+`datetime_precision` and `insert_format` take a string in any letter case, with or without surrounding spaces, or a case
+of the `Oralunal\LaravelClickHouse\Enums\DateTimePrecision` and `Oralunal\LaravelClickHouse\Enums\Format` enums:
+
+```php
+use Oralunal\LaravelClickHouse\Enums\DateTimePrecision;
+use Oralunal\LaravelClickHouse\Enums\Format;
+
+'datetime_precision' => DateTimePrecision::Microsecond,
+'insert_format' => Format::JsonEachRow,
+```
 
 ## Settings
 
@@ -65,12 +72,15 @@ To set a setting for one query, use [`settings()`](/query-builder/basics#setting
 
 | Method | Returns |
 | --- | --- |
-| `getDateTimePrecision()` | `second` or `microsecond` |
-| `getInsertFormat()` | `Values` or `JSONEachRow` |
-| `getClusterName()`, `getDefaultCluster()` | See [Clusters](/advanced/clusters#change-the-active-node). |
+| `getDateTimePrecision()` | `DateTimePrecision::Second` or `DateTimePrecision::Microsecond` |
+| `getInsertFormat()` | `Format::Values` or `Format::JsonEachRow` |
+| `formatDateTime($date)` | A date as the connection writes it, without quotes: `2024-01-02 03:04:05`, or `2024-01-02 03:04:05.500000` at `microsecond` |
+| `getClusterName()` | The `cluster_name` option without surrounding spaces, or `null` when it is blank |
+| `hasClusterNodes()` | `true` when the `cluster` option lists nodes |
+| `getDefaultCluster()` | The cluster of `ON CLUSTER` when `use_on_cluster` is on, or `null`. See [Clusters](/advanced/clusters#change-the-active-node). |
 | `getServerVersion()` | The version of the server of the active node, for example `24.8.14.39` |
 | `getDriverTitle()` | `ClickHouse`, the name that `php artisan db:show` shows |
-| `newBuilderGrammar()` | A grammar of the package's query builder that writes dates at `datetime_precision` |
+| `newLiteralGrammar()` | A `LiteralGrammar` that writes values as ClickHouse literals, as the connection writes them, with dates at `datetime_precision`. See [Literals](/reference/helpers#literals). |
 
 Call them on the connection: `DB::connection('clickhouse')->getServerVersion()`.
 `Connection::createWithClient($config)` makes a connection and its nodes from a config array. The `clickhouse` driver uses it. It checks the options before it pings a node.

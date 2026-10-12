@@ -20,18 +20,13 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Fluent;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Expression;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Grammar;
-use Oralunal\LaravelClickHouse\ClickhouseBuilder\Query\Identifier;
-use Oralunal\LaravelClickHouse\Expressions\InsertArray;
 use Oralunal\LaravelClickHouse\JsonEachRowEncoder;
-use Oralunal\LaravelClickHouse\RawColumn;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use stdClass;
-use Tests\Unit\ClickhouseBuilder\IntBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\StringBackedEnumFixture;
-use Tests\Unit\ClickhouseBuilder\UnitEnumFixture;
+use Tests\Fixtures\IntBackedEnumFixture;
+use Tests\Fixtures\StringBackedEnumFixture;
+use Tests\Fixtures\UnitEnumFixture;
 
 /**
  * How JsonEachRowEncoder writes rows for the JSONEachRow and JSONCompactEachRow input formats.
@@ -72,10 +67,6 @@ class JsonEachRowEncoderTest extends TestCase
             'an empty stdClass' => [new stdClass(), '{}'],
             'a stdClass with properties' => [$object, '{"a":1,"b":["nan","x"]}'],
             'an empty array' => [[], '[]'],
-            'an InsertArray of integers' => [new InsertArray(['1', '2', 3], InsertArray::TYPE_INT), '[1,2,3]'],
-            'an InsertArray of strings' => [new InsertArray(['it\'s', 'b']), '["it\'s","b"]'],
-            'an escaped InsertArray of strings' => [new InsertArray(['it\'s'], InsertArray::TYPE_STRING_ESCAPE), '["it\'s"]'],
-            'an InsertArray of decimals' => [new InsertArray(['1.5', 2], InsertArray::TYPE_DECIMAL), '[1.5,2]'],
             'a smi2 UInt64' => [UInt64::fromString('18446744073709551615'), '"18446744073709551615"'],
             'a smi2 Float64' => [Float64::fromString('0.1'), '"0.1"'],
             'a smi2 Boolean of true' => [Boolean::fromBool(true), 'true'],
@@ -176,16 +167,16 @@ class JsonEachRowEncoderTest extends TestCase
         $encoder = $this->encoder();
 
         $this->assertSame('nan', $encoder->normalizeValue(NAN));
-        $this->assertSame(['a' => 'inf', 'b' => ['x']], $encoder->normalizeValue(['a' => INF, 'b' => new InsertArray(['x'])]));
+        $this->assertSame(['a' => 'inf', 'b' => ['x']], $encoder->normalizeValue(['a' => INF, 'b' => ['x']]));
         $this->assertEquals((object) ['k' => 1], $encoder->normalizeValue(MapType::fromArray(['k' => 1])));
     }
 
     public function test_normalize_value_refuses_raw_sql_with_a_message(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cannot insert the value as JSON: raw SQL (' . RawColumn::class . ') cannot be sent as data.');
+        $this->expectExceptionMessage('Cannot insert the value as JSON: raw SQL (' . LaravelExpression::class . ') cannot be sent as data.');
 
-        $this->encoder()->normalizeValue(new RawColumn('now()'));
+        $this->encoder()->normalizeValue(new LaravelExpression('now()'));
     }
 
     /**
@@ -194,12 +185,9 @@ class JsonEachRowEncoderTest extends TestCase
     public static function refusedValues(): array
     {
         return [
-            'a RawColumn' => [new RawColumn('now()'), 'raw SQL (' . RawColumn::class . ') cannot be sent as data'],
-            "the package's Expression" => [new Expression('now()'), 'raw SQL (' . Expression::class . ') cannot be sent as data'],
             "smi2's Raw" => [new Raw('now()'), 'raw SQL (' . Raw::class . ') cannot be sent as data'],
             "Laravel's DB::raw()" => [new LaravelExpression('now()'), 'raw SQL (' . LaravelExpression::class . ') cannot be sent as data'],
-            'raw SQL inside an array' => [[1, new RawColumn('now()')], 'raw SQL (' . RawColumn::class . ') cannot be sent as data'],
-            "the package's Identifier" => [new Identifier('f_int'), 'raw SQL (' . Identifier::class . ') cannot be sent as data'],
+            'raw SQL inside an array' => [[1, new LaravelExpression('now()')], 'raw SQL (' . LaravelExpression::class . ') cannot be sent as data'],
             'an Arrayable that is not a collection' => [
                 new Fluent(['id' => 1]),
                 'a value of type ' . Fluent::class . ' cannot be sent as JSON. Pass a scalar value, such as $model->getKey(), or an array.',
@@ -283,137 +271,6 @@ class JsonEachRowEncoderTest extends TestCase
         $this->expectExceptionMessage('the value is nested more than 512 levels deep.');
 
         $this->encoder()->encodeRows([['deep' => $value]]);
-    }
-
-    /**
-     * @return array<string, array{InsertArray, array<int, int|float|string>}>
-     */
-    public static function insertArrays(): array
-    {
-        return [
-            'integers' => [new InsertArray(['a' => '1', 'b' => '2.7', 'c' => 3], InsertArray::TYPE_INT), [1, 2, 3]],
-            'decimals' => [new InsertArray(['1.5', 2, '0.1'], InsertArray::TYPE_DECIMAL), [1.5, 2.0, 0.1]],
-            'strings, unescaped' => [new InsertArray(["it's", 5, null]), ["it's", '5', '']],
-            'escaped strings, unescaped' => [new InsertArray(["it's"], InsertArray::TYPE_STRING_ESCAPE), ["it's"]],
-        ];
-    }
-
-    /**
-     * @param array<int, int|float|string> $items
-     */
-    #[DataProvider('insertArrays')]
-    public function test_insert_array_items_have_the_type_applied(InsertArray $array, array $items): void
-    {
-        $this->assertSame($items, $array->getItems());
-    }
-
-    public function test_insert_array_sql_is_unchanged_for_items_without_a_quote_or_a_backslash(): void
-    {
-        $this->assertSame('[1,2]', (new InsertArray(['1', '2'], InsertArray::TYPE_INT))->getValue());
-        $this->assertSame("['it\\'s']", (new InsertArray(["it's"], InsertArray::TYPE_STRING_ESCAPE))->getValue());
-        $this->assertSame("['a','b']", (new InsertArray(['a', 'b']))->getValue());
-    }
-
-    /**
-     * Decimal items and the array literal that getValue() writes for them.
-     *
-     * @return array<string, array{array<int, mixed>, string}>
-     */
-    public static function decimalInsertArrays(): array
-    {
-        return [
-            'a third keeps every digit' => [[1 / 3], '[0.3333333333333333]'],
-            'a computed sum keeps every digit' => [[0.1 + 0.2], '[0.30000000000000004]'],
-            'negative zero keeps its sign' => [[-0.0], '[-0.0]'],
-            'NaN' => [[NAN], '[nan]'],
-            'INF' => [[INF], '[inf]'],
-            '-INF' => [[-INF], '[-inf]'],
-            'numeric strings and ints are written as floats' => [['1.5', '2', 3], '[1.5,2.0,3.0]'],
-            'a big and a small float' => [[1.0E+25, 1.0E-7], '[1.0E+25,1.0E-7]'],
-            'all of them together' => [
-                [1 / 3, 0.1 + 0.2, -0.0, NAN, INF, -INF],
-                '[0.3333333333333333,0.30000000000000004,-0.0,nan,inf,-inf]',
-            ],
-        ];
-    }
-
-    /**
-     * getValue() writes each decimal item as the query builder writes a float (Grammar::compileLiteral()), so a
-     * Values insert stores the same floats as the JSONEachRow encoder, which sends getItems(), and NaN raises no
-     * warning on PHP 8.5.
-     *
-     * @param array<int, mixed> $items
-     */
-    #[DataProvider('decimalInsertArrays')]
-    public function test_decimal_insert_array_items_are_written_as_the_query_builder_writes_floats(array $items, string $sql): void
-    {
-        set_error_handler(function (int $severity, string $message): never {
-            throw new ErrorException($message, 0, $severity);
-        });
-
-        try {
-            $array = new InsertArray($items, InsertArray::TYPE_DECIMAL);
-            $grammar = new Grammar();
-            $writtenItems = array_map(fn (float $item): string => $grammar->compileLiteral($item), $array->getItems());
-
-            $this->assertSame($sql, $array->getValue());
-            $this->assertSame('[' . implode(',', $writtenItems) . ']', $array->getValue(), 'getValue() writes getItems()');
-
-            foreach ($array->getItems() as $index => $item) {
-                if (is_finite($item)) {
-                    $this->assertSame($item, (float) $writtenItems[$index], 'the text reads back as the same float');
-                }
-            }
-        } finally {
-            restore_error_handler();
-        }
-    }
-
-    /**
-     * @return array<string, array{string|null}>
-     */
-    public static function insertArrayTypes(): array
-    {
-        return [
-            'the default type' => [null],
-            'string' => [InsertArray::TYPE_STRING],
-            'escaped string' => [InsertArray::TYPE_STRING_ESCAPE],
-            'int' => [InsertArray::TYPE_INT],
-            'decimal' => [InsertArray::TYPE_DECIMAL],
-        ];
-    }
-
-    #[DataProvider('insertArrayTypes')]
-    public function test_an_empty_insert_array_is_an_empty_array(?string $type): void
-    {
-        $array = $type === null ? new InsertArray([]) : new InsertArray([], $type);
-
-        $this->assertSame('[]', $array->getValue());
-        $this->assertSame([], $array->getItems());
-        $this->assertSame('{"a":[]}', $this->encoder()->encodeRows([['a' => $array]]));
-    }
-
-    /**
-     * @return array<string, array{InsertArray, string}>
-     */
-    public static function escapedInsertArrays(): array
-    {
-        return [
-            'a single quote is escaped' => [new InsertArray(["O'Brien", 'x']), "['O\\'Brien','x']"],
-            'a backslash is doubled' => [new InsertArray(['C:\\temp', 'path\\']), "['C:\\\\temp','path\\\\']"],
-            'a trailing backslash cannot escape the closing quote' => [new InsertArray(['ends\\']), "['ends\\\\']"],
-            'the escape type escapes backslashes too' => [
-                new InsertArray(['a\\', "b'"], InsertArray::TYPE_STRING_ESCAPE),
-                "['a\\\\','b\\'']",
-            ],
-            'a non-string item becomes a quoted string' => [new InsertArray([5, null]), "['5','']"],
-        ];
-    }
-
-    #[DataProvider('escapedInsertArrays')]
-    public function test_insert_array_escapes_string_items(InsertArray $array, string $sql): void
-    {
-        $this->assertSame($sql, $array->getValue());
     }
 
     /**
