@@ -515,10 +515,12 @@ production has.
    (added columns, `dropColumn()`, `index()`, `dropIndex()`, `comment()`,
    `orderBy()`, `sampleBy()`, `ttl()`, `settings()`, `Schema::rename()`).
    These **fail** a fresh run and must change: `engine('InnoDB')` or another
-   MySQL engine, a MySQL index type such as `btree`, `time()`, `timeTz()`,
-   `set()`, `computed()`, `fullText()`, and `primary()`, `dropPrimary()` or
-   `renameIndex()` inside `Schema::table()`. Ask the user how to change each
-   one.
+   MySQL engine, a MySQL index type such as `btree`, `set()`, `computed()`,
+   and `primary()`, `dropPrimary()` or `renameIndex()` inside
+   `Schema::table()`. `time()`, `timeTz()`, `fullText()` and `vectorIndex()`
+   create a `Time` column and text and vector indexes on ClickHouse 26.3 and
+   later, and fail on 24.8: check the server version of the user before you
+   keep them. Ask the user how to change each one.
 4. **Cluster connections.** If a ClickHouse connection sets `cluster_name`,
    tell the user: the schema builder sends its statements `ON CLUSTER` and,
    when the connection also lists its nodes in `cluster`, creates MergeTree

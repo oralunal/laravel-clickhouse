@@ -381,8 +381,10 @@ touched.
   added columns, `dropColumn()`, `index()`, `comment()`, `orderBy()`,
   `ttl()`, `settings()` and `Schema::rename()`, which 3.x ignored. These calls
   now fail a fresh run: a MySQL engine such as `engine('InnoDB')`, a MySQL
-  index type such as `btree`, `time()`, `set()`, `computed()`, `fullText()`,
-  and `primary()`, `dropPrimary()` or `renameIndex()` inside `Schema::table()`.
+  index type such as `btree`, `set()`, `computed()`, and `primary()`,
+  `dropPrimary()` or `renameIndex()` inside `Schema::table()`. `time()`,
+  `fullText()` and `vectorIndex()` create a `Time` column and text and vector
+  indexes on ClickHouse 26.3 and later, and fail on 24.8.
   To keep a table exactly as it is, write its `CREATE TABLE` with
   `statementOnEveryNode()`.
 - **`Schema::hasTable()`** returns `false` for views and dictionaries. Guard

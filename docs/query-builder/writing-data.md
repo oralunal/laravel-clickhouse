@@ -166,6 +166,22 @@ $query->where('id', 123)->update(['tags' => ['a', 'b']]);
 - `update()` has the rules and refusals of `delete()`. To update all rows, add `whereRaw('1')`.
 - ClickHouse cannot update a column of the sorting key. A `ReplacingMergeTree` table also refuses an update of its version column.
 
+### JSON paths
+
+`update()` sets a JSON path of a `String` column that holds a JSON object:
+
+```php
+$query->where('id', 123)->update(['payload->color' => 'green', 'payload->user->age' => 30]);
+// alter table "my_table" update "payload" = if(JSONType("payload") = 'Object',
+//   jsonMergePatch(if(JSONType("payload") = 'Object', "payload", '{}'), '{"color":"green","user":{"age":30}}'), "payload")
+//   where "id" = 123
+```
+
+- The paths of a column are merged into its document with `jsonMergePatch()`. A missing key is added, with the objects of its path. An object as the value replaces the object at its path.
+- A row whose column holds no JSON object, such as `''`, `NULL` or an array, keeps it. `jsonMergePatch()` would fail on it, and the mutation with it.
+- An update throws a `QueryException` and sends nothing for an array index, such as `payload->tags[0]`, for raw SQL as the value, and when it sets the column and a path of it.
+- `insert()` throws a `QueryException` for a JSON path as a column. Insert the whole document.
+
 ::: warning
 ClickHouse reads a float in a mutation as `Float64` and cuts it at the scale of the column.
 `update(['price' => 19.99])` stores `19.98` in a `Decimal(10, 2)` column. `round()` does not help.

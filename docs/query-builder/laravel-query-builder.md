@@ -21,6 +21,9 @@ This page lists what works differently on ClickHouse, and what does not work.
 | `inRandomOrder()` | `order by rand()`. A seed throws. Use `orderByRaw('cityHash64(?, id)', [$seed])`. |
 | `union()` | `union distinct`. With `union_default_mode` in the connection `settings`, a bare `union`. `unionAll()` sends `union all`. |
 | `whereLike()`, `whereNotLike()` | `ilike`, `not ilike`. With `caseSensitive: true`, `like`, `not like`. |
+| JSON paths, such as `where('payload->name', 'x')`, `whereJsonContains()`, `whereJsonLength()` | ClickHouse's JSON functions on a `String` column. See [JSON paths](/query-builder/conditions#json-paths). |
+| `whereFullText()` | `hasAllTokens()`, or `hasAnyTokens()` with `['mode' => 'any']`. ClickHouse 26.3 and later. See [Full-text search](/query-builder/conditions#full-text-search). |
+| `whereVectorSimilarTo()`, `orderByVectorDistance()`, `selectVectorDistance()` | `cosineDistance()`. See [Vector search](/query-builder/conditions#vector-search). |
 | `whereNullSafeEquals('comment', null)` | `["comment"] = [null]`, which matches the `NULL` rows. The `<=>` operator also works. |
 | `where('field_two', '&', 4)` | `bitAnd("field_two", 4) != 0`. `\|`, `^`, `<<`, `>>` and `&~` also work. |
 | `whereDate()`, `whereTime()`, `whereDay()`, `whereMonth()`, `whereYear()` | ClickHouse functions of the column. See [Date conditions](/query-builder/dates#date-conditions). |
@@ -54,7 +57,5 @@ These methods throw Laravel's `RuntimeException` before the package sends a requ
 | --- | --- |
 | `upsert()` with columns to update | `insert()` into a `ReplacingMergeTree` table, or `update()`. `upsert()` without columns to update is an `insert()`. |
 | `insertOrIgnore()` | `insert()`. ClickHouse has no unique constraints. |
-| `whereJsonContains()`, JSON paths such as `where('payload->name', 'x')` | `whereRaw("JSONExtractString(payload, 'name') = ?", ['x'])` |
-| `whereFullText()` | `whereRaw('hasToken(body, ?)', ['word'])` or `whereLike()` |
 
 Laravel's transactions are not supported either. See [Transactions](/advanced/raw-sql#transactions).

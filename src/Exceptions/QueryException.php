@@ -222,6 +222,39 @@ class QueryException extends \ClickHouseDB\Exception\QueryException
     }
 
     /**
+     * A column of an insert is a JSON selector, such as payload->a: an insert writes whole columns.
+     *
+     * Thrown by QueryGrammar::compileInsert(), compileInsertUsing() and QueryBuilder::insert() in JSONEachRow, before
+     * anything is sent.
+     *
+     * @param string $column The JSON selector
+     * @return self
+     */
+    public static function cannotInsertIntoJsonPath(string $column): self
+    {
+        $document = explode('->', $column, 2)[0];
+
+        return new self(
+            "Cannot insert into the JSON path [{$column}]: an insert writes whole columns. Insert the JSON document"
+            . " into the column [{$document}], such as json_encode(['a' => \$value])."
+        );
+    }
+
+    /**
+     * An update sets a JSON path, such as payload->a, that the package cannot write into a JSON patch.
+     *
+     * Thrown by QueryGrammar::compileUpdate(), before anything is sent.
+     *
+     * @param string $selector The JSON selector
+     * @param string $reason Why the path cannot be set
+     * @return self
+     */
+    public static function cannotUpdateJsonPath(string $selector, string $reason): self
+    {
+        return new self("Cannot update the JSON path [{$selector}]: {$reason}.");
+    }
+
+    /**
      * A row of a JSONEachRow insert has other keys than the first row.
      *
      * The column list of the insert is taken from the keys of the first row. ClickHouse (24.8 checked) silently

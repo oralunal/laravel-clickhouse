@@ -76,6 +76,15 @@ Without a default, they fail with ``Please specify `DEFAULT` expression in ALTER
 26.3 and 26.8 run a `SELECT` whose sub-query reads a column of the outer query. 24.8 refuses it.
 They refuse a mutation with such a condition at once. See [Deletions](/query-builder/writing-data#conditions-that-clickhouse-cannot-run).
 
+`has()`, `whereHas()` and `doesntHave()` send an `IN` sub-query, which all versions run, also in a mutation.
+`withCount()` and the other `with` aggregates of relations select a correlated sub-query, which only 26.3 and 26.8 run. See [Relations](/models/eloquent#relations).
+
+## Time, text indexes and vector indexes
+
+26.3 and 26.8 turn on the settings `enable_time_time64_type`, `enable_full_text_index` and `enable_vector_similarity_index`.
+On 24.8, the package refuses `time()`, `fullText()` and `vectorIndex()` before it sends anything: 24.8 reads `Time` as `Int64`, has no text index, and has the vector similarity index only as an experimental feature.
+`whereFullText()` calls `hasAllTokens()`, which 24.8 does not have. See [Text and vector indexes](/schema/schema-builder#text-and-vector-indexes).
+
 ## INTERSECT and EXCEPT
 
 24.8 compares only the columns that the outer query reads in an `INTERSECT` or `EXCEPT` sub-query, so `count()` and `exists()` of such a query got other rows than `get()`.

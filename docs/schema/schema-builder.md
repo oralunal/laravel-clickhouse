@@ -56,6 +56,7 @@ All names are in backticks. A column name is one identifier: `n.a` is `` `n.a` `
 | `json()`, `jsonb()` | `String` |
 | `date()` | `Date` |
 | `dateTime()`, `dateTimeTz()`, `timestamp()`, `timestampTz()` | `DateTime`, or `DateTime64(<precision>)` for a precision above 0 |
+| `time()`, `timeTz()` | `Time`, or `Time64(<precision>)` for a precision above 0. Needs ClickHouse 26.3 or later, see below. |
 | `year()` | `UInt16` |
 | `binary()` | `String`, or `FixedString(<length>)` with `fixed: true` |
 | `uuid()`, `foreignUuid()` | `UUID` |
@@ -71,6 +72,8 @@ All names are in backticks. A column name is one identifier: `n.a` is `` `n.a` `
 - `array()`, `map()`, `ipv4()`, `ipv6()` and `date32()` are `SchemaBlueprint` methods.
 - `json()` stores the document as a string, because the `JSON` type of 24.8 is experimental. On 25.8 and later, use `rawColumn('payload', 'JSON')`.
 - An `IPv6` column stores `127.0.0.1` as `::ffff:127.0.0.1`.
+- `time()` needs the setting `enable_time_time64_type`, which ClickHouse 26.3 and later turn on. The package reads it from `system.settings` once, and refuses `time()` on a server that does not turn it on, because 24.8 reads `Time` as `Int64`.
+  `Time` holds a time of day, such as `12:34:56`, and up to 999 hours either way. It has no time zone, as MySQL's `TIME`.
 - ClickHouse pads a short `FixedString` value with NUL bytes.
 
 ### Integer types
@@ -112,6 +115,7 @@ ClickHouse has no auto-increment. `id()` and the `increments()` methods create a
 | `useCurrent()` | `DEFAULT now()`, `now64(<precision>)` with a precision, `today()` on `date()`, `toYear(now())` on `year()` |
 | `storedAs('domain(url)')` | `MATERIALIZED domain(url)` |
 | `virtualAs('upper(url)')` | `ALIAS upper(url)` |
+| `storedAsJson('payload->dims->size')`, `virtualAsJson('payload->color')` | `MATERIALIZED JSONExtract(payload, 'dims', 'size', 'Nullable(Int32)')`, `ALIAS JSONExtract(payload, 'color', 'String')`: the value of the [JSON path](/query-builder/conditions#json-paths) as the column's type |
 | `ephemeral()`, `ephemeral('')` | `EPHEMERAL`, `EPHEMERAL ''` |
 | `comment("it's")` | `COMMENT 'it\'s'` |
 | `lowCardinality()` | `LowCardinality(<type>)`. With `nullable()`, `LowCardinality(Nullable(<type>))`. |
@@ -246,6 +250,34 @@ Schema::table('visits', function (SchemaBlueprint $table) {
 `IF EXISTS` lets `down()` drop an index without a type, which the package did not create.
 `dropIndex()` reads the engine of the table from `system.tables` when it compiles, also under `toSql()` and `migrate --pretend`.
 
+### Text and vector indexes
+
+`fullText()` adds a text index, which speeds up [`whereFullText()`](/query-builder/conditions#full-text-search).
+`vectorIndex()`, and `index()` of a `vector()` column, add a vector similarity index, which speeds up [the vector queries](/query-builder/conditions#vector-search):
+
+```php
+Schema::create('documents', function (SchemaBlueprint $table) {
+    $table->id();
+    $table->text('body')->fulltext();
+    $table->string('title');
+    $table->fullText('title', 'title_ngrams', 'ngrams(3)');
+    $table->vector('embedding', 1536)->index();
+});
+// CREATE TABLE `documents` (`id` UInt64, `body` String, `title` String, `embedding` Array(Float32),
+//   INDEX `title_ngrams` `title` TYPE text(tokenizer = ngrams(3)),
+//   INDEX `documents_body_fulltext` `body` TYPE text(tokenizer = splitByNonAlpha),
+//   INDEX `documents_embedding_vectorindex` `embedding` TYPE vector_similarity('hnsw', 'cosineDistance', 1536))
+//   ENGINE = MergeTree() ORDER BY (`id`)
+```
+
+- They need the settings `enable_full_text_index` and `enable_vector_similarity_index`, which ClickHouse 26.3 and later turn on.
+  The package reads them from `system.settings` once, and throws a `RuntimeException` before it sends anything on a server that does not turn them on, such as 24.8.
+- A text index takes one column. The third argument of `fullText()`, or `algorithm()`, is the tokenizer, such as `ngrams(3)`. The default is `splitByNonAlpha`.
+- A vector index needs the dimensions: those of `vector('embedding', 1536)` in the same blueprint, or `vectorIndex('embedding')->dimensions(1536)`.
+  The distance is `cosineDistance`, which the vector queries use. `->operatorClass('vector_l2_ops')` gives `L2Distance`.
+- ClickHouse gives both indexes a granularity of 100000000 when `granularity()` does not give one. `materialize()` works as for the other indexes.
+- `dropFullText()` and `dropVectorIndex()` send `DROP INDEX IF EXISTS`, as `dropIndex()`.
+
 ## Change tables
 
 `Schema::table()` sends an `ALTER TABLE` statement for each change, in the order of the calls:
@@ -347,10 +379,10 @@ These calls throw before the blueprint sends a statement:
 
 | Call | Exception |
 | --- | --- |
-| `time()`, `timeTz()`, `set()`, `computed()` | `RuntimeException`. The message names a replacement, such as `rawColumn('flags', "Array(Enum('a', 'b'))")`. |
+| `set()`, `computed()` | `RuntimeException`. The message names a replacement, such as `rawColumn('flags', "Array(Enum('a', 'b'))")`. |
+| `time()`, `timeTz()`, `fullText()`, `vectorIndex()` on a server without their settings, such as 24.8 | `RuntimeException`. See [Column types](#column-types) and [Text and vector indexes](#text-and-vector-indexes). |
+| `fullText()` of two columns, `vectorIndex()` without dimensions | `RuntimeException` |
 | `geometry()`, `geography()` without a subtype of the type table | `RuntimeException` |
-| `virtualAsJson()`, `storedAsJson()` | `RuntimeException`. Use `virtualAs()` or `storedAs()` with `JSONExtractString(payload, 'name')`. |
-| `fullText()`, `dropFullText()`, `vectorIndex()`, `dropVectorIndex()` | `RuntimeException`. Use a data-skipping index, such as `index('body', null, 'tokenbf_v1(512, 3, 0)')`. |
 | In `Schema::table()`: `primary()`, `dropPrimary()`, `renameIndex()`, `partitionBy()` | `RuntimeException` |
 | An incorrect `enum()` array, a `default()` without a literal, an incorrect setting name | `InvalidArgumentException` |
 

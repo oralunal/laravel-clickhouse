@@ -96,6 +96,7 @@ The static methods of `QueryException` make the exceptions that the package thro
 | `QueryException::cannotRunAsynchronouslyInSession()` | An asynchronous request or `insertFiles()` in a session |
 | `QueryException::sessionNotFound()`, `sessionIsLocked()` | The ClickHouse errors `SESSION_NOT_FOUND` and `SESSION_IS_LOCKED`. See [Sessions](/advanced/sessions#errors-in-a-session). |
 | `QueryException::cannotUpdateEmptyValues()` | `update([])`, before anything is sent |
+| `QueryException::cannotInsertIntoJsonPath()`, `cannotUpdateJsonPath()` | A JSON path as a column of an insert, or a path that `update()` cannot set. See [JSON paths](/query-builder/writing-data#json-paths). |
 
 The package throws other errors as the smi2 client and PHP do:
 
