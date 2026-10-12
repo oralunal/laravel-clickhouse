@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Static analysis tools, such as PHPStan and Larastan, read the rows of `QueryBuilder` as `stdClass` objects, as Laravel's builder declares them, but each row is an associative array. `get()` was `Collection<int, stdClass>`, `first()` was `stdClass|null`, and `toBase()` and `getQuery()` of a model query were Laravel's `Illuminate\Database\Query\Builder`. Thus code that declares its rows as arrays, such as `->toBase()->get()->all()` from the upgrade guide, got incorrect `return.type` and `argument.type` errors, and a stub file did not correct them, because a stub applies only to a method that the class declares. `QueryBuilder` now declares the array type with `@method` tags for `get()`, `first()`, `firstOrFail()`, `sole()`, `find()`, `findOr()`, `cursor()`, `lazy()`, `lazyById()`, `lazyByIdDesc()`, `chunk()`, `chunkById()`, `chunkByIdDesc()`, `each()`, `eachById()` and `chunkMap()`, and `Eloquent\Builder` declares `QueryBuilder` for `toBase()` and `getQuery()`. The code that runs does not change. `DB::connection()` still declares Laravel's connection type: declare the type of the connection, as [Static analysis](https://laravel-clickhouse.oralunal.com/query-builder/reading-results#static-analysis) shows. ([#14](https://github.com/oralunal/laravel-clickhouse/issues/14))
+
 ## [4.0.0] - 2026-10-12
 
 4.0.0 is a full cleanup. The package's own query builder, `BaseModel`, the `Migration` class and the helpers that went with them are removed without a deprecation phase. Laravel's query builder, with the ClickHouse clauses, is now the only query builder, the Eloquent model of the package is the only model, and migrations are Laravel's own. [UPGRADE.md](UPGRADE.md) and the upgrade skills (see Added) describe each step of the upgrade.
