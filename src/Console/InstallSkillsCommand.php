@@ -6,6 +6,7 @@ namespace Oralunal\LaravelClickHouse\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use Symfony\Component\Finder\SplFileInfo;
 
 use function Laravel\Prompts\multiselect;
 
@@ -34,7 +35,7 @@ class InstallSkillsCommand extends Command
             'skills' => '.github/skills',
         ],
         'codex' => ['name' => 'Codex', 'detect' => ['.codex'], 'skills' => '.agents/skills'],
-        'agents' => ['name' => 'AGENTS.md agents', 'detect' => ['AGENTS.md', '.agents'], 'skills' => '.agents/skills'],
+        'agents' => ['name' => 'Agents of .agents/skills', 'detect' => ['AGENTS.md', '.agents'], 'skills' => '.agents/skills'],
         'junie' => ['name' => 'Junie', 'detect' => ['.junie', '.idea'], 'skills' => '.junie/skills'],
         'opencode' => ['name' => 'OpenCode', 'detect' => ['opencode.json', 'opencode.jsonc'], 'skills' => '.agents/skills'],
         'amp' => ['name' => 'Amp', 'detect' => ['.amp'], 'skills' => '.agents/skills'],
@@ -78,7 +79,7 @@ class InstallSkillsCommand extends Command
      */
     public function handle(): int
     {
-        $agents = $this->option('agent');
+        $agents = array_values(array_unique($this->option('agent')));
 
         if ($unknown = array_diff($agents, array_keys(self::AGENTS))) {
             $this->components->error(
@@ -109,6 +110,7 @@ class InstallSkillsCommand extends Command
         $skills = $this->files->directories($this->skillsSource());
         $installed = [];
         $removed = [];
+        $changed = [];
 
         foreach ($agents as $agent) {
             $directory = self::AGENTS[$agent]['skills'];
@@ -117,7 +119,7 @@ class InstallSkillsCommand extends Command
                 $target = $directory . '/' . $retired;
 
                 if (!isset($removed[$target]) && $this->isPackageSkill(base_path($target), $retired)) {
-                    $this->files->deleteDirectory(base_path($target));
+                    $this->removeDirectory(base_path($target));
                     $removed[$target] = true;
                 }
             }
@@ -127,7 +129,11 @@ class InstallSkillsCommand extends Command
 
                 // Several agents share .agents/skills; write each target once.
                 if (!isset($installed[$target])) {
-                    $this->files->deleteDirectory(base_path($target));
+                    if ($this->hasLocalChanges($skill, base_path($target))) {
+                        $changed[] = $target;
+                    }
+
+                    $this->removeDirectory(base_path($target));
                     $this->files->copyDirectory($skill, base_path($target));
                     $installed[$target] = [];
                 }
@@ -144,10 +150,15 @@ class InstallSkillsCommand extends Command
             $this->components->twoColumnDetail('Removed, no longer shipped', $target);
         }
 
+        foreach ($changed as $target) {
+            $this->components->warn("The files of {$target} differed from the package's skill and were replaced.");
+        }
+
         $this->newLine();
         $this->components->info(
-            'Skills installed. Ask your agent to run /lc-upgrade-3x-to-4x to upgrade from 3.x to 4.x,'
-            . ' /lc-upgrade-2x-to-4x from 2.x, or /lc-upgrade-1x-to-4x from 1.x.'
+            'Skills installed. Start a new session of your agent, then run /lc-upgrade-3x-to-4x to upgrade from 3.x to'
+            . ' 4.x, /lc-upgrade-2x-to-4x from 2.x, or /lc-upgrade-1x-to-4x from 1.x. In an agent without slash'
+            . ' commands for skills, ask it to use the skill of that name.'
         );
 
         return self::SUCCESS;
@@ -181,8 +192,71 @@ class InstallSkillsCommand extends Command
     {
         $file = $directory . '/SKILL.md';
 
-        return $this->files->isFile($file)
-            && preg_match('/\A---\n.*?^name: ' . preg_quote($name, '/') . '$.*?\n---\n/ms', $this->files->get($file)) === 1;
+        if (!$this->files->isFile($file)) {
+            return false;
+        }
+
+        // A checkout with Windows line endings, a byte order mark or a quoted name is still the package's skill.
+        $contents = str_replace("\r\n", "\n", (string) preg_replace('/\A\xEF\xBB\xBF/', '', $this->files->get($file)));
+
+        return preg_match(
+            '/\A---\n.*?^name:[ \t]*([\'"]?)' . preg_quote($name, '/') . '\1[ \t]*$.*?\n---\n/ms',
+            $contents
+        ) === 1;
+    }
+
+    /**
+     * Determine if an installed copy of a skill differs from the package's: another file, a file more or less, or
+     * other contents, such as local edits, which the install replaces.
+     *
+     * @param string $source
+     * @param string $target
+     * @return bool
+     */
+    protected function hasLocalChanges(string $source, string $target): bool
+    {
+        if (!$this->files->isDirectory($target)) {
+            return false;
+        }
+
+        $relative = fn (string $root): array => array_map(
+            fn (SplFileInfo $file): string => $file->getRelativePathname(),
+            $this->files->allFiles($root, true)
+        );
+        $files = $relative($source);
+        $installed = $relative($target);
+        sort($files);
+        sort($installed);
+
+        if ($files !== $installed) {
+            return true;
+        }
+
+        foreach ($files as $file) {
+            if ($this->files->get($source . '/' . $file) !== $this->files->get($target . '/' . $file)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Remove a skill directory of the project. A symbolic link is removed itself, so that the directory it points
+     * to, such as the package's own skill, keeps its files.
+     *
+     * @param string $directory
+     * @return void
+     */
+    protected function removeDirectory(string $directory): void
+    {
+        if (is_link($directory)) {
+            $this->files->delete($directory);
+
+            return;
+        }
+
+        $this->files->deleteDirectory($directory);
     }
 
     /**

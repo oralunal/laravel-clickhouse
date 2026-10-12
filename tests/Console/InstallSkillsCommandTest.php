@@ -135,6 +135,107 @@ class InstallSkillsCommandTest extends TestCase
         }
     }
 
+    /**
+     * A copy of a retired skill is the package's also with Windows line endings, a byte order mark, a quoted name or
+     * a space after the name, as a checkout or an editor can leave it.
+     */
+    public function testRemovesARetiredSkillWithOtherLineEndingsOrQuotes(): void
+    {
+        $variants = [
+            '.claude/skills' => "---\r\nname: lc-upgrade-2x-to-3x\r\ndescription: Old.\r\n---\r\n",
+            '.cursor/skills' => "\xEF\xBB\xBF---\nname: \"lc-upgrade-2x-to-3x\" \ndescription: Old.\n---\n",
+            '.github/skills' => "---\nname: 'lc-upgrade-2x-to-3x'\ndescription: Old.\n---\n",
+        ];
+        foreach ($variants as $directory => $contents) {
+            $this->files->ensureDirectoryExists($this->project . "/{$directory}/lc-upgrade-2x-to-3x");
+            $this->files->put($this->project . "/{$directory}/lc-upgrade-2x-to-3x/SKILL.md", $contents);
+        }
+
+        $this->artisan('clickhouse:install-skills', ['--agent' => ['claude_code', 'cursor', 'copilot']])->assertSuccessful();
+
+        foreach (array_keys($variants) as $directory) {
+            $this->assertDirectoryDoesNotExist($this->project . "/{$directory}/lc-upgrade-2x-to-3x", $directory);
+        }
+    }
+
+    /**
+     * A skill directory that is a symbolic link, such as one into vendor/, is replaced by a copy, and the directory
+     * that it points to keeps its files.
+     */
+    public function testReplacesASymbolicLinkWithoutEmptyingItsTarget(): void
+    {
+        $linked = $this->project . '/linked-skill';
+        $this->files->ensureDirectoryExists($linked);
+        $this->files->put($linked . '/SKILL.md', 'mine');
+        $this->files->ensureDirectoryExists($this->project . '/.claude/skills');
+        symlink($linked, $this->project . '/.claude/skills/lc-upgrade-3x-to-4x');
+
+        $this->artisan('clickhouse:install-skills', ['--agent' => ['claude_code']])->assertSuccessful();
+
+        $this->assertSame('mine', $this->files->get($linked . '/SKILL.md'));
+        $this->assertFalse(is_link($this->project . '/.claude/skills/lc-upgrade-3x-to-4x'));
+        $this->assertInstalled('.claude/skills');
+    }
+
+    public function testWarnsWhenItReplacesALocallyChangedSkill(): void
+    {
+        $this->artisan('clickhouse:install-skills', ['--agent' => ['claude_code']])->assertSuccessful();
+        $this->files->append($this->project . '/.claude/skills/lc-upgrade-3x-to-4x/SKILL.md', "\nMy notes.\n");
+
+        $this->artisan('clickhouse:install-skills', ['--agent' => ['claude_code']])
+            ->expectsOutputToContain('.claude/skills/lc-upgrade-3x-to-4x differed from the package')
+            ->assertSuccessful();
+
+        $this->assertInstalled('.claude/skills');
+    }
+
+    public function testARepeatedAgentIsInstalledOnce(): void
+    {
+        $this->artisan('clickhouse:install-skills', ['--agent' => ['cursor', 'cursor']])
+            ->expectsOutputToContain('Cursor')
+            ->doesntExpectOutputToContain('Cursor, Cursor')
+            ->assertSuccessful();
+    }
+
+    /**
+     * Every file or directory of the detection rules selects its agent.
+     */
+    public function testEveryDetectionRuleSelectsItsAgent(): void
+    {
+        foreach (InstallSkillsCommand::AGENTS as $key => $agent) {
+            foreach ($agent['detect'] as $path) {
+                $this->files->deleteDirectory($this->project);
+                $this->files->ensureDirectoryExists($this->project);
+                if (str_contains(basename($path), '.') && !str_starts_with(basename($path), '.')) {
+                    $this->files->ensureDirectoryExists(dirname($this->project . '/' . $path));
+                    $this->files->put($this->project . '/' . $path, '');
+                } else {
+                    $this->files->ensureDirectoryExists($this->project . '/' . $path);
+                }
+
+                $this->artisan('clickhouse:install-skills')->assertSuccessful();
+
+                $this->assertFileExists(
+                    $this->project . '/' . $agent['skills'] . '/lc-upgrade-3x-to-4x/SKILL.md',
+                    "{$key} from {$path}"
+                );
+            }
+        }
+    }
+
+    public function testAsksForTheAgentsWhenNoneIsDetected(): void
+    {
+        $this->artisan('clickhouse:install-skills')
+            ->expectsChoice(
+                'No coding agent was detected. Which ones do you use?',
+                ['kiro'],
+                array_map(fn (array $agent): string => $agent['name'], InstallSkillsCommand::AGENTS)
+            )
+            ->assertSuccessful();
+
+        $this->assertInstalled('.kiro/skills');
+    }
+
     public function testFailsWithoutAnyAgentWhenNotInteractive(): void
     {
         $this->artisan('clickhouse:install-skills', ['--no-interaction' => true])

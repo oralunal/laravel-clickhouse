@@ -61,11 +61,12 @@ abstract class Model extends EloquentModel
     /**
      * Keep one row, or a list of rows, in the memory of the process, for flushBuffer() to insert in one INSERT.
      *
-     * Each row has column keys. Every buffered row of a model must have the same keys, in any order, because the
-     * buffer is sent as one insert: a row with other keys, or without keys, is refused before anything is buffered,
-     * and the rows buffered before stay buffered. The rows are inserted as given, as insert() inserts them: casts and
-     * mutators do not apply. While the model's connection pretends, the rows are inserted at once, which logs the
-     * INSERT and sends nothing.
+     * Each row has column keys. An array with an integer key is a list of rows, also when its keys are not 0, 1, 2, ...,
+     * such as the result of array_filter() or rows keyed by an id; an array with only string keys is one row. Every
+     * buffered row of a model must have the same keys, in any order, because the buffer is sent as one insert: a row
+     * with other keys, or without keys, is refused before anything is buffered, and the rows buffered before stay
+     * buffered. The rows are inserted as given, as insert() inserts them: casts and mutators do not apply. While the
+     * model's connection pretends, the rows are inserted at once, which logs the INSERT and sends nothing.
      *
      * @param array<string, mixed>|array<int, array<string, mixed>> $rowOrRows
      * @return void
@@ -77,7 +78,7 @@ abstract class Model extends EloquentModel
             return;
         }
 
-        $rows = array_is_list($rowOrRows) ? $rowOrRows : [$rowOrRows];
+        $rows = array_filter(array_keys($rowOrRows), 'is_int') !== [] ? array_values($rowOrRows) : [$rowOrRows];
         $model = new static();
 
         if ($model->getConnection()->pretending()) {

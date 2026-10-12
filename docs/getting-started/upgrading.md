@@ -3,10 +3,11 @@
 | From | Package before | Skill |
 | --- | --- | --- |
 | 3.x | `oralunal/laravel-clickhouse` | `/lc-upgrade-3x-to-4x` |
-| 2.x | `oralunal/phpclickhouse-laravel` | `/lc-upgrade-2x-to-4x` |
-| 1.x | `oralunal/phpclickhouse-laravel` | `/lc-upgrade-1x-to-4x` |
+| 2.0.1, 2.0.2 | `oralunal/phpclickhouse-laravel` | `/lc-upgrade-2x-to-4x` |
+| 1.x, 2.0.0 | `oralunal/phpclickhouse-laravel` | `/lc-upgrade-1x-to-4x` |
 
 PHP 8.5 and Laravel 13 stay the requirements.
+2.0.0 still required the libraries that 2.0.1 bundled, so upgrade 2.0.0 as 1.x.
 The complete guide is [UPGRADE.md](https://github.com/oralunal/laravel-clickhouse/blob/master/UPGRADE.md).
 The [changelog](https://github.com/oralunal/laravel-clickhouse/blob/master/CHANGELOG.md) shows each change with the SQL before and after.
 
@@ -14,6 +15,9 @@ The [changelog](https://github.com/oralunal/laravel-clickhouse/blob/master/CHANG
 
 A coding-agent skill does the upgrade, checks the result, and asks you when a change needs a decision.
 It does not run `migrate:fresh` and does not change the data of a database. See [Coding-agent skills](/reference/agent-skills).
+
+First, commit your work, run your test suite and keep its output, for example `php artisan test > tests-before-4x.txt`.
+After the update the old code no longer loads, so the skill compares its run with this result.
 
 ### From 3.x
 
@@ -24,7 +28,7 @@ It does not run `migrate:fresh` and does not change the data of a database. See 
    php artisan clickhouse:install-skills
    ```
 
-2. In your agent, run `/lc-upgrade-3x-to-4x`.
+2. Start a new session of your agent and run `/lc-upgrade-3x-to-4x`.
 
 ### From 2.x
 
@@ -36,11 +40,16 @@ It does not run `migrate:fresh` and does not change the data of a database. See 
    php artisan clickhouse:install-skills
    ```
 
-2. In your agent, run `/lc-upgrade-2x-to-4x`.
+   If `composer.json` lists `oralunal/phpclickhouse-laravel` in `extra.laravel.dont-discover`, rename it to
+   `oralunal/laravel-clickhouse`.
+
+2. Start a new session of your agent and run `/lc-upgrade-2x-to-4x`.
 
 ### From 1.x
 
-1. Replace the packages and install the skills:
+1. Remove `Tinderbox\ClickhouseBuilder\Integrations\Laravel\ClickhouseServiceProvider` from `bootstrap/providers.php`
+   or `config/app.php` if it is listed there.
+2. Replace the packages and install the skills:
 
    ```sh
    composer remove oralunal/phpclickhouse-laravel oralunal/clickhouse-builder glushkovds/php-clickhouse-schema-builder --no-update
@@ -48,9 +57,17 @@ It does not run `migrate:fresh` and does not change the data of a database. See 
    php artisan clickhouse:install-skills
    ```
 
-2. In your agent, run `/lc-upgrade-1x-to-4x`.
+   If your own code uses `myclabs/php-enum` or `the-tinderbox/clickhouse-php-client`, add it to the same
+   `composer require`.
 
-If `php artisan` fails with a class-not-found error after step 1, copy the skills by hand:
+3. Start a new session of your agent and run `/lc-upgrade-1x-to-4x`.
+
+In an agent without slash commands for skills, ask for the skill by name, as in
+"Upgrade laravel-clickhouse from 3.x to 4.x with the lc-upgrade-3x-to-4x skill."
+
+If `php artisan` fails with a class-not-found error after the update, delete `bootstrap/cache/packages.php` and
+`bootstrap/cache/services.php` and try again. If the app still does not boot, copy the skills by hand into the skills
+directory of your agent, such as `.claude/skills` for Claude Code or `.agents/skills` for Codex, Zed and Gemini:
 
 ```sh
 mkdir -p .claude/skills
@@ -64,7 +81,7 @@ migrations. It removes the parts of 3.x that did the same work, without a deprec
 
 | Removed | Use instead |
 | --- | --- |
-| `BaseModel` and its `insertAssoc()`, `insertBulk()`, `prepareAndInsert*()`, `getRows()` and `$tableForInserts` | `Oralunal\LaravelClickHouse\Eloquent\Model` with `insert()`, `create()` and `buffer()`. See [Define an Eloquent model](/models/defining-models). |
+| `BaseModel` and its `insertAssoc()`, `insertBulk()`, `prepareAndInsert*()`, `getRows()`, `$tableForInserts` and `$tableSources` | `Oralunal\LaravelClickHouse\Eloquent\Model` with `insert()`, `create()` and `buffer()`, one model for each table. See [Define an Eloquent model](/models/defining-models). |
 | The package's own `Builder`, `ClickhouseBuilder\*`, `RawColumn`, `raw()` and `InsertArray` | The `QueryBuilder` that `DB::connection('clickhouse')->table()` returns, `DB::raw()` and PHP arrays. See [Query builder basics](/query-builder/basics). |
 | `format()` of the builder | `getStatement($format)->rawData()`, or `selectStatement($sql)` of the connection |
 | `getCountQuery()`, `asyncWithQuery()` | `count()`, `exists()`, `forPage()` and [parallel queries](/advanced/parallel-queries) |
@@ -73,8 +90,12 @@ migrations. It removes the parts of 3.x that did the same work, without a deprec
 | The package's `Grammar` | `LiteralGrammar` and `newLiteralGrammar()` |
 | The option `fix_default_query_builder` | Nothing. The query builder is always the package's `QueryBuilder`. |
 
-These changes make the same code do something else:
+Some changes make the same code do something else, without an error. Among them:
 
+- `where('id', [1, 2])` compared with `IN (1, 2)` in 3.x. Laravel compares with the first value only, so a `delete()`
+  or an `update()` changes fewer rows. Use `whereIn()`.
+- `whereNotIn('id', [])` matches every row, as in Laravel: as the only condition of a `delete()`, it deletes every row.
+- A model ignores `$tableForInserts` and `$tableSources`, and casts no longer apply to its writes.
 - `tinyInteger()`, `smallInteger()`, `integer()` and `bigInteger()` create `Int8`, `Int16`, `Int32` and `Int64`, and
   their unsigned forms `UInt8` to `UInt64`. `id()` creates a `UInt64` column. 3.x wrote `Int16` for `tinyInteger()`,
   and signed types for the unsigned columns and `id()`.
