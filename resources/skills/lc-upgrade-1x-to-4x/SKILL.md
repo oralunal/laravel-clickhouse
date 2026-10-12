@@ -100,6 +100,11 @@ is unclear.
      then `composer install` and the test command in `../lc-baseline`, then
      `git worktree remove ../lc-baseline`. Otherwise say in the report that
      there is no baseline.
+   - If the project runs PHPStan (a `phpstan.neon`, `phpstan.neon.dist` or
+     `phpstan.dist.neon` file), run it as well, as the project runs it, such
+     as `vendor/bin/phpstan analyse` or a Composer script, and keep its
+     errors. Step 14.8 of the `lc-upgrade-3x-to-4x` skill compares them. In a
+     worktree, run it there after the test suite.
 4. Search for every pattern below and keep the list of matches. You will work
    through it in the next steps. The patterns are PCRE and work with
    `rg`/`grep -P` or your search tool; search `*.php` files and the non-PHP

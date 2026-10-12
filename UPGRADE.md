@@ -108,8 +108,10 @@ have to change or check.
 The agent rewrites the models, the queries and the migrations for 4.0, reviews
 with you the writes and the migrations whose behavior changes, checks the
 result, and reports how the test suite compares with the run before the
-upgrade. It never runs `migrate:fresh` or changes the data of a real database,
-and it asks before it changes what a write does.
+upgrade. In a project with Larastan, it offers to include the PHPStan
+extension of the package, and compares the errors of PHPStan with the run
+before the upgrade. It never runs `migrate:fresh` or changes the data of a
+real database, and it asks before it changes what a write does.
 
 ### Or upgrade by hand
 

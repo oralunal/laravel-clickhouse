@@ -53,12 +53,14 @@ If 4.x is already installed, a skill asks you for that result, or runs the suite
 
 Each skill:
 
-1. records the result of the test suite before the upgrade;
+1. records the result of the test suite before the upgrade, and the errors of PHPStan when the project runs it;
 2. updates the dependency, unless 4.x is already installed;
 3. changes the code that the upgrade breaks;
 4. asks you before it changes a write or a migration that already ran;
 5. checks the result and compares the test suite with the first run;
-6. writes a report.
+6. in a project with Larastan, offers to include the [PHPStan extension](/reference/static-analysis) of the package,
+   adds it only if you agree, and compares the errors of PHPStan with the first run;
+7. writes a report.
 
 The skills do not run `migrate:fresh`, do not change the data of a database, and do not commit.
 
