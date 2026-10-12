@@ -22,15 +22,11 @@ class RowTypesTest extends TestCase
 {
     public function testPhpStanReadsTheRowsAsArrays(): void
     {
-        $process = new Process(
-            [
-                PHP_BINARY, 'vendor/bin/phpstan', 'analyse', '--configuration=tests/Types/phpstan.neon',
-                '--error-format=json', '--no-progress', '--memory-limit=1G',
-            ],
-            dirname(__DIR__, 2),
-            timeout: 300,
-        );
-        $process->run();
+        $this->phpStan(['clear-result-cache', '--configuration=tests/Types/phpstan.neon']);
+        $process = $this->phpStan([
+            'analyse', '--configuration=tests/Types/phpstan.neon', '--error-format=json', '--no-progress',
+            '--memory-limit=1G',
+        ]);
 
         $result = json_decode($process->getOutput(), true);
         $this->assertIsArray($result, 'PHPStan did not run: ' . $process->getErrorOutput() . $process->getOutput());
@@ -46,5 +42,35 @@ class RowTypesTest extends TestCase
         $dumped = array_filter($messages, fn (string $message): bool => str_contains($message, ': Dumped type: '));
         $this->assertCount(1, $dumped, implode("\n", $messages));
         $this->assertSame([], array_values(array_diff($messages, $dumped)));
+    }
+
+    /**
+     * Run PHPStan in a process of its own, with the environment of the shell only: the other tests load the .env
+     * file of the testbench application into $_ENV, such as DB_CONNECTION=sqlite, which the Laravel application
+     * that Larastan boots would read in place of the env of testbench.yaml. The result cache is cleared first,
+     * because it does not depend on the environment.
+     *
+     * @param list<string> $arguments
+     * @return Process
+     */
+    private function phpStan(array $arguments): Process
+    {
+        $environment = array_fill_keys(array_keys($_ENV), false);
+        foreach (['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot'] as $name) {
+            $value = getenv($name);
+            if ($value !== false) {
+                $environment[$name] = $value;
+            }
+        }
+
+        $process = new Process(
+            [PHP_BINARY, 'vendor/bin/phpstan', ...$arguments],
+            dirname(__DIR__, 2),
+            $environment,
+            timeout: 300,
+        );
+        $process->run();
+
+        return $process;
     }
 }

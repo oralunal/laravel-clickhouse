@@ -17,7 +17,8 @@ $clickhouse->insert('INSERT INTO my_table (id, field_one, ratio) VALUES (?, ?, ?
 // INSERT INTO my_table (id, field_one, ratio) VALUES (1, 'a', 0.3333333333333333)
 ```
 
-- `select()` returns the rows as `stdClass` objects, as Laravel's other connections do. `selectStatement()->rows()` returns associative arrays. See [FORMAT clauses](#format-clauses).
+- `select()` returns the rows as `stdClass` objects, as Laravel's other connections do. Each value has the PHP type of its ClickHouse type. See [Read results](/query-builder/reading-results#rows).
+  `selectStatement()->rows()` returns associative arrays with the values of the JSON result. See [FORMAT clauses](#format-clauses).
 - A string is escaped. A date is written in its own time zone. `true` and `false` are `1` and `0`. A float keeps all digits. An array is an array literal. `DB::raw()` is written as SQL.
 - A `?` in a string literal, a quoted name, a heredoc such as `$$...$$` or a comment is not a placeholder.
 - Write a `?` that is not a placeholder, such as the ternary operator, as `??`:
@@ -43,6 +44,7 @@ Use `?` when you can. A query that has `?` and a `:0`, `{0}` or `{name:Type}` th
 
 `select()`, `scalar()`, `selectOne()`, `selectParallelly()` and the query builder read the rows of a JSON result.
 A `FORMAT` clause with `JSON`, `JSONStrings`, `JSONCompact` or `JSONCompactStrings` returns rows.
+The values of `JSON` get the PHP types of their columns. The other three formats keep the values that the SQL asks for, such as strings for `JSONStrings`.
 Another format throws an `Oralunal\LaravelClickHouse\Exceptions\QueryException` before the request:
 
 ```text
@@ -92,6 +94,8 @@ foreach ($clickhouse->cursor('SELECT id, field_one FROM my_table WHERE field_two
 ```
 
 - `cursor()` asks for `JSONEachRow` and downloads the result into `php://temp`. This stream keeps 2 MB in memory and moves to a temporary file above that.
+- `JSONEachRow` names no types. When the result has rows, `cursor()` sends `DESCRIBE TABLE (<query>)`, which gives the type of each column without running the query again, and gives each value the type that `select()` gives it. This request is not logged.
+  ClickHouse cannot describe SQL that is no `SELECT`, such as `SHOW TABLES`: its values stay as the JSON result writes them.
 - The query runs when you ask for the first row. The full download must end within `timeout_query`.
 - On ClickHouse 24.8, two million rows used 2 MB more memory. `select()` used 193 MB for 200,000 of these rows.
 - A query with its own `FORMAT` clause, `JSON` included, throws before the request.

@@ -14,11 +14,16 @@ $rows = $query->select('id', 'field_one')->orderBy('id')->get();
 $rows[0]->field_one; // 'a'
 ```
 
-- A value of an `Array`, a `Map` or a `Tuple` column is a PHP array: `$row->tags[0]`.
-- To read the rows as associative arrays, use `getStatement()->rows()`. See [Other formats](#other-formats).
+- Each value has the PHP type of its ClickHouse type, on every ClickHouse version:
+  - an integer is an `int`, and a numeric string above `PHP_INT_MAX`, as a `UInt64` can be;
+  - a `Float32` or `Float64` is a `float`, also a whole number, and NaN and the infinities are `NAN`, `INF` and `-INF`;
+  - a `Decimal` is a string with every digit and the scale of the column, such as `'1.50'`;
+  - an `Array`, a `Map` or a `Tuple` is a PHP array whose values follow the same rules: `$row->tags[0]`.
+
+  See [Static analysis](/reference/static-analysis#the-types-of-the-rows) for every type.
+- To read the rows as associative arrays, with the values of the JSON result, use `getStatement()->rows()`.
+  See [Other formats](#other-formats).
 - The Eloquent builder of a model returns models. See [Eloquent models](/models/eloquent).
-- ClickHouse 24.8 returns 64-bit integers, such as `UInt64` and the result of `count()` in SQL, as strings. 25.8 and later return numbers.
-  The `output_format_json_quote_64bit_integers` setting chooses. See [ClickHouse versions](/reference/clickhouse-versions).
 
 ### Static analysis
 
@@ -26,18 +31,8 @@ The rows have the types that Laravel declares, so static analysis tools, such as
 correctly: `get()` returns `Collection<int, stdClass>`, and `first()` returns `stdClass|null`.
 On a model query, `toBase()` and `getQuery()` return `QueryBuilder`.
 
-`DB::connection()` declares Laravel's connection type. Thus PHPStan reads `DB::connection('clickhouse')->table()` as
-Laravel's builder, and does not know the ClickHouse methods, such as `final()` and `settings()`. Declare the type of
-the connection:
-
-```php
-use Oralunal\LaravelClickHouse\Connection;
-
-/** @var Connection $clickhouse */
-$clickhouse = DB::connection('clickhouse');
-
-$rows = $clickhouse->table('my_table')->final()->get(); // QueryBuilder::final(), Collection<int, stdClass>
-```
+The PHPStan extension of the package gives `DB::connection('clickhouse')` and `Schema::connection('clickhouse')` the
+types of the package, and reads the schema dumps of ClickHouse connections. See [Static analysis](/reference/static-analysis).
 
 ## First row and single values
 

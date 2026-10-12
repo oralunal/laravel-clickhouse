@@ -652,6 +652,23 @@ package's), `(static|self)::(write|createMergeTree)\(` and
    where the rows go on as arrays, such as into `array_column()` with a key,
    a JSON response or a function typed `array`. `array_column()` reads the
    properties of objects too.
+7. **Values have the PHP types of their columns.** 3.x returned the values of
+   the JSON result, which changed with the ClickHouse version. 4.x gives each
+   value the type of its ClickHouse type, on every version, through the rows
+   of step 9.6 (not through `getStatement()` or `selectStatement()`):
+   - `UInt64` and `Int64` are ints, where 24.8 gave strings, such as `'5'`; a
+     value above `PHP_INT_MAX` is a numeric string;
+   - a whole `Float64` is a float, where 3.x gave an int; NaN and the
+     infinities are `NAN`, `INF` and `-INF`, where 3.x gave `null`;
+   - a `Decimal` is a string with the scale of its column, such as `'1.50'`,
+     where 3.x gave a float, or an int for a whole value.
+   Search the code that reads such values for a comparison with a numeric
+   string or an int, such as `=== '0'` or `=== 0`, for `is_string(`,
+   `is_int(` and `is_float(`, and for `round(`, `number_format(`, `floor(`,
+   `ceil(` and `abs(` on decimal columns: in a file with
+   `declare(strict_types=1)`, a decimal string given to a float parameter
+   fails with a `TypeError`. Cast it with `(float)` where the code needs a
+   float. Ask the user before a change of a value that is stored or sent on.
 
 ## Step 10: Review the writes with the user
 

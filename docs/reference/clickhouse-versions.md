@@ -8,17 +8,16 @@ This page lists the differences of 26.3 and 26.8, and the connection `settings` 
 
 ## 64-bit integers
 
-24.8 returns `UInt64` and `Int64` values, such as `count()`, as strings: `'3'`.
-From 25.8, `output_format_json_quote_64bit_integers` is `0`, so they are JSON numbers. PHP reads them as ints, or as floats above `PHP_INT_MAX`, which loses digits:
-`toUInt64('18446744073709551615')` gives `1.8446744073709552E+19`.
+24.8 writes `UInt64` and `Int64` values, such as `count()`, as JSON strings: `'3'`.
+From 25.8, `output_format_json_quote_64bit_integers` is `0`, so they are JSON numbers.
 
-To get strings on all versions:
+`select()`, the query builder, `cursor()` and `Parallel::getRows()` give the same values on every version: an `int`, or
+a numeric string above `PHP_INT_MAX`, such as `'18446744073709551615'`. The setting does not change them.
+See [Read results](/query-builder/reading-results#rows).
 
-```php
-'settings' => ['output_format_json_quote_64bit_integers' => 1],
-```
-
-Or for one query: `->settings('output_format_json_quote_64bit_integers', 1)`. The query builder's `count()` returns an int on all versions.
+The setting changes the values of a `Statement` only, as `getStatement()->rows()` and `selectStatement($sql)->rows()`
+give them: strings when it is `1`, and numbers when it is `0`. smi2 reads a number above `PHP_INT_MAX` as a float,
+which loses digits: `toUInt64('18446744073709551615')` gives `1.8446744073709552E+19`.
 
 ## Asynchronous inserts
 
