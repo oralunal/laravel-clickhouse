@@ -525,16 +525,74 @@ class SchemaGrammarTest extends TestCase
         $this->assertSame('', $position->invoke($grammar, new ColumnDefinition(['name' => 'c'])));
     }
 
-    public function test_json_generated_columns_throw(): void
+    /**
+     * virtualAsJson() and storedAsJson() read the value of a JSON selector as the column's type, so that a missing
+     * key gives the type's default, or null in a Nullable column. Another expression is written as given.
+     */
+    public function test_json_generated_columns_read_the_value_as_the_column_type(): void
     {
-        foreach (['virtualAsJson', 'storedAsJson'] as $method) {
+        $this->assertSame(
+            "`c` String ALIAS JSONExtract(`payload`, 'user', 'name', 'String')",
+            $this->compileColumn(fn (Blueprint $t) => $t->string('c')->virtualAsJson('payload->user->name'))
+        );
+        $this->assertSame(
+            "`c` Nullable(Int32) MATERIALIZED JSONExtract(`payload`, 'sizes', 1, 'Nullable(Int32)')",
+            $this->compileColumn(fn (Blueprint $t) => $t->integer('c')->nullable()->storedAsJson('payload->sizes[0]'))
+        );
+        $this->assertSame(
+            "`c` String ALIAS JSONExtractString(payload, 'x')",
+            $this->compileColumn(fn (Blueprint $t) => $t->string('c')->virtualAsJson("JSONExtractString(payload, 'x')"))
+        );
+    }
+
+    /**
+     * time() and timeTz() create Time, or Time64 with a precision, on a server that turns on the setting
+     * enable_time_time64_type, and are refused on one that does not, such as 24.8, which reads Time as Int64.
+     */
+    public function test_time_columns_follow_the_setting_of_the_server(): void
+    {
+        $enabled = $this->clickhouseConnection(rows: fn (string $sql): array => str_contains($sql, 'enable_time_time64_type')
+            ? [['name' => 'enable_time_time64_type']]
+            : []);
+        $grammar = $enabled->getSchemaGrammar();
+        $column = fn (Blueprint $blueprint): string => (new ReflectionMethod($grammar, 'getColumn'))
+            ->invoke($grammar, $blueprint, array_values($blueprint->getAddedColumns())[0]);
+
+        $this->assertSame('`c` Time', $column($this->blueprintOn($enabled, fn (Blueprint $t) => $t->time('c'))));
+        $this->assertSame('`c` Time64(6)', $column($this->blueprintOn($enabled, fn (Blueprint $t) => $t->time('c', 6))));
+        $this->assertSame('`c` Nullable(Time64(3))', $column($this->blueprintOn($enabled, fn (Blueprint $t) => $t->timeTz('c', 3)->nullable())));
+        $this->assertCount(1, $this->selects, 'The setting is read once.');
+
+        $disabled = $this->clickhouseConnection();
+        foreach (['time', 'timeTz'] as $method) {
             try {
-                $this->compileColumn(fn (Blueprint $t) => $t->string('c')->{$method}('payload->name'));
+                $disabledGrammar = $disabled->getSchemaGrammar();
+                (new ReflectionMethod($disabledGrammar, 'getColumn'))->invoke(
+                    $disabledGrammar,
+                    $blueprint = $this->blueprintOn($disabled, fn (Blueprint $t) => $t->{$method}('c')),
+                    array_values($blueprint->getAddedColumns())[0]
+                );
                 $this->fail("{$method}() should throw");
             } catch (RuntimeException $exception) {
-                $this->assertStringContainsString("ClickHouse does not support {$method}() (column [c])", $exception->getMessage());
+                $this->assertSame(
+                    "ClickHouse has no time-of-day type for {$method}() (column [c]) on this server: the Time type needs"
+                    . ' the setting enable_time_time64_type, which ClickHouse 26.3 and later turn on. Store the seconds'
+                    . ' since midnight in an integer column, the time as a string, or use dateTime().',
+                    $exception->getMessage()
+                );
             }
         }
+    }
+
+    /**
+     * @param \Closure(Blueprint): mixed $define
+     */
+    private function blueprintOn(ClickHouseConnection $connection, \Closure $define): Blueprint
+    {
+        $blueprint = new Blueprint($connection, 'events');
+        $define($blueprint);
+
+        return $blueprint;
     }
 
     /**
@@ -605,12 +663,6 @@ class SchemaGrammarTest extends TestCase
                 fn (Blueprint $t) => $t->set('c', ['a']),
                 "ClickHouse has no SET type (column [c]). Use an array of an enum, for example rawColumn('c', \"Array(Enum('a', 'b'))\").",
             ],
-            'time' => [
-                fn (Blueprint $t) => $t->time('c'),
-                'ClickHouse has no time-of-day type for time() (column [c]). Store the seconds since midnight in an integer'
-                . ' column, the time as a string, or use dateTime().',
-            ],
-            'timeTz' => [fn (Blueprint $t) => $t->timeTz('c', 3), 'ClickHouse has no time-of-day type for timeTz() (column [c]).'],
             'computed' => [
                 fn (Blueprint $t) => $t->computed('c', 'a + 1'),
                 'ClickHouse has no computed() column (column [c]). Give the column a type and use storedAs() for a'

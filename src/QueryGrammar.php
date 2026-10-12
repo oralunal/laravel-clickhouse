@@ -4,21 +4,29 @@ declare(strict_types=1);
 
 namespace Oralunal\LaravelClickHouse;
 
+use BackedEnum;
 use ClickHouseDB\Exception\DatabaseException;
 use ClickHouseDB\Query\Degeneration\Bindings;
 use ClickHouseDB\Query\Query;
 use Closure;
 use DateTimeInterface;
+use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\Query\Expression;
 use Illuminate\Database\Query\Grammars\Grammar;
 use Illuminate\Database\Query\IndexHint;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Enumerable;
 use InvalidArgumentException;
+use JsonException;
+use JsonSerializable;
+use Oralunal\LaravelClickHouse\Concerns\CompilesJsonPaths;
 use Oralunal\LaravelClickHouse\Concerns\SubstitutesBindings;
 use Oralunal\LaravelClickHouse\Enums\DateTimePrecision;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
+use stdClass;
 use Stringable;
+use UnitEnum;
 
 /**
  * The grammar of Laravel's query builder on a ClickHouse connection.
@@ -26,10 +34,12 @@ use Stringable;
  * Bindings are Laravel's "?" placeholders, which the connection writes into the SQL as ClickHouse literals before
  * the query is sent (see SubstitutesBindings::prepareQueryForClient()). Identifiers are double-quoted, with
  * backslashes and double quotes escaped. Deletes and updates are ClickHouse mutations, refused when the query uses
- * a clause that the mutation would ignore (see verifyClausesOfMutation()).
+ * a clause that the mutation would ignore (see verifyClausesOfMutation()). A JSON selector, such as payload->a, reads
+ * a JSON document from a String column with ClickHouse's JSON functions (see CompilesJsonPaths and wrapJsonSelector()).
  */
 class QueryGrammar extends Grammar
 {
+    use CompilesJsonPaths;
     use SubstitutesBindings;
 
     /**
@@ -175,20 +185,58 @@ class QueryGrammar extends Grammar
     /**
      * Compile an insert, with the dates of its values as strings (see parameter()): ClickHouse (25.8 and earlier)
      * refuses a fraction for a DateTime column in an insert also as toDateTime64(), and a string keeps the VALUES
-     * fast to parse.
+     * fast to parse. A JSON selector as a column, such as payload->a, is refused (see refuseJsonPathsInInsert()).
      *
      * @param Builder $query
      * @param array<int|string, mixed> $values
      * @return string
+     * @throws QueryException When a column is a JSON selector
      */
     public function compileInsert(Builder $query, array $values)
     {
+        $first = array_first($values);
+        $this->refuseJsonPathsInInsert(array_keys(is_array($first) ? $first : $values));
+
         $this->writesSubSecondDatesAsDateTime64 = false;
 
         try {
             return parent::compileInsert($query, $values);
         } finally {
             $this->writesSubSecondDatesAsDateTime64 = true;
+        }
+    }
+
+    /**
+     * Compile an insert of the rows that a query selects (insertUsing()). A JSON selector as a column is refused (see
+     * refuseJsonPathsInInsert()).
+     *
+     * @param Builder $query
+     * @param array<int, string> $columns
+     * @param string $sql
+     * @return string
+     * @throws QueryException When a column is a JSON selector
+     */
+    public function compileInsertUsing(Builder $query, array $columns, string $sql)
+    {
+        $this->refuseJsonPathsInInsert($columns);
+
+        return parent::compileInsertUsing($query, $columns, $sql);
+    }
+
+    /**
+     * Refuse a column of an insert that is a JSON selector, such as payload->a: an insert writes whole columns, and
+     * Laravel would write the selector's function in the column list, which ClickHouse rejects.
+     *
+     * @param array<int, int|string> $columns
+     * @return void
+     * @throws QueryException When a column is a JSON selector
+     */
+    public function refuseJsonPathsInInsert(array $columns): void
+    {
+        foreach ($columns as $column) {
+            if (is_string($column) && $this->isJsonSelector($column)) {
+                throw QueryException::cannotInsertIntoJsonPath($column);
+            }
         }
     }
 
@@ -799,7 +847,398 @@ class QueryGrammar extends Grammar
             return $this->compileNullSafeEquals($where['column'], $where['value']);
         }
 
-        return parent::whereBasic($query, $where);
+        return parent::whereBasic($query, $this->readJsonSelectorAsNumber($where, [$where['value']]));
+    }
+
+    /**
+     * Compile a whereIn() clause, with a JSON selector read as a number when every value is a number (see
+     * readJsonSelectorAsNumber()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereIn(Builder $query, $where)
+    {
+        return parent::whereIn($query, $this->readJsonSelectorAsNumber($where, $where['values']));
+    }
+
+    /**
+     * Compile a whereNotIn() clause, with a JSON selector read as a number when every value is a number (see
+     * readJsonSelectorAsNumber()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereNotIn(Builder $query, $where)
+    {
+        return parent::whereNotIn($query, $this->readJsonSelectorAsNumber($where, $where['values']));
+    }
+
+    /**
+     * Compile a whereIntegerInRaw() clause, with a JSON selector read as a number (see readJsonSelectorAsNumber()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereInRaw(Builder $query, $where)
+    {
+        return parent::whereInRaw($query, $this->readJsonSelectorAsNumber($where, $where['values']));
+    }
+
+    /**
+     * Compile a whereIntegerNotInRaw() clause, with a JSON selector read as a number (see
+     * readJsonSelectorAsNumber()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereNotInRaw(Builder $query, $where)
+    {
+        return parent::whereNotInRaw($query, $this->readJsonSelectorAsNumber($where, $where['values']));
+    }
+
+    /**
+     * Compile a whereBetween() clause, with a JSON selector read as a number when both bounds are numbers (see
+     * readJsonSelectorAsNumber()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereBetween(Builder $query, $where)
+    {
+        return parent::whereBetween(
+            $query,
+            $this->readJsonSelectorAsNumber($where, is_array($where['values']) ? $where['values'] : [])
+        );
+    }
+
+    /**
+     * Compile a whereNull() clause. For a JSON selector it is JSONType(<column>, <path>) = 'Null', which holds for
+     * a null value and for a missing key, as Laravel's MySQL grammar checks both.
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereNull(Builder $query, $where)
+    {
+        return is_string($where['column']) && $this->isJsonSelector($where['column'])
+            ? $this->compileJsonType($where['column']) . " = 'Null'"
+            : parent::whereNull($query, $where);
+    }
+
+    /**
+     * Compile a whereNotNull() clause. For a JSON selector it is JSONType(<column>, <path>) != 'Null' (see
+     * whereNull()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     */
+    protected function whereNotNull(Builder $query, $where)
+    {
+        return is_string($where['column']) && $this->isJsonSelector($where['column'])
+            ? $this->compileJsonType($where['column']) . " != 'Null'"
+            : parent::whereNotNull($query, $where);
+    }
+
+    /**
+     * Compile a whereFullText() clause with ClickHouse's token functions, which a text index of the column speeds up
+     * (see SchemaGrammar::compileFulltext()): hasAllTokens(<column>, ?), which holds when the column has every token
+     * of the value, or hasAnyTokens() with the option mode 'any' (see getFullTextFunction()). Several columns are
+     * joined with or, each with its own binding of the value (see QueryBuilder::whereFullText()). The functions split
+     * the value into tokens at each character that is no ASCII letter or digit, and compare tokens with their letter
+     * case. ClickHouse 26.3 and 26.8 have them, 24.8 does not (UNKNOWN_FUNCTION).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     * @throws InvalidArgumentException For another mode
+     */
+    public function whereFullText(Builder $query, $where)
+    {
+        $function = $this->getFullTextFunction((array) $where['options']);
+        $conditions = array_map(
+            fn (mixed $column): string => "{$function}({$this->wrap($column)}, {$this->parameter($where['value'])})",
+            array_values((array) $where['columns'])
+        );
+
+        return count($conditions) === 1 ? $conditions[0] : '(' . implode(' or ', $conditions) . ')';
+    }
+
+    /**
+     * Get the function of whereFullText() for its options: hasAllTokens for no mode or the mode 'all', and
+     * hasAnyTokens for the mode 'any'.
+     *
+     * @param array<string, mixed> $options
+     * @return string
+     * @throws InvalidArgumentException For another mode, such as MySQL's 'boolean'
+     */
+    public function getFullTextFunction(array $options): string
+    {
+        $mode = $options['mode'] ?? 'all';
+
+        return match ($mode) {
+            'all' => 'hasAllTokens',
+            'any' => 'hasAnyTokens',
+            default => throw new InvalidArgumentException(sprintf(
+                "whereFullText() takes the mode 'all' or 'any' on ClickHouse, [%s] given.",
+                is_string($mode) ? $mode : get_debug_type($mode)
+            )),
+        };
+    }
+
+    /**
+     * Compile the distance of Laravel's vector queries, such as whereVectorSimilarTo() and orderByVectorDistance():
+     * cosineDistance(<column>, CAST(? AS Array(Float32))), with the vector as its JSON binding. It is 1 minus the
+     * cosine similarity, as the distance of PostgreSQL's pgvector, and a vector similarity index with
+     * cosineDistance speeds up an ORDER BY of it with a LIMIT (see SchemaGrammar::compileVectorIndex()).
+     *
+     * @param mixed $column
+     * @return string
+     */
+    public function compileVectorDistanceExpression($column)
+    {
+        return 'cosineDistance(' . $this->wrap($column) . ', CAST(? AS Array(Float32)))';
+    }
+
+    /**
+     * Determine if the grammar compiles Laravel's vector queries: it does (see compileVectorDistanceExpression()).
+     *
+     * @return bool
+     */
+    public function supportsVectorDistance()
+    {
+        return true;
+    }
+
+    /**
+     * Read the JSON selector of a condition as a number when every value it is compared with is an int or a float:
+     * JSONExtract(<column>, <path>, 'Nullable(Float64)'), which gives null for a value that is no number, such as
+     * "red" or a missing key, so that the condition does not hold for that row. Otherwise the selector is read as a
+     * string (see wrapJsonSelector()). ClickHouse (24.8 checked) converts such a string to the type of a number
+     * that it is compared with, and the whole query fails with TYPE_MISMATCH at the first string that is no number.
+     *
+     * @param array<string, mixed> $where
+     * @param array<int|string, mixed> $values
+     * @return array<string, mixed>
+     */
+    protected function readJsonSelectorAsNumber(array $where, array $values): array
+    {
+        if (!is_string($where['column']) || !$this->isJsonSelector($where['column']) || $values === []) {
+            return $where;
+        }
+
+        foreach ($values as $value) {
+            if (!is_int($value) && !is_float($value)) {
+                return $where;
+            }
+        }
+
+        $where['column'] = new Expression($this->compileJsonExtract($where['column'], 'Nullable(Float64)'));
+
+        return $where;
+    }
+
+    /**
+     * Wrap a JSON selector, such as payload->user->name, as the value it names, read as a string:
+     * JSONExtractString("payload", 'user', 'name'). A string is read without its quotes; a number, a boolean, an
+     * object and an array as their JSON text, such as 1.5, true or {"a":1}; null and a missing key as ''. The
+     * column must hold JSON text, as the String column of json() does.
+     *
+     * @param string $value
+     * @return string
+     */
+    protected function wrapJsonSelector($value)
+    {
+        return $this->compileJsonExtract($value);
+    }
+
+    /**
+     * Wrap a JSON selector that a condition compares with true or false, as where('payload->active', true) does:
+     * JSONExtract(<column>, <path>, 'Nullable(Bool)'), which is null for a missing key.
+     *
+     * @param string $value
+     * @return string
+     */
+    protected function wrapJsonBooleanSelector($value)
+    {
+        return $this->compileJsonExtract($value, 'Nullable(Bool)');
+    }
+
+    /**
+     * Write the JSON type of the value of a JSON selector: JSONType(<column>, <path>), which is 'Null' for null and
+     * for a missing key.
+     *
+     * @param string $selector
+     * @return string
+     */
+    protected function compileJsonType(string $selector): string
+    {
+        [$column, $path] = $this->wrapJsonColumnAndPath($selector);
+
+        return "JSONType({$column}{$path})";
+    }
+
+    /**
+     * Compile a whereJsonContainsKey() clause: JSONHas(<column>, <path>), which holds for a key whose value is null
+     * too.
+     *
+     * @param string $column
+     * @return string
+     */
+    protected function compileJsonContainsKey($column)
+    {
+        [$column, $path] = $this->wrapJsonColumnAndPath($column);
+
+        return "JSONHas({$column}{$path})";
+    }
+
+    /**
+     * Compile a whereJsonLength() clause: JSONLength(<column>, <path>), the number of elements of an array or of
+     * keys of an object, and 0 for any other value and for a missing key.
+     *
+     * @param string $column
+     * @param string $operator
+     * @param string $value
+     * @return string
+     */
+    protected function compileJsonLength($column, $operator, $value)
+    {
+        [$column, $path] = $this->wrapJsonColumnAndPath($column);
+
+        return "JSONLength({$column}{$path}) {$operator} {$value}";
+    }
+
+    /**
+     * Compile a whereJsonContains() clause: the array at the selector holds every given value (see
+     * compileJsonArrayCondition()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     * @throws InvalidArgumentException When the value is an object
+     */
+    protected function whereJsonContains(Builder $query, $where)
+    {
+        return ($where['not'] ? 'not ' : '') . $this->compileJsonArrayCondition('hasAll', $where['column'], $where['value']);
+    }
+
+    /**
+     * Compile a whereJsonOverlaps() clause: the array at the selector holds one of the given values at least (see
+     * compileJsonArrayCondition()).
+     *
+     * @param Builder $query
+     * @param array<string, mixed> $where
+     * @return string
+     * @throws InvalidArgumentException When the value is an object
+     */
+    protected function whereJsonOverlaps(Builder $query, $where)
+    {
+        return ($where['not'] ? 'not ' : '') . $this->compileJsonArrayCondition('hasAny', $where['column'], $where['value']);
+    }
+
+    /**
+     * Compile hasAll() or hasAny() of the array at a JSON selector and the given values, which the binding holds as
+     * a JSON array (see prepareBindingForJsonContains()). When the values are all strings, all numbers or all
+     * booleans, both arrays are read with that type: JSONExtract(<column>, <path>, 'Array(String)'), Float64 or
+     * Bool, so that 1 matches 1.0. Otherwise each element is compared as its JSON text, which
+     * JSONExtractArrayRaw() writes alike for both arrays, without spaces. An expression is read as a JSON array.
+     *
+     * @param string $function hasAll or hasAny
+     * @param string $column
+     * @param mixed $value
+     * @return string
+     * @throws InvalidArgumentException When the value is an object
+     */
+    protected function compileJsonArrayCondition(string $function, string $column, mixed $value): string
+    {
+        [$column, $path] = $this->wrapJsonColumnAndPath($column);
+
+        if ($this->isExpression($value)) {
+            return "{$function}(JSONExtractArrayRaw({$column}{$path}), JSONExtractArrayRaw({$this->getValue($value)}))";
+        }
+
+        $type = $this->getJsonArrayElementType($this->toJsonList($value));
+
+        return $type === null
+            ? "{$function}(JSONExtractArrayRaw({$column}{$path}), JSONExtractArrayRaw(?))"
+            : "{$function}(JSONExtract({$column}{$path}, 'Array({$type})'), JSONExtract(?, 'Array({$type})'))";
+    }
+
+    /**
+     * Prepare the binding of whereJsonContains() and whereJsonOverlaps(): the value as a JSON array, a single value
+     * becoming an array of one element.
+     *
+     * @param mixed $binding
+     * @return string
+     * @throws InvalidArgumentException When the value is an object
+     * @throws JsonException When a value cannot be written as JSON
+     */
+    public function prepareBindingForJsonContains($binding)
+    {
+        return json_encode(
+            $this->toJsonList($binding),
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR
+        );
+    }
+
+    /**
+     * Get the values of whereJsonContains() and whereJsonOverlaps() as a list: a list as it is, a collection as its
+     * items, and any other value as a list of that value.
+     *
+     * @param mixed $value
+     * @return list<mixed>
+     * @throws InvalidArgumentException When the value is an array with keys, a JSON object
+     */
+    protected function toJsonList(mixed $value): array
+    {
+        if ($value instanceof Arrayable) {
+            $value = $value->toArray();
+        }
+
+        if (!is_array($value)) {
+            return [$value];
+        }
+
+        if (!array_is_list($value)) {
+            throw new InvalidArgumentException(
+                'whereJsonContains() and whereJsonOverlaps() take a value or a list of values on ClickHouse, not an'
+                . ' array with keys, which is a JSON object: ClickHouse cannot check that one object holds another.'
+                . ' Check its keys one by one, such as where(\'payload->a\', 1).'
+            );
+        }
+
+        return $value;
+    }
+
+    /**
+     * Get the ClickHouse type that reads the elements of a JSON array that holds the given values: String, Float64
+     * for ints and floats, or Bool, when all of them have that kind, and String for no values. Null for any other
+     * mix, whose elements are compared as their JSON text.
+     *
+     * @param list<mixed> $values
+     * @return string|null
+     */
+    protected function getJsonArrayElementType(array $values): ?string
+    {
+        $types = array_unique(array_map(fn (mixed $value): ?string => match (true) {
+            is_string($value) => 'String',
+            is_int($value), is_float($value) => 'Float64',
+            is_bool($value) => 'Bool',
+            default => null,
+        }, $values), SORT_REGULAR);
+
+        if ($types === []) {
+            return 'String';
+        }
+
+        return count($types) === 1 ? array_first($types) : null;
     }
 
     /**
@@ -1103,28 +1542,180 @@ class QueryGrammar extends Grammar
      * Compile the columns of an update. An array or a collection value is written as a ClickHouse array literal,
      * such as ['a', 'b'], in place of a placeholder: Laravel would bind its elements one by one, so that they took
      * the places of the following placeholders. prepareBindingsForUpdate() leaves its elements out of the bindings.
+     * The JSON selectors of a column, such as payload->a and payload->b, set that column to one patched document
+     * (see compileJsonPatch()).
      *
      * @param Builder $query
      * @param array<string, mixed> $values
      * @return string
      * @throws InvalidArgumentException When an element of an array cannot be written as a literal
+     * @throws QueryException When the update sets a column and a JSON path of it, or a JSON path cannot be set
      */
     protected function compileUpdateColumns(Builder $query, array $values)
     {
         $columns = [];
+        $jsonPaths = [];
 
         foreach ($values as $column => $value) {
+            if (is_string($column) && $this->isJsonSelector($column)) {
+                $jsonPaths[explode('->', $column, 2)[0]][$column] = $value;
+
+                continue;
+            }
+
             $columns[] = $this->wrap($column) . ' = ' . ($this->isArrayValue($value)
                 ? $this->compileLiteral($value instanceof Enumerable ? $value->toArray() : $value)
                 : $this->parameter($value));
+        }
+
+        foreach ($jsonPaths as $column => $pathValues) {
+            if (array_key_exists($column, $values)) {
+                throw QueryException::cannotUpdateJsonPath(
+                    (string) array_key_first($pathValues),
+                    "the update also sets the column [{$column}]"
+                );
+            }
+
+            $columns[] = $this->wrap($column) . ' = ' . $this->compileJsonPatch($column, $pathValues);
         }
 
         return implode(', ', $columns);
     }
 
     /**
+     * Compile the new value of a column whose JSON paths an update sets, as update(['payload->a' => 1]) does: the
+     * document with the values merged in by jsonMergePatch(), for the rows whose column holds a JSON object. The
+     * values are written into the patch as JSON, so they need no bindings (see prepareBindingsForUpdate()).
+     *
+     * A row whose column holds anything else keeps it: '', null, an array or text that is no JSON. jsonMergePatch()
+     * fails on such a document (BAD_ARGUMENTS, 26.3 checked), which would stop the mutation at that row, so the
+     * patch reads '{}' in its place and its result is not used. A value that is an object replaces the object at its
+     * path: a first patch sets the path to null, so that the second does not merge the two objects. A missing key is
+     * added, with the objects of its path.
+     *
+     * @param string $column The column, without a path
+     * @param array<string, mixed> $values The values, by JSON selector, such as payload->a
+     * @return string
+     * @throws QueryException When a path names an array element, or a value is SQL or cannot be written as JSON
+     */
+    protected function compileJsonPatch(string $column, array $values): string
+    {
+        $patch = new stdClass();
+        $resets = new stdClass();
+        $replacesAnObject = false;
+
+        foreach ($values as $selector => $value) {
+            $keys = $this->getJsonPathKeys(explode('->', $selector, 2)[1]);
+            foreach ($keys as $key) {
+                if (is_int($key)) {
+                    throw QueryException::cannotUpdateJsonPath(
+                        $selector,
+                        'jsonMergePatch() sets the keys of objects, not the elements of arrays. Update the whole column'
+                    );
+                }
+            }
+
+            $value = $this->toJsonPatchValue($selector, $value);
+            $this->setJsonPatchKey($patch, $keys, $value);
+
+            if ($value instanceof stdClass || (is_array($value) && !array_is_list($value))) {
+                $this->setJsonPatchKey($resets, $keys, null);
+                $replacesAnObject = true;
+            }
+        }
+
+        $wrapped = $this->wrap($column);
+        $isAnObject = "JSONType({$wrapped}) = 'Object'";
+        $patches = array_map(
+            fn (stdClass $document): string => $this->compileJsonStringLiteral($this->encodeJsonPatch($document, $selector)),
+            $replacesAnObject ? [$resets, $patch] : [$patch]
+        );
+
+        return "if({$isAnObject}, jsonMergePatch(if({$isAnObject}, {$wrapped}, '{}'), " . implode(', ', $patches)
+            . "), {$wrapped})";
+    }
+
+    /**
+     * Set a key of a JSON patch, with the objects of its path, as stdClass objects, so that a key such as '0' stays
+     * the key of an object.
+     *
+     * @param stdClass $patch
+     * @param list<string|int> $keys
+     * @param mixed $value
+     * @return void
+     */
+    protected function setJsonPatchKey(stdClass $patch, array $keys, mixed $value): void
+    {
+        $object = $patch;
+        $last = (string) array_pop($keys);
+
+        foreach ($keys as $key) {
+            if (!isset($object->{$key}) || !$object->{$key} instanceof stdClass) {
+                $object->{$key} = new stdClass();
+            }
+
+            $object = $object->{$key};
+        }
+
+        $object->{$last} = $value;
+    }
+
+    /**
+     * Get a value that update() sets at a JSON path as a value for json_encode(): a backed enum as its value, a unit
+     * enum as its name, a date as the connection writes dates, a Stringable object as its string, an Arrayable
+     * object, such as a collection, as its array, and an array with each of its values so converted.
+     *
+     * @param string $selector
+     * @param mixed $value
+     * @return mixed
+     * @throws QueryException When the value is SQL, such as DB::raw()
+     */
+    protected function toJsonPatchValue(string $selector, mixed $value): mixed
+    {
+        return match (true) {
+            $this->isExpression($value) => throw QueryException::cannotUpdateJsonPath(
+                $selector,
+                'the value is SQL, and the package writes the values of JSON paths into a JSON patch. Update the whole'
+                . ' column, such as with DB::raw("jsonMergePatch(...)")'
+            ),
+            $value instanceof BackedEnum => $value->value,
+            $value instanceof UnitEnum => $value->name,
+            $value instanceof DateTimeInterface => $this->getLiteralGrammar()->formatDateTime($value),
+            $value instanceof Arrayable => $this->toJsonPatchValue($selector, $value->toArray()),
+            $value instanceof JsonSerializable => $value,
+            $value instanceof Stringable => (string) $value,
+            is_array($value) => array_map(fn (mixed $item): mixed => $this->toJsonPatchValue($selector, $item), $value),
+            default => $value,
+        };
+    }
+
+    /**
+     * Write a JSON patch as JSON text, with Unicode and slashes unescaped and floats keeping a zero fraction.
+     *
+     * @param stdClass $patch
+     * @param string $selector A JSON selector of the update, for the message
+     * @return string
+     * @throws QueryException When a value cannot be written as JSON
+     */
+    protected function encodeJsonPatch(stdClass $patch, string $selector): string
+    {
+        try {
+            return json_encode(
+                $patch,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR
+            );
+        } catch (JsonException $exception) {
+            throw QueryException::cannotUpdateJsonPath(
+                $selector,
+                'a value cannot be written as JSON: ' . $exception->getMessage()
+            );
+        }
+    }
+
+    /**
      * Prepare the bindings of an update: Laravel's, without the array and collection values that
-     * compileUpdateColumns() writes as literals, and without the bindings of the order, such as those of
+     * compileUpdateColumns() writes as literals and the values of JSON paths, which compileJsonPatch() writes, and
+     * without the bindings of the order, such as those of
      * orderByRaw('...?', [...]), inOrderOf() or orderBy() of a sub-query, since the mutation has no ORDER BY.
      *
      * @param array<string, array<int, mixed>> $bindings
@@ -1135,7 +1726,12 @@ class QueryGrammar extends Grammar
     {
         return parent::prepareBindingsForUpdate(
             Arr::except($bindings, ['order', 'unionOrder']),
-            array_filter($values, fn (mixed $value): bool => !$this->isArrayValue($value))
+            array_filter(
+                $values,
+                fn (mixed $value, int|string $column): bool => !$this->isArrayValue($value)
+                    && !(is_string($column) && $this->isJsonSelector($column)),
+                ARRAY_FILTER_USE_BOTH
+            )
         );
     }
 

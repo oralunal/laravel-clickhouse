@@ -101,8 +101,23 @@ $events = Event::with('user')->get();    // A ClickHouse model with belongsTo(Us
 $user->events()->where('type', 'click')->count();
 ```
 
-- `belongsToMany()`, `hasManyThrough()` and `hasOneThrough()` use a join. The tests of the package do not cover them.
-- `whereHas()` and `has()` write a correlated sub-query. ClickHouse 24.8 cannot run it. 26.3 and 26.8 can.
+- `belongsToMany()`, `hasManyThrough()` and `hasOneThrough()` use a join.
+- `has()`, `whereHas()`, `doesntHave()`, `whereRelation()` and their `or` forms check the relation with an `IN` sub-query, which ClickHouse 24.8 runs, in a `delete()` or an `update()` too:
+
+  ```php
+  User::whereHas('posts', fn ($query) => $query->where('title', 'x'))->get();
+  // select * from "users" where "users"."id" in (select "posts"."user_id" from "posts" where "title" = 'x')
+
+  User::has('posts', '>=', 2)->get();
+  // ... "users"."id" in (select "posts"."user_id" from "posts" group by "posts"."user_id" having count(*) >= 2)
+
+  User::doesntHave('posts')->delete();
+  // alter table "users" delete where ("id" not in (select "posts"."user_id" from "posts") or "id" is null)
+  ```
+
+  A relation query that reads the outer table, such as `whereColumn('posts.created_at', '>', 'users.created_at')`, or that has a `limit()`, keeps Laravel's correlated `EXISTS`.
+  ClickHouse 26.3 and 26.8 run it in a select. 24.8 does not.
+- `withCount()`, `withExists()`, `withSum()` and the other `with` aggregates select a correlated sub-query. ClickHouse 24.8 cannot run it. 26.3 and 26.8 can.
 - `upsert()`, `insertOrIgnore()` and the locks are not supported.
   See [Not supported](/query-builder/laravel-query-builder#not-supported).
 

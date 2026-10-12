@@ -12,6 +12,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Grammars\Grammar as BaseGrammar;
 use Illuminate\Support\Fluent;
 use InvalidArgumentException;
+use Oralunal\LaravelClickHouse\Concerns\CompilesJsonPaths;
 use Oralunal\LaravelClickHouse\Exceptions\QueryException;
 use RuntimeException;
 use Stringable;
@@ -21,6 +22,8 @@ use WeakMap;
 
 class SchemaGrammar extends BaseGrammar
 {
+    use CompilesJsonPaths;
+
     /**
      * The column modifiers, in the order ClickHouse reads them after the type:
      * one default expression (DEFAULT, MATERIALIZED, ALIAS or EPHEMERAL), then
@@ -37,6 +40,14 @@ class SchemaGrammar extends BaseGrammar
      * @var WeakMap<Blueprint, bool>|null
      */
     protected ?WeakMap $temporaryTablesOfTheSession = null;
+
+    /**
+     * Whether the connection turns on the settings of each server feature, as serverEnablesAnyOf() read them, by the
+     * names of the settings.
+     *
+     * @var array<string, bool>
+     */
+    protected array $enabledServerFeatures = [];
 
     /**
      * Wrap a ClickHouse identifier (database, table or column name) in backticks.
@@ -1471,69 +1482,175 @@ class SchemaGrammar extends BaseGrammar
     }
 
     /**
-     * Compile a fulltext index command, which ClickHouse cannot run.
+     * Compile a fullText() index of Schema::table() as a text index, as compileIndex() compiles an index with a type
+     * (see toTextIndexCommand()): ALTER TABLE <table> ADD INDEX <name> <column> TYPE text(tokenizer = splitByNonAlpha),
+     * and MATERIALIZE INDEX after materialize(). Schema::create() writes it into the CREATE statement.
      *
      * @param Blueprint $blueprint
      * @param Fluent $command
-     * @return never
-     * @throws RuntimeException Always
+     * @return list<string>
+     * @throws RuntimeException When the server has no text index, or the index has more than one column
      */
-    public function compileFulltext(Blueprint $blueprint, Fluent $command): never
+    public function compileFulltext(Blueprint $blueprint, Fluent $command): array
     {
-        throw new RuntimeException(
-            "ClickHouse has no full-text index for fullText() (index [{$command->index}] of the table"
-            . " [{$blueprint->getTable()}]). Add a data-skipping index of a token or n-gram type instead, such as"
-            . " index('body', null, 'tokenbf_v1(512, 3, 0)')."
+        return $this->compileIndex($blueprint, $this->toTextIndexCommand($blueprint, $command)) ?? [];
+    }
+
+    /**
+     * Compile a dropFullText() command as compileDropIndex() drops an index: ALTER TABLE <table> DROP INDEX IF
+     * EXISTS <name>.
+     *
+     * @param Blueprint $blueprint
+     * @param Fluent $command
+     * @return string|null
+     */
+    public function compileDropFullText(Blueprint $blueprint, Fluent $command): ?string
+    {
+        return $this->compileDropIndex($blueprint, $command);
+    }
+
+    /**
+     * Compile a vectorIndex() of Schema::table() as a vector similarity index, as compileIndex() compiles an index
+     * with a type (see toVectorIndexCommand()): ALTER TABLE <table> ADD INDEX <name> <column> TYPE
+     * vector_similarity('hnsw', 'cosineDistance', <dimensions>). Schema::create() writes it into the CREATE
+     * statement.
+     *
+     * @param Blueprint $blueprint
+     * @param Fluent $command
+     * @return list<string>
+     * @throws RuntimeException When the server has no vector similarity index, or the dimensions are unknown
+     * @throws InvalidArgumentException For an algorithm or an operator class that ClickHouse does not have
+     */
+    public function compileVectorIndex(Blueprint $blueprint, Fluent $command): array
+    {
+        return $this->compileIndex($blueprint, $this->toVectorIndexCommand($blueprint, $command)) ?? [];
+    }
+
+    /**
+     * Compile a dropVectorIndex() command as compileDropIndex() drops an index: ALTER TABLE <table> DROP INDEX IF
+     * EXISTS <name>.
+     *
+     * @param Blueprint $blueprint
+     * @param Fluent $command
+     * @return string|null
+     */
+    public function compileDropVectorIndex(Blueprint $blueprint, Fluent $command): ?string
+    {
+        return $this->compileDropIndex($blueprint, $command);
+    }
+
+    /**
+     * Turn a fullText() command into an index command whose type is a text index:
+     * text(tokenizer = <tokenizer>), with the algorithm argument of fullText() or algorithm() as the tokenizer, such
+     * as ngrams(3) or 'splitByString', and splitByNonAlpha without one. A text index takes one column, and needs the
+     * setting enable_full_text_index, which ClickHouse 26.3 and 26.8 turn on (checked); 24.8 has no text index.
+     *
+     * @param Blueprint $blueprint
+     * @param Fluent $command
+     * @return Fluent
+     * @throws RuntimeException When the server has no text index, or the index has more than one column
+     */
+    protected function toTextIndexCommand(Blueprint $blueprint, Fluent $command): Fluent
+    {
+        $columns = array_values((array) $command->columns);
+
+        if (count($columns) !== 1) {
+            throw new RuntimeException(
+                "A ClickHouse text index takes one column, and fullText() (index [{$command->index}] of the table"
+                . " [{$blueprint->getTable()}]) names " . count($columns) . '. Call fullText() once for each column.'
+            );
+        }
+
+        if (! $this->serverEnablesAnyOf('enable_full_text_index', 'allow_experimental_full_text_index')) {
+            throw new RuntimeException(
+                "ClickHouse has no text index for fullText() (index [{$command->index}] of the table"
+                . " [{$blueprint->getTable()}]) on this server: it needs the setting enable_full_text_index, which"
+                . ' ClickHouse 26.3 and later turn on. Add a data-skipping index of a token or n-gram type instead,'
+                . " such as index('body', null, 'tokenbf_v1(512, 3, 0)')."
+            );
+        }
+
+        $tokenizer = $this->getIndexType($command) ?? 'splitByNonAlpha';
+
+        return new Fluent(['algorithm' => "text(tokenizer = {$tokenizer})"] + $command->getAttributes());
+    }
+
+    /**
+     * Turn a vectorIndex() command into an index command whose type is a vector similarity index:
+     * vector_similarity('hnsw', '<distance>', <dimensions>).
+     *
+     * - The distance is cosineDistance, the distance of Laravel's vector queries (see
+     *   QueryGrammar::compileVectorDistanceExpression()), or L2Distance for the operator class vector_l2_ops or
+     *   L2Distance.
+     * - The dimensions are those of dimensions() on the command, or of vector('<column>', <dimensions>) in the same
+     *   blueprint: ClickHouse needs them, and its column type, Array(Float32), does not hold them.
+     * - The index needs the setting enable_vector_similarity_index, which ClickHouse 26.3 and 26.8 turn on
+     *   (checked); 24.8 has it only as an experimental feature, without the dimensions argument.
+     *
+     * @param Blueprint $blueprint
+     * @param Fluent $command
+     * @return Fluent
+     * @throws RuntimeException When the server has no vector similarity index, or the dimensions are unknown
+     * @throws InvalidArgumentException For an algorithm or an operator class that ClickHouse does not have
+     */
+    protected function toVectorIndexCommand(Blueprint $blueprint, Fluent $command): Fluent
+    {
+        $column = (string) array_first((array) $command->columns);
+        $description = "vectorIndex() (index [{$command->index}] of the table [{$blueprint->getTable()}])";
+
+        if (! $this->serverEnablesAnyOf('enable_vector_similarity_index', 'allow_experimental_vector_similarity_index')) {
+            throw new RuntimeException(
+                "ClickHouse has no vector similarity index for {$description} on this server: it needs the setting"
+                . ' enable_vector_similarity_index, which ClickHouse 26.3 and later turn on.'
+            );
+        }
+
+        if (! in_array($command->algorithm, [null, 'hnsw'], true)) {
+            throw new InvalidArgumentException(
+                "ClickHouse has no vector index algorithm [{$command->algorithm}] for {$description}: it has hnsw."
+            );
+        }
+
+        $distance = match ($command->operatorClass) {
+            null, 'vector_cosine_ops', 'cosineDistance' => 'cosineDistance',
+            'vector_l2_ops', 'L2Distance' => 'L2Distance',
+            default => throw new InvalidArgumentException(
+                "ClickHouse has no vector distance for the operator class [{$command->operatorClass}] of"
+                . " {$description}: use vector_cosine_ops or cosineDistance, or vector_l2_ops or L2Distance."
+            ),
+        };
+
+        $dimensions = $command->dimensions ?? $this->getVectorDimensions($blueprint, $column);
+        if (! is_numeric($dimensions) || (int) $dimensions < 1) {
+            throw new RuntimeException(
+                "ClickHouse needs the dimensions of the column [{$column}] for {$description}. Add the column in the"
+                . " same blueprint with vector('{$column}', 1536), or give them with vectorIndex('{$column}')"
+                . '->dimensions(1536).'
+            );
+        }
+
+        return new Fluent(
+            ['algorithm' => "vector_similarity('hnsw', '{$distance}', " . (int) $dimensions . ')']
+            + $command->getAttributes()
         );
     }
 
     /**
-     * Compile a drop fulltext index command, which ClickHouse cannot run.
+     * Get the dimensions of a vector() column that the blueprint adds, or null when it adds no such column.
      *
      * @param Blueprint $blueprint
-     * @param Fluent $command
-     * @return never
-     * @throws RuntimeException Always
+     * @param string $column
+     * @return int|string|null
      */
-    public function compileDropFullText(Blueprint $blueprint, Fluent $command): never
+    protected function getVectorDimensions(Blueprint $blueprint, string $column): int|string|null
     {
-        throw new RuntimeException(
-            "ClickHouse has no full-text index for dropFullText() (index [{$command->index}] of the table"
-            . " [{$blueprint->getTable()}]). Drop a data-skipping index with dropIndex()."
-        );
-    }
+        foreach ($blueprint->getColumns() as $definition) {
+            if ($definition->name === $column && $definition->type === 'vector') {
+                return $definition->dimensions;
+            }
+        }
 
-    /**
-     * Compile a vector index command, which ClickHouse cannot run as Laravel writes it.
-     *
-     * @param Blueprint $blueprint
-     * @param Fluent $command
-     * @return never
-     * @throws RuntimeException Always
-     */
-    public function compileVectorIndex(Blueprint $blueprint, Fluent $command): never
-    {
-        throw new RuntimeException(
-            "ClickHouse has no vector index for vectorIndex() (index [{$command->index}] of the table"
-            . " [{$blueprint->getTable()}]). Pass a vector similarity index type that the server supports to"
-            . ' index() as its algorithm.'
-        );
-    }
-
-    /**
-     * Compile a drop vector index command, which ClickHouse cannot run.
-     *
-     * @param Blueprint $blueprint
-     * @param Fluent $command
-     * @return never
-     * @throws RuntimeException Always
-     */
-    public function compileDropVectorIndex(Blueprint $blueprint, Fluent $command): never
-    {
-        throw new RuntimeException(
-            "ClickHouse has no vector index for dropVectorIndex() (index [{$command->index}] of the table"
-            . " [{$blueprint->getTable()}]). Drop a data-skipping index with dropIndex()."
-        );
+        return null;
     }
 
     /**
@@ -1884,7 +2001,9 @@ class SchemaGrammar extends BaseGrammar
      * cannot have data-skipping indexes, so the option does not apply to
      * them; an index's own type is written for every engine, so that the
      * server accepts or refuses it. An index without a type is left out.
-     * materialize() adds nothing here: a new table has no rows.
+     * materialize() adds nothing here: a new table has no rows. fullText()
+     * and vectorIndex() add a text index and a vector similarity index (see
+     * toTextIndexCommand() and toVectorIndexCommand()).
      *
      * Every index command is marked to be skipped, so that none of them
      * compiles to an ALTER statement of its own after the CREATE.
@@ -1898,7 +2017,19 @@ class SchemaGrammar extends BaseGrammar
         $defaultType = $this->isMergeTreeEngine($engine) ? $this->getDefaultIndexType() : null;
         $indexes = [];
 
-        foreach ($this->takeCommands($blueprint, 'index') as $command) {
+        $commands = [
+            ...$this->takeCommands($blueprint, 'index'),
+            ...array_map(
+                fn (Fluent $command): Fluent => $this->toTextIndexCommand($blueprint, $command),
+                $this->takeCommands($blueprint, 'fulltext')
+            ),
+            ...array_map(
+                fn (Fluent $command): Fluent => $this->toVectorIndexCommand($blueprint, $command),
+                $this->takeCommands($blueprint, 'vectorIndex')
+            ),
+        ];
+
+        foreach ($commands as $command) {
             $type = $this->getIndexType($command) ?? $defaultType;
 
             if ($type !== null) {
@@ -2110,43 +2241,54 @@ class SchemaGrammar extends BaseGrammar
     }
 
     /**
-     * Get the SQL for a stored generated column modifier: MATERIALIZED <expression>.
+     * Get the SQL for a stored generated column modifier: MATERIALIZED <expression>, or, for storedAsJson(), the
+     * value of its JSON selector (see compileGeneratedJsonValue()).
      *
      * @param Blueprint $blueprint
      * @param Fluent $column
      * @return string|null
-     * @throws RuntimeException For storedAsJson(), which needs JSON paths that ClickHouse does not have
      */
     protected function modifyStoredAs(Blueprint $blueprint, Fluent $column): ?string
     {
         if ($column->storedAsJson !== null) {
-            throw new RuntimeException(
-                "ClickHouse does not support storedAsJson() (column [{$column->name}]): use storedAs()"
-                . " with an expression such as JSONExtractString(payload, 'name')."
-            );
+            return ' MATERIALIZED ' . $this->compileGeneratedJsonValue($column, (string) $column->storedAsJson);
         }
 
         return $column->storedAs === null ? null : ' MATERIALIZED ' . $this->getValue($column->storedAs);
     }
 
     /**
-     * Get the SQL for a virtual generated column modifier: ALIAS <expression>.
+     * Get the SQL for a virtual generated column modifier: ALIAS <expression>, or, for virtualAsJson(), the value
+     * of its JSON selector (see compileGeneratedJsonValue()).
      *
      * @param Blueprint $blueprint
      * @param Fluent $column
      * @return string|null
-     * @throws RuntimeException For virtualAsJson(), which needs JSON paths that ClickHouse does not have
      */
     protected function modifyVirtualAs(Blueprint $blueprint, Fluent $column): ?string
     {
         if ($column->virtualAsJson !== null) {
-            throw new RuntimeException(
-                "ClickHouse does not support virtualAsJson() (column [{$column->name}]): use virtualAs()"
-                . " with an expression such as JSONExtractString(payload, 'name')."
-            );
+            return ' ALIAS ' . $this->compileGeneratedJsonValue($column, (string) $column->virtualAsJson);
         }
 
         return $column->virtualAs === null ? null : ' ALIAS ' . $this->getValue($column->virtualAs);
+    }
+
+    /**
+     * Compile the expression of virtualAsJson() or storedAsJson(): for a JSON selector, such as payload->user->name,
+     * the value it names, read as the column's type, JSONExtract(`payload`, 'user', 'name', 'Nullable(String)'),
+     * which gives the type's default, or null in a Nullable column, for a missing key and a value of another type.
+     * Any other expression is written as given, as in Laravel.
+     *
+     * @param Fluent $column
+     * @param string $expression
+     * @return string
+     */
+    protected function compileGeneratedJsonValue(Fluent $column, string $expression): string
+    {
+        return $this->isJsonSelector($expression)
+            ? $this->compileJsonExtract($expression, $this->getColumnType($column))
+            : $expression;
     }
 
     /**
@@ -2870,31 +3012,64 @@ class SchemaGrammar extends BaseGrammar
     }
 
     /**
-     * Refuse a time column: ClickHouse 24.8 has no time-of-day type, and the
-     * name Time gives an Int64 column there.
+     * Create the column definition for a time column: Time, or Time64(<precision>) for a precision above 0, which
+     * hold a time of day, such as 12:34:56, and up to 999 hours either way.
+     *
+     * ClickHouse has these types when its setting enable_time_time64_type is on, as it is by default on 26.3 and 26.8
+     * (checked). 24.8 has no such setting and reads the name Time as Int64, so the column is refused on a server that
+     * does not turn the setting on (see serverEnablesAnyOf()).
      *
      * @param Fluent $column
-     * @return never
-     * @throws RuntimeException Always
+     * @return string
+     * @throws RuntimeException When the server does not turn the setting on
      */
-    protected function typeTime(Fluent $column): never
+    protected function typeTime(Fluent $column): string
     {
-        throw new RuntimeException(
-            "ClickHouse has no time-of-day type for {$column->type}() (column [{$column->name}]). Store the seconds since"
-            . ' midnight in an integer column, the time as a string, or use dateTime().'
-        );
+        if (! $this->serverEnablesAnyOf('enable_time_time64_type', 'allow_experimental_time_time64_type')) {
+            throw new RuntimeException(
+                "ClickHouse has no time-of-day type for {$column->type}() (column [{$column->name}]) on this server: the"
+                . ' Time type needs the setting enable_time_time64_type, which ClickHouse 26.3 and later turn on. Store'
+                . ' the seconds since midnight in an integer column, the time as a string, or use dateTime().'
+            );
+        }
+
+        return $column->precision ? 'Time64(' . (int) $column->precision . ')' : 'Time';
     }
 
     /**
-     * Refuse a time (with time zone) column, as typeTime() does.
+     * Create the column definition for a time (with time zone) column, as typeTime() does: ClickHouse's Time has no
+     * time zone, as MySQL's TIME has none.
      *
      * @param Fluent $column
-     * @return never
-     * @throws RuntimeException Always
+     * @return string
+     * @throws RuntimeException When the server does not turn the setting of the Time type on
      */
-    protected function typeTimeTz(Fluent $column): never
+    protected function typeTimeTz(Fluent $column): string
     {
-        $this->typeTime($column);
+        return $this->typeTime($column);
+    }
+
+    /**
+     * Determine if the connection turns on one of the given settings, which turn on a server feature, such as
+     * enable_time_time64_type. They are read from system.settings of the active node, once for each grammar and
+     * also while the connection pretends (see selectWhilePretending()), so the connection's own settings count. A
+     * setting that the server does not have is off.
+     *
+     * @param string ...$settings
+     * @return bool
+     */
+    protected function serverEnablesAnyOf(string ...$settings): bool
+    {
+        $key = implode(',', $settings);
+
+        if (! isset($this->enabledServerFeatures[$key])) {
+            $this->enabledServerFeatures[$key] = $this->selectWhilePretending(
+                'SELECT name FROM system.settings WHERE name IN (' . $this->quoteString($settings)
+                . ") AND value IN ('1', 'true')"
+            ) !== [];
+        }
+
+        return $this->enabledServerFeatures[$key];
     }
 
     /**

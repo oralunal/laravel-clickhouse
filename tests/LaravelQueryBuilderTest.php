@@ -762,15 +762,6 @@ class LaravelQueryBuilderTest extends TestCase
                 fn (QueryBuilder $query) => $query->insertOrIgnore([['id' => 9, 'name' => 'u']]),
                 'This database engine does not support inserting while ignoring errors.',
             ],
-            'whereJsonContains()' => [
-                fn (QueryBuilder $query) => $query->whereJsonContains('note', 'x')->get(),
-                'This database engine does not support JSON contains operations.',
-            ],
-            'a JSON selector' => [fn (QueryBuilder $query) => $query->where('note->a', 'x')->get(), 'This database engine does not support JSON operations.'],
-            'whereFullText()' => [
-                fn (QueryBuilder $query) => $query->whereFullText('name', 'x')->get(),
-                'This database engine does not support fulltext search operations.',
-            ],
             'useIndex()' => [
                 fn (QueryBuilder $query) => $query->useIndex('idx_name')->get(),
                 'ClickHouse chooses data-skipping indexes itself: use forceIndex() to require one or ignoreIndex() to skip one.',

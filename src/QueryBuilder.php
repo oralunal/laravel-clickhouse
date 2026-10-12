@@ -1844,6 +1844,33 @@ class QueryBuilder extends Builder
     }
 
     /**
+     * Add a whereFullText() condition, as Laravel does, with one binding of the value for each column, since the
+     * grammar joins the columns with or, each with the value (see QueryGrammar::whereFullText()). The mode option is
+     * checked at once.
+     *
+     * @param string|array<int, string> $columns
+     * @param string $value
+     * @param array<string, mixed> $options
+     * @param string $boolean
+     * @return $this
+     * @throws InvalidArgumentException For a mode other than 'all' or 'any'
+     */
+    public function whereFullText($columns, $value, array $options = [], $boolean = 'and')
+    {
+        if ($this->grammar instanceof QueryGrammar) {
+            $this->grammar->getFullTextFunction($options);
+        }
+
+        parent::whereFullText($columns, $value, $options, $boolean);
+
+        for ($column = 1; $column < count((array) $columns); $column++) {
+            $this->addBinding($value, 'where');
+        }
+
+        return $this;
+    }
+
+    /**
      * Insert rows as JSONEachRow: insert into <table> (<keys of the first row>) format JSONEachRow, written by this
      * builder's grammar, with the rows as one JSON object per line in the request body (see
      * ClientRequests::encodeJsonEachRow() and sendInsert()). Every row must have the first row's keys, in any order.
@@ -1858,7 +1885,8 @@ class QueryBuilder extends Builder
      * @return bool
      * @throws InvalidArgumentException When the connection is not a ClickHouse connection, a row is not an array, or
      *                                  a value cannot be sent as JSON
-     * @throws QueryException When a row's keys differ from the first row's
+     * @throws QueryException When a row's keys differ from the first row's, or a key is a JSON selector, such as
+     *                        payload->a
      * @throws ClientQueryException When a row has no keys, or the insert fails
      */
     protected function insertJsonEachRow(array $rows): bool
@@ -1882,6 +1910,9 @@ class QueryBuilder extends Builder
             $rows,
             new JsonEachRowEncoder($connection->newLiteralGrammar()->formatDateTime(...))
         );
+        if ($this->grammar instanceof QueryGrammar) {
+            $this->grammar->refuseJsonPathsInInsert($columns);
+        }
         $head = sprintf(
             'insert into %s (%s) format %s',
             $this->grammar->wrapTable($this->from),

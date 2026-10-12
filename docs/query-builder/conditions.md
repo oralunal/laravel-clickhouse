@@ -259,6 +259,76 @@ $query->whereNullSafeEquals('comment', null); // ["comment"] = [null]
   `&~` gives `bitAnd("field_two", 4) != "field_two"`.
 - `whereNullSafeEquals()` and the `<=>` operator compare in arrays, so that `NULL` equals `NULL`.
 
+## JSON paths
+
+A JSON path, such as `payload->user->name`, reads a value of a JSON document in a `String` column, as `json()` creates it.
+It works in conditions, `select()`, `orderBy()` and `groupBy()`:
+
+```php
+$query->where('payload->user->name', 'Ann')        // JSONExtractString("payload", 'user', 'name') = 'Ann'
+    ->where('payload->size', '>', 2)               // JSONExtract("payload", 'size', 'Nullable(Float64)') > 2
+    ->where('payload->active', true)               // JSONExtract("payload", 'active', 'Nullable(Bool)') = true
+    ->where('payload->tags[0]', 'en')              // JSONExtractString("payload", 'tags', 1) = 'en'
+    ->whereNull('payload->deleted');               // JSONType("payload", 'deleted') = 'Null'
+
+$query->select('id', 'payload->user as user')->orderBy('payload->color');
+// select "id", JSONExtractString("payload", 'user') as "user" from "my_table" order by JSONExtractString("payload", 'color') asc
+```
+
+- A value is read as a string: a string without its quotes, and a number, a boolean, an object or an array as its JSON text, such as `1.5`, `true` or `{"a":1}`.
+  `null`, a missing key and a document that is no JSON give `''`.
+- A comparison with an int or a float reads the value as a `Float64`, also in `whereIn()` and `whereBetween()`.
+  A value that is no number, such as `"large"`, is then `NULL`, so no comparison holds for it, `!=` and `whereNotIn()` included.
+- `true` and `false` read the value as a `Bool`. `whereNull()` holds for `null`, for a missing key and for a document that is no JSON.
+- An array index counts from `0`, as in Laravel: `[0]` is the first element and `[-1]` the last. A key can hold any character, such as a space or a dot.
+- A native `JSON` column of ClickHouse 26.x is no `String`. Read it with its own syntax, such as `whereRaw('payload.user.name = ?', ['Ann'])`.
+
+```php
+$query->whereJsonContains('payload->tags', 'en');        // hasAll(JSONExtract("payload", 'tags', 'Array(String)'), JSONExtract('["en"]', 'Array(String)'))
+$query->whereJsonContains('payload->tags', ['en', 'de']); // the array holds every value
+$query->whereJsonOverlaps('payload->tags', ['fr', 'de']); // hasAny(...): the array holds one of the values
+$query->whereJsonContainsKey('payload->user->name');      // JSONHas("payload", 'user', 'name')
+$query->whereJsonLength('payload->tags', '>', 1);         // JSONLength("payload", 'tags') > 1
+```
+
+- `whereJsonContains()` and `whereJsonOverlaps()` read both arrays as `Array(String)`, `Array(Float64)` or `Array(Bool)` when the values are all strings, all numbers or all booleans.
+  Other values are compared as their JSON text.
+  An array with keys, which is a JSON object, throws an `InvalidArgumentException`: ClickHouse cannot check that one object holds another.
+- `whereJsonContainsKey()` holds for a key whose value is `null`. `whereJsonLength()` counts the elements of an array or the keys of an object.
+- Each method has its `or` and `doesnt` forms, as in Laravel.
+
+To set a JSON path, see [Updates](/query-builder/writing-data#json-paths).
+
+## Full-text search
+
+`whereFullText()` checks the tokens of a column. A text index of the column speeds it up. See [Text indexes](/schema/schema-builder#text-and-vector-indexes).
+
+```php
+$query->whereFullText('body', 'quick fox');                     // hasAllTokens("body", 'quick fox')
+$query->whereFullText(['title', 'body'], 'fox', ['mode' => 'any']); // (hasAnyTokens("title", 'fox') or hasAnyTokens("body", 'fox'))
+```
+
+- The value is split into tokens at each character that is no ASCII letter or digit. Without a mode, every token must be in the column. With `['mode' => 'any']`, one of them.
+  Tokens compare with their letter case: `Lazy` does not match `lazy`.
+  Another mode, such as MySQL's `boolean`, throws an `InvalidArgumentException`.
+- ClickHouse 26.3 and 26.8 have `hasAllTokens()` and `hasAnyTokens()`. 24.8 does not, and the query fails with `UNKNOWN_FUNCTION`.
+
+## Vector search
+
+Laravel's vector methods use the cosine distance, `1 -` the cosine similarity, as PostgreSQL's pgvector:
+
+```php
+$query->whereVectorSimilarTo('embedding', $vector, 0.8);
+// where cosineDistance("embedding", CAST('[0.1,0.2,...]' AS Array(Float32))) <= 0.2
+//   order by cosineDistance("embedding", CAST('[0.1,0.2,...]' AS Array(Float32))) asc
+
+$query->select('id')->selectVectorDistance('embedding', $vector, 'distance')->orderByVectorDistance('embedding', $vector)->limit(10);
+```
+
+- The column is an `Array(Float32)`, as `vector()` creates it. ClickHouse 24.8, 26.3 and 26.8 have `cosineDistance()`.
+- A vector similarity index of the column speeds up an `orderByVectorDistance()` with a `limit()`. See [Vector indexes](/schema/schema-builder#text-and-vector-indexes).
+- A string as the vector calls Laravel's `toEmbeddings()`, as in Laravel.
+
 ## Random order
 
 `inRandomOrder()` gives `order by rand()`. ClickHouse has no random function with a seed, so a seed throws an `InvalidArgumentException`.

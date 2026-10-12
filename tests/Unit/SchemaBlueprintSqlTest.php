@@ -39,6 +39,13 @@ class SchemaBlueprintSqlTest extends TestCase
      */
     private array $selects = [];
 
+    /**
+     * The settings of system.settings that the mocked server turns on, such as enable_time_time64_type.
+     *
+     * @var list<string>
+     */
+    private array $enabledSettings = [];
+
     protected function tearDown(): void
     {
         Builder::defaultTimePrecision(0);
@@ -851,6 +858,111 @@ class SchemaBlueprintSqlTest extends TestCase
         $this->compileTable(fn (SchemaBlueprint $table) => $table->partitionBy('toYYYYMM(visited_at)'), table: 'visits');
     }
 
+    /**
+     * time() and timeTz() create a Time column, and a Time64 column with a precision, on a server that turns on
+     * enable_time_time64_type; fullText() and vectorIndex() add a text index and a vector similarity index, whose
+     * dimensions come from the vector() column. Laravel adds the indexes of column modifiers, such as fulltext() and
+     * index(), after the others. The settings are read once for each feature.
+     */
+    public function test_time_columns_text_and_vector_indexes_in_create_table(): void
+    {
+        $this->enabledSettings = ['enable_time_time64_type', 'enable_full_text_index', 'enable_vector_similarity_index'];
+
+        $this->assertSame(
+            ['CREATE TABLE `docs` (`id` UInt32, `opens_at` Time, `closes_at` Nullable(Time64(3)), `local_at` Time,'
+                . ' `body` String, `title` String, `embedding` Array(Float32), `other` Array(Float32),'
+                . ' INDEX `title_ngrams` `title` TYPE text(tokenizer = ngrams(3)) GRANULARITY 64,'
+                . ' INDEX `docs_body_fulltext` `body` TYPE text(tokenizer = splitByNonAlpha),'
+                . " INDEX `other_l2` `other` TYPE vector_similarity('hnsw', 'L2Distance', 3),"
+                . " INDEX `docs_embedding_vectorindex` `embedding` TYPE vector_similarity('hnsw', 'cosineDistance', 1536))"
+                . ' ENGINE = MergeTree() ORDER BY (`id`)'],
+            $this->compileCreate(function (SchemaBlueprint $table) {
+                $table->unsignedInteger('id');
+                $table->time('opens_at');
+                $table->time('closes_at', 3)->nullable();
+                $table->timeTz('local_at');
+                $table->text('body')->fulltext();
+                $table->string('title');
+                $table->fullText('title', 'title_ngrams', 'ngrams(3)')->granularity(64);
+                $table->vector('embedding', 1536)->index();
+                $table->vector('other');
+                $table->vectorIndex('other', 'other_l2')->operatorClass('vector_l2_ops')->dimensions(3);
+                $table->orderBy('id');
+            }, table: 'docs')
+        );
+        $this->assertCount(3, $this->selects, 'one read of system.settings for each feature');
+        $this->assertSame(
+            "SELECT name FROM system.settings WHERE name IN ('enable_time_time64_type', 'allow_experimental_time_time64_type')"
+                . " AND value IN ('1', 'true')",
+            $this->selects[0]
+        );
+    }
+
+    public function test_text_and_vector_indexes_in_alter_table(): void
+    {
+        $this->enabledSettings = ['allow_experimental_full_text_index', 'allow_experimental_vector_similarity_index'];
+
+        $this->assertSame(
+            [
+                'ALTER TABLE `docs` ADD INDEX `docs_body_fulltext` `body` TYPE text(tokenizer = splitByNonAlpha)',
+                'ALTER TABLE `docs` MATERIALIZE INDEX `docs_body_fulltext`',
+                "ALTER TABLE `docs` ADD INDEX `docs_embedding_vectorindex` `embedding` TYPE vector_similarity('hnsw', 'cosineDistance', 3)",
+                'ALTER TABLE `docs` DROP INDEX IF EXISTS `docs_title_fulltext`',
+                'ALTER TABLE `docs` DROP INDEX IF EXISTS `docs_old_vectorindex`',
+            ],
+            $this->compileTable(function (SchemaBlueprint $table) {
+                $table->fullText('body')->materialize();
+                $table->vectorIndex('embedding')->dimensions(3);
+                $table->dropFullText(['title']);
+                $table->dropVectorIndex(['old']);
+            }, table: 'docs')
+        );
+    }
+
+    /**
+     * @return array<string, array{Closure(SchemaBlueprint): mixed, class-string<\Throwable>, string}>
+     */
+    public static function vectorIndexesThatClickHouseCannotCreate(): array
+    {
+        return [
+            'no dimensions' => [
+                fn (SchemaBlueprint $table) => $table->vectorIndex('embedding'),
+                \RuntimeException::class,
+                'ClickHouse needs the dimensions of the column [embedding] for vectorIndex() (index'
+                . ' [docs_embedding_vectorindex] of the table [docs]). Add the column in the same blueprint with'
+                . " vector('embedding', 1536), or give them with vectorIndex('embedding')->dimensions(1536).",
+            ],
+            'another algorithm' => [
+                fn (SchemaBlueprint $table) => $table->vectorIndex('embedding')->algorithm('ivfflat')->dimensions(3),
+                InvalidArgumentException::class,
+                'ClickHouse has no vector index algorithm [ivfflat] for vectorIndex() (index [docs_embedding_vectorindex]'
+                . ' of the table [docs]): it has hnsw.',
+            ],
+            'another operator class' => [
+                fn (SchemaBlueprint $table) => $table->vectorIndex('embedding')->operatorClass('vector_ip_ops')->dimensions(3),
+                InvalidArgumentException::class,
+                'ClickHouse has no vector distance for the operator class [vector_ip_ops] of vectorIndex() (index'
+                . ' [docs_embedding_vectorindex] of the table [docs]): use vector_cosine_ops or cosineDistance, or'
+                . ' vector_l2_ops or L2Distance.',
+            ],
+        ];
+    }
+
+    /**
+     * @param Closure(SchemaBlueprint): mixed $index
+     * @param class-string<\Throwable> $exception
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('vectorIndexesThatClickHouseCannotCreate')]
+    public function test_a_vector_index_that_clickhouse_cannot_create_throws(Closure $index, string $exception, string $message): void
+    {
+        $this->enabledSettings = ['enable_vector_similarity_index'];
+
+        $this->expectException($exception);
+        $this->expectExceptionMessage($message);
+
+        $this->compileTable($index, table: 'docs');
+    }
+
     public function test_data_skipping_indexes_in_alter_table(): void
     {
         $this->assertSame(
@@ -1068,30 +1180,32 @@ class SchemaBlueprintSqlTest extends TestCase
                 fn (SchemaBlueprint $table) => $table->renameIndex('a', 'b'),
                 'ClickHouse cannot rename the index [a] of the table [visits]. Drop it with dropIndex() and add it again with index().',
             ],
-            'fullText' => [
+            'fullText on a server without text indexes' => [
                 fn (SchemaBlueprint $table) => $table->fullText('body'),
-                'ClickHouse has no full-text index for fullText() (index [visits_body_fulltext] of the table [visits]). Add a'
+                'ClickHouse has no text index for fullText() (index [visits_body_fulltext] of the table [visits]) on this'
+                . ' server: it needs the setting enable_full_text_index, which ClickHouse 26.3 and later turn on. Add a'
                 . " data-skipping index of a token or n-gram type instead, such as index('body', null, 'tokenbf_v1(512, 3, 0)').",
             ],
-            'dropFullText' => [
-                fn (SchemaBlueprint $table) => $table->dropFullText(['body']),
-                'ClickHouse has no full-text index for dropFullText() (index [visits_body_fulltext] of the table [visits]).'
-                . ' Drop a data-skipping index with dropIndex().',
+            'fullText of two columns' => [
+                fn (SchemaBlueprint $table) => $table->fullText(['title', 'body']),
+                'A ClickHouse text index takes one column, and fullText() (index [visits_title_body_fulltext] of the table'
+                . ' [visits]) names 2. Call fullText() once for each column.',
             ],
-            'vectorIndex' => [
+            'vectorIndex on a server without vector similarity indexes' => [
                 fn (SchemaBlueprint $table) => $table->vectorIndex('embedding'),
-                'ClickHouse has no vector index for vectorIndex() (index [visits_embedding_vectorindex] of the table [visits]).'
-                . ' Pass a vector similarity index type that the server supports to index() as its algorithm.',
+                'ClickHouse has no vector similarity index for vectorIndex() (index [visits_embedding_vectorindex] of the'
+                . ' table [visits]) on this server: it needs the setting enable_vector_similarity_index, which ClickHouse'
+                . ' 26.3 and later turn on.',
             ],
-            'index() of a vector column' => [
+            'index() of a vector column on a server without vector similarity indexes' => [
                 fn (SchemaBlueprint $table) => $table->vector('embedding', 3)->index(),
-                'ClickHouse has no vector index for vectorIndex()',
+                'ClickHouse has no vector similarity index for vectorIndex()',
             ],
-            'dropVectorIndex' => [
-                fn (SchemaBlueprint $table) => $table->dropVectorIndex(['embedding']),
-                'ClickHouse has no vector index for dropVectorIndex() (index [visits_embedding_vectorindex] of the table [visits]).',
+            'time on a server without the Time type' => [
+                fn (SchemaBlueprint $table) => $table->time('at'),
+                'ClickHouse has no time-of-day type for time() (column [at]) on this server: the Time type needs the'
+                . ' setting enable_time_time64_type, which ClickHouse 26.3 and later turn on.',
             ],
-            'time' => [fn (SchemaBlueprint $table) => $table->time('at'), 'ClickHouse has no time-of-day type for time() (column [at]).'],
             'set' => [fn (SchemaBlueprint $table) => $table->set('flags', ['a']), 'ClickHouse has no SET type (column [flags]).'],
         ];
     }
@@ -1232,7 +1346,8 @@ class SchemaBlueprintSqlTest extends TestCase
      * A connection with the given options, a real SchemaGrammar and the
      * database `analytics`, which records the statements it is given. Its
      * active node's client answers a read of system.tables with the given
-     * engine, and any other read with no rows; it records the reads.
+     * engine, a read of system.settings with the enabled settings that it
+     * names, and any other read with no rows; it records the reads.
      *
      * @param array<string, mixed> $config
      * @param string|null $engine The engine that system.tables gives for the table; null when it does not list it
@@ -1242,6 +1357,13 @@ class SchemaBlueprintSqlTest extends TestCase
         $client = $this->createMock(Client::class);
         $client->method('select')->willReturnCallback(function (string $sql) use ($engine): Statement {
             $this->selects[] = $sql;
+
+            if (str_contains($sql, 'FROM system.settings')) {
+                return $this->statement(array_map(
+                    fn (string $name): array => ['name' => $name],
+                    array_values(array_filter($this->enabledSettings, fn (string $name): bool => str_contains($sql, "'{$name}'")))
+                ));
+            }
 
             return $this->statement(str_contains($sql, 'FROM system.tables') && $engine !== null ? [['engine' => $engine]] : []);
         });

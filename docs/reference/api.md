@@ -127,6 +127,7 @@ settings(array|string $settings, mixed $value = null): static
 unionDistinct($query): static
 update(array $values, Illuminate\Contracts\Database\Query\Expression|string|int|null $partition = null)
 whereEmpty($columns, $boolean = 'and', $not = false): static
+whereFullText($columns, $value, array $options = [], $boolean = 'and')
 whereGlobalIn($column, $values, $boolean = 'and', $not = false): static
 whereGlobalNotIn($column, $values, $boolean = 'and'): static
 whereNotEmpty($columns, $boolean = 'and'): static
@@ -371,10 +372,12 @@ See [the guide](/reference/helpers#exceptions).
 ```php
 static cannotCreateTemporaryTableOutsideSession(string $table): Exceptions\QueryException
 static cannotDeleteWithoutWhere(): Exceptions\QueryException
+static cannotInsertIntoJsonPath(string $column): Exceptions\QueryException
 static cannotMutateWithClauses(string $statement, array $clauses, array $methodsThatLeaveALimit = [], ?string $methodThatAddsALimit = null, array $refusedSettings = []): Exceptions\QueryException
 static cannotReachTemporaryTable(string $statement, string $table, string $alternative): Exceptions\QueryException
 static cannotRunAsynchronouslyInSession(): Exceptions\QueryException
 static cannotUpdateEmptyValues(): Exceptions\QueryException
+static cannotUpdateJsonPath(string $selector, string $reason): Exceptions\QueryException
 static cannotUpdateWithoutWhere(): Exceptions\QueryException
 static insertKeysDiffer(string|int $index, array $keys, array $expectedKeys): Exceptions\QueryException
 static sessionIsLocked(string $sessionId, Throwable $previous): Exceptions\QueryException
@@ -410,6 +413,12 @@ static selectStatement(ClickHouseDB\Transport\CurlerRequest $request): ClickHous
 static sendInsert(ClickHouseDB\Client $client, string $head, string $body, string $format): ClickHouseDB\Statement
 static write(ClickHouseDB\Client $client, Connection $connection, string $sql, array $bindings = []): ClickHouseDB\Statement
 ```
+
+### Concerns\CompilesJsonPaths
+
+Trait `Oralunal\LaravelClickHouse\Concerns\CompilesJsonPaths`.
+
+It has no public constants or methods of its own.
 
 ### Concerns\SubstitutesBindings
 
@@ -489,7 +498,7 @@ normalizeValue(mixed $value): mixed
 
 ### QueryGrammar
 
-Class `Oralunal\LaravelClickHouse\QueryGrammar`, extends `Illuminate\Database\Query\Grammars\Grammar`, uses `Concerns\SubstitutesBindings`.
+Class `Oralunal\LaravelClickHouse\QueryGrammar`, extends `Illuminate\Database\Query\Grammars\Grammar`, uses `Concerns\CompilesJsonPaths`, `Concerns\SubstitutesBindings`.
 
 ```php
 const MUTATION_SETTINGS = [/* 20 values */];
@@ -497,6 +506,7 @@ const MUTATION_SETTINGS = [/* 20 values */];
 compileDelete(Illuminate\Database\Query\Builder $query)
 compileExists(Illuminate\Database\Query\Builder $query)
 compileInsert(Illuminate\Database\Query\Builder $query, array $values)
+compileInsertUsing(Illuminate\Database\Query\Builder $query, array $columns, string $sql)
 compileLiteral(mixed $value): string
 compileOptimize(QueryBuilder $query, bool $final, Illuminate\Contracts\Database\Query\Expression|string|int|null $partition): string
 compileRandom($seed)
@@ -504,14 +514,20 @@ compileSelect(Illuminate\Database\Query\Builder $query)
 compileThreadCount()
 compileTruncate(Illuminate\Database\Query\Builder $query)
 compileUpdate(Illuminate\Database\Query\Builder $query, array $values)
+compileVectorDistanceExpression($column)
+getFullTextFunction(array $options): string
 hasAnOrderThatAddsRows(Illuminate\Database\Query\Builder $query): bool
 hasAnOrderThatCallsArrayJoin(Illuminate\Database\Query\Builder $query): bool
 hasAnOrderThatDefinesAnAlias(Illuminate\Database\Query\Builder $query): bool
 hasAnOrderThatLimitsRows(Illuminate\Database\Query\Builder $query): bool
 parameter($value)
+prepareBindingForJsonContains($binding)
 prepareBindingsForDelete(array $bindings)
 prepareBindingsForUpdate(array $bindings, array $values)
+refuseJsonPathsInInsert(array $columns): void
 selectsAnAliasOrAnExpression(Illuminate\Database\Query\Builder $query): bool
+supportsVectorDistance()
+whereFullText(Illuminate\Database\Query\Builder $query, $where)
 ```
 
 ### QueryProcessor
@@ -527,7 +543,7 @@ static typeAcceptsNull(string $type): bool
 
 ### SchemaGrammar
 
-Class `Oralunal\LaravelClickHouse\SchemaGrammar`, extends `Illuminate\Database\Schema\Grammars\Grammar`.
+Class `Oralunal\LaravelClickHouse\SchemaGrammar`, extends `Illuminate\Database\Schema\Grammars\Grammar`, uses `Concerns\CompilesJsonPaths`.
 
 ```php
 compileAdd(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): ?string
@@ -538,16 +554,16 @@ compileDictionaryExists(?string $schema, string $dictionary): string
 compileDrop(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): string
 compileDropColumn(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): string
 compileDropForeign(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): null
-compileDropFullText(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): never
+compileDropFullText(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): ?string
 compileDropIfExists(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): string
 compileDropIndex(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): ?string
 compileDropPrimary(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): never
 compileDropSpatialIndex(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): null
 compileDropUnique(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): null
-compileDropVectorIndex(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): never
+compileDropVectorIndex(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): ?string
 compileForeign(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): null
 compileForeignKeys($schema, $table): string
-compileFulltext(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): never
+compileFulltext(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): array
 compileIndex(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): ?array
 compileIndexes($schema, $table): string
 compileOrderBy(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): ?string
@@ -565,7 +581,7 @@ compileTables($schema): string
 compileTemporaryTableExists(string $table): string
 compileTtl(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): string
 compileUnique(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): null
-compileVectorIndex(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): never
+compileVectorIndex(Illuminate\Database\Schema\Blueprint $blueprint, Illuminate\Support\Fluent $command): array
 compileViews($schema): string
 static quoteIdentifier(string $identifier): string
 quoteString($value): string

@@ -865,8 +865,8 @@ class SchemaBlueprintTest extends TestCase
             fn (SchemaBlueprint $table) => $table->renameIndex('a', 'b'),
             fn (SchemaBlueprint $table) => $table->primary('id'),
             fn (SchemaBlueprint $table) => $table->dropPrimary(),
-            fn (SchemaBlueprint $table) => $table->fullText('payload'),
-            fn (SchemaBlueprint $table) => $table->time('at'),
+            fn (SchemaBlueprint $table) => $table->set('flags', ['a']),
+            fn (SchemaBlueprint $table) => $table->fullText(['payload', 'name']),
         ] as $command) {
             try {
                 Schema::table(self::ALTERED, function (SchemaBlueprint $table) use ($command) {
@@ -875,7 +875,7 @@ class SchemaBlueprintTest extends TestCase
                 });
                 $this->fail('Schema::table() should throw');
             } catch (\RuntimeException $exception) {
-                $this->assertStringStartsWith('ClickHouse ', $exception->getMessage());
+                $this->assertStringContainsString('ClickHouse ', $exception->getMessage());
             }
         }
 
