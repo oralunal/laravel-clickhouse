@@ -35,6 +35,7 @@ function columnsOfTheClickHouseDump(TypedEvent $event, TypedEventView $view): vo
     assertType('mixed', $event->attributes);
     assertType('mixed', $event->big);
     assertType('mixed', $event->computed);
+    assertType('string|null', $event->alias_col);
     assertType('string|null', $view->name);
     assertType('float', $view->ratio);
 }

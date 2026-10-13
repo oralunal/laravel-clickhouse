@@ -27,33 +27,37 @@ final class DatabaseFacadeReturnType implements DynamicStaticMethodReturnTypeExt
     /**
      * @param ConnectionConfig $config
      * @param Container $container
-     * @throws LogicException When Larastan's own SQL parser is in place, so that the schema dumps of ClickHouse
-     *                        connections would not be read (see verifySqlParser())
+     * @throws LogicException When Larastan's own parsers are in place, so that the schema dumps and the migrations
+     *                        of ClickHouse connections would be read with the types of MySQL (see verifyParsers())
      */
     public function __construct(private ConnectionConfig $config, Container $container)
     {
-        self::verifySqlParser($container);
+        self::verifyParsers($container);
     }
 
     /**
-     * Refuse to run when Larastan is loaded and its sqlParser service is not the parser of this extension. That is
-     * so when this extension is included before Larastan's, whose definition of the service then wins: Larastan
-     * would skip the schema dumps of ClickHouse connections without an error.
+     * Refuse to run when Larastan is loaded and its sqlParser or migrationsParser service is not the parser of this
+     * extension. That is so when this extension is included before Larastan's, whose definitions of the services
+     * then win: Larastan would skip the schema dumps of ClickHouse connections without an error, and read their
+     * migrations with the types of MySQL.
      *
      * @param Container $container
      * @return void
      * @throws LogicException
      */
-    private static function verifySqlParser(Container $container): void
+    private static function verifyParsers(Container $container): void
     {
         if (!interface_exists(SqlParser::class) || !$container->hasService('sqlParser')) {
             return;
         }
 
-        if (!$container->getService('sqlParser') instanceof ClickHouseSqlParser) {
+        if (!$container->getService('sqlParser') instanceof ClickHouseSqlParser
+            || $container->hasService('migrationsParser')
+            && !$container->getService('migrationsParser') instanceof ClickHouseMigrationParser
+        ) {
             throw new LogicException(
                 'The PHPStan extension of oralunal/laravel-clickhouse must be included after the extension of'
-                . ' Larastan, so that its SQL parser reads the schema dumps of ClickHouse connections:'
+                . ' Larastan, so that its parsers read the schema dumps and the migrations of ClickHouse connections:'
                 . ' include vendor/larastan/larastan/extension.neon first, then'
                 . ' vendor/oralunal/laravel-clickhouse/extension.neon.'
             );

@@ -32,7 +32,8 @@ correctly: `get()` returns `Collection<int, stdClass>`, and `first()` returns `s
 On a model query, `toBase()` and `getQuery()` return `QueryBuilder`.
 
 The PHPStan extension of the package gives `DB::connection('clickhouse')` and `Schema::connection('clickhouse')` the
-types of the package, and reads the schema dumps of ClickHouse connections. See [Static analysis](/reference/static-analysis).
+types of the package, and reads the migrations and the schema dumps of ClickHouse connections with the types of the
+values. See [Static analysis](/reference/static-analysis).
 
 ## First row and single values
 

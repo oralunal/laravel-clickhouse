@@ -27,17 +27,7 @@ class ClickHouseSqlParserTest extends TestCase
         parent::setUp();
 
         $this->previousContainer = Container::getInstance();
-        $container = new Container();
-        $container->instance('config', new Repository([
-            'database' => [
-                'default' => 'clickhouse',
-                'connections' => [
-                    'clickhouse' => ['driver' => 'clickhouse'],
-                    'reader' => ['driver' => 'clickhouse', 'readonly' => true],
-                ],
-            ],
-        ]));
-        Container::setInstance($container);
+        $this->useConnections(['clickhouse' => ['driver' => 'clickhouse']]);
     }
 
     protected function tearDown(): void
@@ -45,6 +35,19 @@ class ClickHouseSqlParserTest extends TestCase
         Container::setInstance($this->previousContainer);
 
         parent::tearDown();
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $connections
+     * @return void
+     */
+    private function useConnections(array $connections): void
+    {
+        $container = new Container();
+        $container->instance('config', new Repository([
+            'database' => ['default' => 'clickhouse', 'connections' => $connections],
+        ]));
+        Container::setInstance($container);
     }
 
     /**
@@ -73,6 +76,10 @@ class ClickHouseSqlParserTest extends TestCase
         return $result;
     }
 
+    /**
+     * Each column gets the PHP type of its values. A MATERIALIZED or ALIAS column is nullable, because SELECT * does
+     * not read it.
+     */
     public function test_a_dump_of_the_package_is_read_with_the_php_types_of_its_values(): void
     {
         $tables = self::columnsByTable($this->parser()->parseTables((string) file_get_contents(__DIR__ . '/../../Types/schema/clickhouse-schema.sql')));
@@ -103,8 +110,8 @@ class ClickHouseSqlParserTest extends TestCase
             'nested.k' => ['CLICKHOUSE', [], false, []],
             'nested.v' => ['CLICKHOUSE', [], false, []],
             'maybe_tags' => ['CLICKHOUSE', [], false, []],
-            'computed' => ['CLICKHOUSE', [], false, []],
-            'alias_col' => ['VARCHAR', [], false, []],
+            'computed' => ['CLICKHOUSE', [], true, []],
+            'alias_col' => ['VARCHAR', [], true, []],
         ], $tables['events']);
         $this->assertSame(['day' => ['VARCHAR', [], false, []], 'c' => ['CLICKHOUSE', [], false, []]], $tables['events_by_day']);
         $this->assertSame(['id' => ['CLICKHOUSE', [], false, []], 'name' => ['VARCHAR', [], false, []]], $tables['users_dict']);
@@ -112,12 +119,17 @@ class ClickHouseSqlParserTest extends TestCase
     }
 
     /**
-     * A read-only user cannot ask ClickHouse to quote NaN and the infinities, which then come as null: a floating-point
-     * column of a read-only connection is nullable.
+     * A read-only user cannot ask ClickHouse to quote NaN and the infinities, which then come as null. Larastan finds
+     * the columns of a model by its table only, so a floating-point column is nullable in the dump of any connection
+     * when a ClickHouse connection of the config is read-only.
      */
-    public function test_a_float_of_a_read_only_connection_is_nullable(): void
+    public function test_a_float_is_nullable_when_a_clickhouse_connection_is_read_only(): void
     {
-        $dump = SchemaState::DUMP_HEADER . "reader\n\nCREATE TABLE t\n(\n    `f` Float64,\n    `n` Nullable(Float32),\n    `i` UInt8\n)\nENGINE = Memory;\n";
+        $this->useConnections([
+            'clickhouse' => ['driver' => 'clickhouse'],
+            'reader' => ['driver' => 'clickhouse', 'readonly' => true],
+        ]);
+        $dump = SchemaState::DUMP_HEADER . "clickhouse\n\nCREATE TABLE t\n(\n    `f` Float64,\n    `n` Nullable(Float32),\n    `i` UInt8\n)\nENGINE = Memory;\n";
 
         $this->assertSame(
             ['t' => ['f' => ['DOUBLE', [], true, []], 'n' => ['DOUBLE', [], true, []], 'i' => ['INT', ['unsigned'], false, []]]],

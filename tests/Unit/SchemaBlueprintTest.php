@@ -14,7 +14,9 @@ use Oralunal\LaravelClickHouse\Connection;
 use Oralunal\LaravelClickHouse\SchemaBlueprint;
 use Oralunal\LaravelClickHouse\SchemaBuilder;
 use Oralunal\LaravelClickHouse\SchemaColumnDefinition;
+use Oralunal\LaravelClickHouse\SchemaDropCommand;
 use Oralunal\LaravelClickHouse\SchemaGrammar;
+use Oralunal\LaravelClickHouse\SchemaIndexDefinition;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -145,6 +147,32 @@ class SchemaBlueprintTest extends TestCase
         $this->assertInstanceOf(SchemaColumnDefinition::class, $blueprint->id());
         $this->assertInstanceOf(SchemaColumnDefinition::class, $blueprint->string('name'));
         $this->assertInstanceOf(SchemaColumnDefinition::class, $blueprint->addColumn('uuid', 'uuid'));
+    }
+
+    /**
+     * drop() and dropIfExists() return a SchemaDropCommand, and the data-skipping indexes a SchemaIndexDefinition, so
+     * that the types that the @method tags of SchemaBlueprint declare are true. The other commands stay Fluent.
+     */
+    public function test_the_commands_have_the_types_of_their_clickhouse_modifiers(): void
+    {
+        $blueprint = $this->blueprint();
+
+        $drop = $blueprint->drop()->sync();
+        $dropIfExists = $blueprint->dropIfExists();
+        $indexes = [
+            $blueprint->index('url', null, 'bloom_filter(0.01)')->granularity(4)->materialize(),
+            $blueprint->rawIndex('lower(url)', 'idx_lower'),
+            $blueprint->fullText('body'),
+            $blueprint->vectorIndex('embedding'),
+        ];
+
+        $this->assertInstanceOf(SchemaDropCommand::class, $drop);
+        $this->assertTrue($drop->sync);
+        $this->assertInstanceOf(SchemaDropCommand::class, $dropIfExists);
+        $this->assertContainsOnlyInstancesOf(SchemaIndexDefinition::class, $indexes);
+        $this->assertSame([4, true], [$indexes[0]->granularity, $indexes[0]->materialize]);
+        $this->assertSame(Fluent::class, $blueprint->orderBy('id')::class);
+        $this->assertSame(Fluent::class, $blueprint->dropColumn('url')::class);
     }
 
     public function test_the_clickhouse_modifiers_are_column_attributes(): void

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The PHPStan extension reads the migrations of ClickHouse tables with the types of the package. Larastan reads the column methods of a migration with the types of MySQL, and it reads a blueprint method that it does not know as a column: `decimal()` was `float`, `id()` and `unsignedBigInteger()` were `int<0, max>`, `year()` was `string|null`, and `engine('ReplacingMergeTree')` added a `ReplacingMergeTree` property to the model. The extension puts a parser in place of Larastan's `migrationsParser` service. It changes the blueprint calls of a ClickHouse callback before Larastan reads them: `decimal()` is `string`, a `UInt64` column, such as `id()`, is `mixed`, `year()` is `int<0, max>`, `enum()` is the union of the names, `rawColumn()` gets the type that a dump gives, an `EPHEMERAL` column is not a property, `change()->renameTo()` renames the column, and the table clauses, such as `engine()` and `orderBy()`, add no column. A callback is a ClickHouse callback when its parameter has the type `SchemaBlueprint`, or when it uses a ClickHouse connection: the constant of `Schema::connection()`, else the `$connection` property of the migration, else the default connection. The migrations of other connections keep the rules of Larastan. See [Static analysis](https://laravel-clickhouse.oralunal.com/reference/static-analysis#migrations).
+- `SchemaDropCommand` and `SchemaIndexDefinition`. `drop()` and `dropIfExists()` of `SchemaBlueprint` return a `SchemaDropCommand`, which declares `sync()`, and `index()`, `rawIndex()`, `fullText()` and `vectorIndex()` return a `SchemaIndexDefinition`, which declares `granularity()` and `materialize()`. PHPStan reported `drop()->sync()` and `index(...)->granularity(4)`, which the documentation shows, as calls to undefined methods. The classes extend `Fluent` and Laravel's `IndexDefinition`, so other code does not change.
+
+### Changed
+
+- The PHPStan extension makes a `Float32` or `Float64` column nullable when a ClickHouse connection of the config has the `readonly` option, in each migration and dump. 4.1 made nullable only the columns of the dump of a read-only connection. But Larastan finds the columns of a model by the name of its table only, so a model that reads through a read-only connection got `float` for a value that can be `null`.
+- The PHPStan extension makes a `MATERIALIZED` or `ALIAS` column of a dump, and a column with `virtualAs()` or `storedAs()` in a migration, nullable: `SELECT *` does not read it, so a model that Eloquent selects with `*` has no value for it.
+- The PHPStan extension turns off the migration cache of Larastan (`enableMigrationCache: false`). Larastan keys the cache by the migration and dump files only, so after an update of the package or a change of the database config, it gave the types of the run before. A `phpstan.neon` can turn the cache on again.
+- `lc-upgrade-3x-to-4x` tells the user that the PHPStan extension reads the migrations, and suggests `schema:dump` only for the table of a ClickHouse model that no migration creates.
+
+### Deprecated
+
+- `PHPStan\ConnectionConfig::isReadOnly()`. The extension uses `hasReadOnlyClickHouseConnection()`.
+
+### Fixed
+
+- `Parallel::get()` and `Parallel::getRows()` declare that they take the Eloquent builder of any model. PHPStan refused `Event::query()`, because `Builder<Event>` is not a `Builder<Model>`.
+
 ## [4.1.1] - 2026-10-13
 
 ### Changed
