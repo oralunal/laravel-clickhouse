@@ -9,24 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The PHPStan extension reads the migrations of ClickHouse tables with the types of the package. For example, `decimal()` is `string`, not `float`, and `engine()` adds no property. The migrations of other connections keep the types of Larastan. See [Static analysis](https://laravel-clickhouse.oralunal.com/reference/static-analysis#migrations).
-- `make:clickhouse-model` and `make:clickhouse-migration`. The model extends the model of the package and uses `HasUuids`. The migration sets its ClickHouse connection and uses `SchemaBlueprint`. `--database` selects the connection, and `stub:publish` copies the stubs. See [Create a model](https://laravel-clickhouse.oralunal.com/models/defining-models#create-a-model) and [Create a migration](https://laravel-clickhouse.oralunal.com/schema/migrations#create-a-migration).
-- `SchemaDropCommand` and `SchemaIndexDefinition`. With them, PHPStan accepts `drop()->sync()` and `index(...)->granularity()`.
+- The PHPStan extension reads the migrations of ClickHouse tables with the types of the package. ([#19](https://github.com/oralunal/laravel-clickhouse/issues/19))
+- `make:clickhouse-model` and `make:clickhouse-migration` create a ClickHouse model and a ClickHouse migration. ([#20](https://github.com/oralunal/laravel-clickhouse/issues/20))
+- `SchemaDropCommand` and `SchemaIndexDefinition`, so that PHPStan accepts `drop()->sync()` and `index()->granularity()`. ([#21](https://github.com/oralunal/laravel-clickhouse/issues/21))
 
 ### Changed
 
-- The PHPStan extension makes `Float32` and `Float64` columns nullable when a ClickHouse connection has the `readonly` option.
-- The PHPStan extension makes `MATERIALIZED`, `ALIAS`, `virtualAs()` and `storedAs()` columns nullable, because `SELECT *` does not read them.
-- The PHPStan extension turns off the migration cache of Larastan. The cache kept old types after a package update or a config change.
-- `lc-upgrade-3x-to-4x` suggests `schema:dump` only for a table that no migration creates.
+- The PHPStan extension makes `Float32` and `Float64` columns nullable when a ClickHouse connection is read-only. ([#22](https://github.com/oralunal/laravel-clickhouse/issues/22))
+- The PHPStan extension makes `MATERIALIZED` and `ALIAS` columns nullable. ([#23](https://github.com/oralunal/laravel-clickhouse/issues/23))
+- The PHPStan extension turns off the migration cache of Larastan. ([#24](https://github.com/oralunal/laravel-clickhouse/issues/24))
+- `lc-upgrade-3x-to-4x` suggests `schema:dump` only for a table that no migration creates. ([#19](https://github.com/oralunal/laravel-clickhouse/issues/19))
 
 ### Deprecated
 
-- `PHPStan\ConnectionConfig::isReadOnly()`. Use `hasReadOnlyClickHouseConnection()`.
+- `PHPStan\ConnectionConfig::isReadOnly()`, replaced by `hasReadOnlyClickHouseConnection()`. ([#22](https://github.com/oralunal/laravel-clickhouse/issues/22))
 
 ### Fixed
 
-- `Parallel::get()` and `Parallel::getRows()` accept the Eloquent builder of any model. Before, PHPStan refused `Event::query()`.
+- PHPStan accepts the query of any model in `Parallel::get()` and `Parallel::getRows()`. ([#25](https://github.com/oralunal/laravel-clickhouse/issues/25))
 
 ## [4.1.1] - 2026-10-13
 

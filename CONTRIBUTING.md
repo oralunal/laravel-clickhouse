@@ -85,6 +85,11 @@ release time.** Three weeks later you will not remember which edge case a fix
 addressed. Entries describe *behavior*, in prose, for someone consuming the
 package; they are not a list of commit subjects.
 
+Write each entry as one short sentence, with a link to its issue at the end:
+`([#19](https://github.com/oralunal/laravel-clickhouse/issues/19))`. The issue
+gives the details: the problem, the change and the examples. If a change has no
+issue, open one.
+
 The `[Unreleased]` section accumulates between releases.
 
 ### What belongs in it
