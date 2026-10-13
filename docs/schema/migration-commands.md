@@ -1,6 +1,7 @@
 # Migration commands
 
 `migrate`, `migrate:rollback`, `migrate:refresh`, `migrate:reset`, `migrate:status`, `migrate:fresh`, `db:wipe` and `schema:dump` work on ClickHouse connections.
+`make:clickhouse-migration` and `make:clickhouse-model --migration` write a migration for a ClickHouse connection. See [Create a migration](/schema/migrations#create-a-migration).
 
 ## The connection that holds the migrations table
 

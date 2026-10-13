@@ -120,14 +120,14 @@ DB::connection('clickhouse')->table('my_table')
 
 | Area | Documentation |
 | --- | --- |
-| Eloquent models with casts, events, relations and timestamps | [Define a model](https://laravel-clickhouse.oralunal.com/models/defining-models) |
+| Eloquent models with casts, events, relations and timestamps, and `make:clickhouse-model` | [Define a model](https://laravel-clickhouse.oralunal.com/models/defining-models) |
 | Batch inserts, in-memory buffers, Buffer tables, JSONEachRow and file inserts | [Insert rows](https://laravel-clickhouse.oralunal.com/models/inserting-rows) |
 | Queries, mutations and parallel queries of a model | [Eloquent models](https://laravel-clickhouse.oralunal.com/models/eloquent) |
 | Laravel's query builder with ClickHouse SQL: `FINAL`, `PREWHERE`, `SAMPLE`, `WITH`, `ARRAY JOIN`, ClickHouse joins, `INTERSECT`, `EXCEPT`, `SETTINGS` | [Query builder](https://laravel-clickhouse.oralunal.com/query-builder/basics) |
 | `count()`, aggregates, `exists()`, `first()`, `pluck()`, `chunk()`, pagination, results in any format | [Read results](https://laravel-clickhouse.oralunal.com/query-builder/reading-results) |
 | Lightweight `DELETE`, mutations, `OPTIMIZE`, `TRUNCATE`, `IN PARTITION`, `ON CLUSTER` | [Updates and deletions](https://laravel-clickhouse.oralunal.com/query-builder/writing-data) |
 | `Schema::create()` and `Schema::table()` with ClickHouse types, engines, keys and indexes | [Laravel's schema builder](https://laravel-clickhouse.oralunal.com/schema/schema-builder) |
-| `migrate`, `migrate:rollback`, `migrate:status`, `migrate:fresh`, `schema:dump` | [Migration commands](https://laravel-clickhouse.oralunal.com/schema/migration-commands) |
+| `make:clickhouse-migration`, `migrate`, `migrate:rollback`, `migrate:status`, `migrate:fresh`, `schema:dump` | [Migration commands](https://laravel-clickhouse.oralunal.com/schema/migration-commands) |
 | `?` bindings, `cursor()`, pretending | [Raw SQL](https://laravel-clickhouse.oralunal.com/advanced/raw-sql) |
 | Sessions and temporary tables | [Sessions](https://laravel-clickhouse.oralunal.com/advanced/sessions) |
 | Queries at the same time, across connections | [Parallel queries](https://laravel-clickhouse.oralunal.com/advanced/parallel-queries) |

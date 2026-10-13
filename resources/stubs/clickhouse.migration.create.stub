@@ -1,0 +1,36 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\Schema;
+use Oralunal\LaravelClickHouse\SchemaBlueprint;
+
+return new class extends Migration
+{
+    /**
+     * The ClickHouse connection of the migration.
+     *
+     * @var string|null
+     */
+    protected $connection = '{{ connection }}';
+
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('{{ table }}', function (SchemaBlueprint $table) {
+            $table->uuid('id');
+            $table->timestamps();
+
+            $table->orderBy('id');
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('{{ table }}');
+    }
+};

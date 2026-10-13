@@ -22,6 +22,40 @@ class Event extends Model
 }
 ```
 
+## Create a model
+
+`make:clickhouse-model` is Laravel's `make:model` for a ClickHouse table:
+
+```sh
+php artisan make:clickhouse-model Event --migration
+```
+
+```php
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
+
+class Event extends Model
+{
+    use HasUuids;
+}
+```
+
+- The model extends the model of the package and uses `HasUuids`, because ClickHouse has no auto-increment. See
+  [Keys](#keys).
+- `--migration` (`-m`) writes the migration of the table with `make:clickhouse-migration`, on the same connection.
+  See [Create a migration](/schema/migrations#create-a-migration).
+- `--database=analytics` names the ClickHouse connection. The model then sets `$connection`. Without the option, the
+  command uses the default connection when it is a ClickHouse connection, else `clickhouse`. A connection that is not
+  a ClickHouse connection stops the command with an error.
+- The other options are those of `make:model`: `--factory`, `--seed`, `--controller`, `--resource`, `--api`,
+  `--requests`, `--policy`, `--all`, `--force`, `--test`, `--pest` and `--phpunit`. They call Laravel's commands.
+  `--pivot` and `--morph-pivot` do not exist: a pivot model extends Laravel's `Pivot`, not the model of the package.
+- To change the model that the command writes, see [The stubs](/schema/migrations#the-stubs).
+- Laravel's `make:model` writes a model of Laravel's Eloquent. Change its parent class to
+  `Oralunal\LaravelClickHouse\Eloquent\Model`.
+
 ## Define a model
 
 The model sets these defaults:
