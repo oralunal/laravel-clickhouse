@@ -430,6 +430,14 @@ substituteBindings(string $sql, array $bindings): string
 substituteBindingsIntoRawSql($sql, $bindings)
 ```
 
+### Console\ConnectionOption
+
+Final class `Oralunal\LaravelClickHouse\Console\ConnectionOption`.
+
+```php
+static resolve(array $connections, mixed $default, ?string $requested): string
+```
+
 ### Console\FreshCommand
 
 Class `Oralunal\LaravelClickHouse\Console\FreshCommand`, extends `Illuminate\Database\Console\Migrations\FreshCommand`.
@@ -450,6 +458,23 @@ const RETIRED_SKILLS = ['plc-upgrade-1x-to-2x', 'lc-upgrade-2x-to-3x'];
 
 new InstallSkillsCommand(Illuminate\Filesystem\Filesystem $files)
 handle(): int
+```
+
+### Console\MigrateMakeCommand
+
+Class `Oralunal\LaravelClickHouse\Console\MigrateMakeCommand`, extends `Illuminate\Database\Console\Migrations\MigrateMakeCommand`.
+
+```php
+new MigrateMakeCommand(MigrationCreator $clickHouseCreator, Illuminate\Support\Composer $composer)
+handle()
+```
+
+### Console\ModelMakeCommand
+
+Class `Oralunal\LaravelClickHouse\Console\ModelMakeCommand`, extends `Illuminate\Foundation\Console\ModelMakeCommand`.
+
+```php
+handle()
 ```
 
 ### CurlerRollingInSession
@@ -493,6 +518,15 @@ new JsonEachRowEncoder(Closure $formatDateTime)
 encodeCompactRows(array $rows): string
 encodeRows(array $rows): string
 normalizeValue(mixed $value): mixed
+```
+
+### MigrationCreator
+
+Class `Oralunal\LaravelClickHouse\MigrationCreator`, extends `Illuminate\Database\Migrations\MigrationCreator`.
+
+```php
+create($name, $path, $table = null, $create = false, string $connection = Connection::DEFAULT_NAME)
+stubPath()
 ```
 
 ### PHPStan\ClickHouseMigrationParser

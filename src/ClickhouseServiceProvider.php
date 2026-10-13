@@ -10,6 +10,7 @@ use Illuminate\Database\Events\SchemaDumped;
 use Illuminate\Database\Events\SchemaLoaded;
 use Illuminate\Database\Migrations\DatabaseMigrationRepository;
 use Illuminate\Database\Migrations\MigrationRepositoryInterface;
+use Illuminate\Foundation\Events\PublishingStubs;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Testing\ParallelTesting;
 
@@ -75,6 +76,15 @@ class ClickhouseServiceProvider extends ServiceProvider
             fn (FreshCommand $command, $app) => new Console\FreshCommand($app['migrator'])
         );
 
+        // make:clickhouse-migration writes its migrations with the ClickHouse stubs.
+        $this->app->singleton(
+            Console\MigrateMakeCommand::class,
+            fn ($app) => new Console\MigrateMakeCommand(
+                new MigrationCreator($app['files'], $app->basePath('stubs')),
+                $app['composer']
+            )
+        );
+
         // Parallel test processes each get their own database on those connections.
         $this->app->afterResolving(
             ParallelTesting::class,
@@ -93,8 +103,15 @@ class ClickhouseServiceProvider extends ServiceProvider
                 : base_path('config/clickhouse.php'),
         ], 'clickhouse-config');
 
+        // The stubs of make:clickhouse-model and make:clickhouse-migration, which an application can change.
+        $this->publishes([__DIR__ . '/../resources/stubs' => base_path('stubs')], 'clickhouse-stubs');
+
         if ($this->app->runningInConsole()) {
-            $this->commands([Console\InstallSkillsCommand::class]);
+            $this->commands([
+                Console\InstallSkillsCommand::class,
+                Console\ModelMakeCommand::class,
+                Console\MigrateMakeCommand::class,
+            ]);
         }
 
         $db = $this->app->make('db');
@@ -108,6 +125,14 @@ class ClickhouseServiceProvider extends ServiceProvider
         $this->app['events']->listen(
             SchemaDumped::class,
             fn (SchemaDumped $event) => $this->app->make(SecondaryConnections::class)->dump($event)
+        );
+        $this->app['events']->listen(
+            PublishingStubs::class,
+            function (PublishingStubs $event): void {
+                foreach (glob(__DIR__ . '/../resources/stubs/*.stub') ?: [] as $stub) {
+                    $event->add((string) realpath($stub), basename($stub));
+                }
+            }
         );
         $this->app['events']->listen(
             SchemaLoaded::class,

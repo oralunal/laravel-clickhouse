@@ -1,0 +1,13 @@
+<?php
+
+namespace {{ namespace }};
+
+{{ factoryImport }}
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Oralunal\LaravelClickHouse\Eloquent\Model;
+
+class {{ class }} extends Model
+{
+    {{ factory }}
+    use HasUuids;{{ connection }}
+}

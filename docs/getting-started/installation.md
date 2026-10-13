@@ -90,6 +90,6 @@ DB::connection('clickhouse')->table('summing_url_views')->final()->where('url', 
 
 ## Next steps
 
-- [Define an Eloquent model](/models/defining-models).
-- [Write a migration](/schema/migrations).
+- [Create an Eloquent model](/models/defining-models#create-a-model) with `php artisan make:clickhouse-model`.
+- [Create a migration](/schema/migrations#create-a-migration) with `php artisan make:clickhouse-migration`.
 - [Query with the query builder](/query-builder/basics).
