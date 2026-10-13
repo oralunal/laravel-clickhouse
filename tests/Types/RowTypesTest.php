@@ -13,14 +13,20 @@ use Symfony\Component\Process\Process;
  * - row-types.php: each row of QueryBuilder is a stdClass object, and the base query of a ClickHouse model is a
  *   QueryBuilder. RowObjectsTest checks the rows that the same methods return;
  * - extension.php: the columns of the models come from the ClickHouse schema dump in schema/, with the PHP types of
- *   the values that ResultValues returns, and the facades give the package's types for ClickHouse connections.
+ *   the values that ResultValues returns, and the facades give the package's types for ClickHouse connections;
+ * - migrations.php: the columns of the models come from the ClickHouse migrations in migrations/ with the same types,
+ *   and the migration of another connection keeps the rules of Larastan;
+ * - usage.php: code that uses the package as its documentation shows, such as the blueprint modifiers, the model
+ *   queries and Parallel, has no error.
+ *
+ * PHPStan runs at the highest level, as the most strict project would run it.
  *
  * PHPStan runs in its own process, because Larastan boots a Laravel application, whose error and exception handlers
  * must not stay in the process of the other tests.
  */
 class RowTypesTest extends TestCase
 {
-    public function testPhpStanReadsTheRowsAsArrays(): void
+    public function testPhpStanReadsTheTypesOfThePackage(): void
     {
         $this->phpStan(['clear-result-cache', '--configuration=tests/Types/phpstan.neon']);
         $process = $this->phpStan([

@@ -495,12 +495,23 @@ encodeRows(array $rows): string
 normalizeValue(mixed $value): mixed
 ```
 
+### PHPStan\ClickHouseMigrationParser
+
+Final class `Oralunal\LaravelClickHouse\PHPStan\ClickHouseMigrationParser`, implements `PHPStan\Parser\Parser`.
+
+```php
+new ClickHouseMigrationParser(PHPStan\Parser\Parser $parser, PHPStan\ConnectionConfig $config)
+parseFile(string $file): array
+parseString(string $sourceCode): array
+```
+
 ### PHPStan\ClickHouseSqlParser
 
 Final class `Oralunal\LaravelClickHouse\PHPStan\ClickHouseSqlParser`, implements `Larastan\Larastan\SQL\SqlParser`.
 
 ```php
 new ClickHouseSqlParser(Larastan\Larastan\SQL\SqlParser $fallback, PHPStan\ConnectionConfig $config)
+static convert(string $type, bool $floatsNullable): array
 static create(): object
 parseTables(string $sql): array
 ```
@@ -518,6 +529,7 @@ static namesClickHouse(array $args, PHPStan\Analyser\Scope $scope, PHPStan\Conne
 Final class `Oralunal\LaravelClickHouse\PHPStan\ConnectionConfig`.
 
 ```php
+hasReadOnlyClickHouseConnection(): bool
 isClickHouse(?string $name): bool
 isReadOnly(string $name): bool
 ```
@@ -614,6 +626,12 @@ static rows(array $meta, iterable $rows): array
 static settingsFor(ClickHouseDB\Client $client): array
 ```
 
+### SchemaDropCommand
+
+Class `Oralunal\LaravelClickHouse\SchemaDropCommand`, extends `Illuminate\Support\Fluent`.
+
+It has no public constants or methods of its own.
+
 ### SchemaGrammar
 
 Class `Oralunal\LaravelClickHouse\SchemaGrammar`, extends `Illuminate\Database\Schema\Grammars\Grammar`, uses `Concerns\CompilesJsonPaths`.
@@ -660,6 +678,12 @@ static quoteIdentifier(string $identifier): string
 quoteString($value): string
 wrap($value): string
 ```
+
+### SchemaIndexDefinition
+
+Class `Oralunal\LaravelClickHouse\SchemaIndexDefinition`, extends `Illuminate\Database\Schema\IndexDefinition`.
+
+It has no public constants or methods of its own.
 
 ### SchemaState
 

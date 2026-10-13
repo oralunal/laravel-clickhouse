@@ -842,11 +842,12 @@ Run all of these and fix what they report:
    - If the config does not include
      `vendor/oralunal/laravel-clickhouse/extension.neon`, offer it to the user
      and ask before you add it. Tell the user what it does: it reads the
-     schema dumps of the ClickHouse connections in `database/schema`, so that
-     PHPStan knows the columns of the ClickHouse models, and it gives
+     migrations and the schema dumps of the ClickHouse connections with the
+     types of the values that the package returns, so that PHPStan knows the
+     columns of the ClickHouse models and their types; it gives
      `DB::connection('<name>')`, `Schema::connection('<name>')` and
      `DB::table()` the types of the package, so that PHPStan knows their
-     ClickHouse methods. See
+     ClickHouse methods; and it turns off the migration cache of Larastan. See
      https://laravel-clickhouse.oralunal.com/reference/static-analysis.
    - If the user agrees, add the line to the `includes` of the config, after
      the line of `vendor/larastan/larastan/extension.neon`. When the config
@@ -862,10 +863,11 @@ Run all of these and fix what they report:
      on a `stdClass` row or a comparison that is always false, shows a case
      that the searches missed: fix it as that step says, or ask the user.
      Explain the other new errors in the report.
-   - Larastan reads the ClickHouse tables from a schema dump, and reads the
-     migrations after the dumps (see the page above). If the project has no
-     dump of a ClickHouse connection, tell the user that
-     `php artisan schema:dump --database=<name>` writes one. Do not run it
+   - The extension reads the ClickHouse tables from the migrations and from
+     the schema dumps (see the page above). If the table of a ClickHouse model
+     has no migration that Larastan reads, such as a table that raw SQL
+     creates, and the project has no dump of its connection, tell the user
+     that `php artisan schema:dump --database=<name>` writes one. Do not run it
      yourself, and never with `--prune`, which deletes the migrations.
 
 ## Step 15: Report

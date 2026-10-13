@@ -38,7 +38,7 @@ use Oralunal\LaravelClickHouse\Exceptions\QueryException;
  * CurlerRollingWithRetries). A client with a ClickHouse session is refused: ClickHouse runs one query of a session
  * at a time, and smi2 would send a request with a session id again and again.
  *
- * @phpstan-type Entry LaravelBuilder|EloquentBuilder<\Illuminate\Database\Eloquent\Model>|array{
+ * @phpstan-type Entry LaravelBuilder|EloquentBuilder<*>|array{
  *     sql: string,
  *     bindings?: array<int|string, mixed>,
  *     connection?: string|Connection
@@ -46,7 +46,7 @@ use Oralunal\LaravelClickHouse\Exceptions\QueryException;
  * @phpstan-type PreparedQuery array{
  *     type: 'laravel'|'sql',
  *     query: LaravelBuilder|null,
- *     eloquent?: EloquentBuilder<\Illuminate\Database\Eloquent\Model>,
+ *     eloquent?: EloquentBuilder<*>,
  *     client: Client|null,
  *     connection: Connection|null,
  *     sql: string,
@@ -56,7 +56,7 @@ use Oralunal\LaravelClickHouse\Exceptions\QueryException;
  * @phpstan-type SentQuery array{
  *     type: 'laravel'|'sql',
  *     query: LaravelBuilder|null,
- *     eloquent?: EloquentBuilder<\Illuminate\Database\Eloquent\Model>,
+ *     eloquent?: EloquentBuilder<*>,
  *     client: Client|null,
  *     connection: Connection|null,
  *     sql: string,
@@ -539,7 +539,7 @@ class Parallel
      * through the afterQuery() callbacks of the Eloquent builder. The rows of a query of a connection that pretends
      * are empty, so it gives an empty collection.
      *
-     * @param EloquentBuilder<\Illuminate\Database\Eloquent\Model> $eloquent
+     * @param EloquentBuilder<*> $eloquent
      * @param LaravelBuilder|null $query The query of the Eloquent builder, its toBase()
      * @param array<int, mixed> $rows
      * @return mixed

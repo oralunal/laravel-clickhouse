@@ -6,11 +6,24 @@
 #
 # See https://laravel-clickhouse.oralunal.com/reference/static-analysis
 
+parameters:
+    # Larastan keeps the tables that it reads from the migrations and the schema dumps in a cache, by the files only.
+    # The tables of ClickHouse connections also come from the database config and the version of this package, so
+    # the extension turns the cache off. Your phpstan.neon can turn it on again.
+    enableMigrationCache: false
+
 services:
     # Larastan's SQL parser, with the schema dumps of ClickHouse connections (see ClickHouseSqlParser).
-    sqlParser:
+    sqlParser!:
         type: Larastan\Larastan\SQL\SqlParser
         factory: Oralunal\LaravelClickHouse\PHPStan\ClickHouseSqlParser::create()
+
+    # Larastan's parser of the migrations, with the types of the columns of ClickHouse tables (see
+    # ClickHouseMigrationParser).
+    migrationsParser!:
+        type: PHPStan\Parser\Parser
+        factory: Oralunal\LaravelClickHouse\PHPStan\ClickHouseMigrationParser(@currentPhpVersionSimpleDirectParser)
+        autowired: false
 
     -
         class: Oralunal\LaravelClickHouse\PHPStan\ConnectionConfig

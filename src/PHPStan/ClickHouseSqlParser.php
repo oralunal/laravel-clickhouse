@@ -23,14 +23,18 @@ use Oralunal\LaravelClickHouse\SchemaState;
  * - Int8 to Int64 are int, and UInt8 to UInt32 are int<0, max>. UInt64 and the integers of 128 and 256 bits are
  *   mixed: a value above PHP_INT_MAX is a numeric string, which no type that Larastan converts can say together
  *   with int;
- * - Float32, Float64 and BFloat16 are float, and nullable on a read-only connection, which gets NaN and the
- *   infinities as null. Decimal, String, FixedString, UUID, IPv4, IPv6 and the dates and times are string, Bool is
- *   bool, and Enum8 and Enum16 are the union of their values;
+ * - Float32, Float64 and BFloat16 are float. When a ClickHouse connection of the config is read-only, they are
+ *   nullable: a read-only connection gets NaN and the infinities as null, and Larastan finds the columns of a model
+ *   by the name of its table only, not by its connection. Decimal, String, FixedString, UUID, IPv4, IPv6 and the
+ *   dates and times are string, Bool is bool, and Enum8 and Enum16 are the union of their values;
  * - Nullable(T) adds null. LowCardinality(T) and SimpleAggregateFunction(f, T) are T;
  * - Array, Map, Tuple, Nested, JSON and any other type are mixed: Larastan converts no array type.
  *
  * Views, materialized views and dictionaries are read as tables. An EPHEMERAL column, which a select cannot read,
- * and the INDEX, PROJECTION and CONSTRAINT lines of a table are left out.
+ * and the INDEX, PROJECTION and CONSTRAINT lines of a table are left out. A MATERIALIZED or ALIAS column is
+ * nullable: SELECT * does not read it, so a model that Eloquent selects with * has no value for it.
+ *
+ * ClickHouseMigrationParser converts the type of a rawColumn() of a migration with convert().
  */
 final class ClickHouseSqlParser implements SqlParser
 {
@@ -59,18 +63,14 @@ final class ClickHouseSqlParser implements SqlParser
      */
     public function parseTables(string $sql): array
     {
-        $connection = null;
-        if (str_starts_with($sql, SchemaState::DUMP_HEADER)) {
-            $line = strtok(substr($sql, strlen(SchemaState::DUMP_HEADER)), "\r\n");
-            $connection = $line === false ? null : trim($line);
-        } elseif (preg_match('/^\)\s*\R\s*ENGINE\s*=/mi', $sql) !== 1) {
+        if (!str_starts_with($sql, SchemaState::DUMP_HEADER) && preg_match('/^\)\s*\R\s*ENGINE\s*=/mi', $sql) !== 1) {
             return $this->fallback->parseTables($sql);
         }
 
-        $readOnly = $connection !== null && $this->config->isReadOnly($connection);
+        $floatsNullable = $this->config->hasReadOnlyClickHouseConnection();
         $tables = [];
         foreach (preg_split('/;\s*$/m', $sql) ?: [] as $statement) {
-            $table = $this->parseCreate($statement, $readOnly);
+            $table = $this->parseCreate($statement, $floatsNullable);
             if ($table !== null) {
                 $tables[] = $table;
             }
@@ -84,10 +84,10 @@ final class ClickHouseSqlParser implements SqlParser
      * any other statement.
      *
      * @param string $statement
-     * @param bool $readOnly
+     * @param bool $floatsNullable
      * @return TableDefinition|null
      */
-    private function parseCreate(string $statement, bool $readOnly): ?TableDefinition
+    private function parseCreate(string $statement, bool $floatsNullable): ?TableDefinition
     {
         $pattern = '/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?'
             . '(?:TABLE|VIEW|MATERIALIZED\s+VIEW|LIVE\s+VIEW|WINDOW\s+VIEW|DICTIONARY)\s+(?:IF\s+NOT\s+EXISTS\s+)?'
@@ -106,7 +106,7 @@ final class ClickHouseSqlParser implements SqlParser
         $open = $match[0][1] + strlen($match[0][0]) - 1;
         $columns = [];
         foreach (self::splitTopLevel(self::insideParentheses($body, $open), ',') as $definition) {
-            $column = $this->parseColumn($definition, $readOnly);
+            $column = $this->parseColumn($definition, $floatsNullable);
             if ($column !== null) {
                 $columns[] = $column;
             }
@@ -119,10 +119,10 @@ final class ClickHouseSqlParser implements SqlParser
      * Read a column definition, or null for an EPHEMERAL column and for an INDEX, PROJECTION or CONSTRAINT line.
      *
      * @param string $definition
-     * @param bool $readOnly
+     * @param bool $floatsNullable
      * @return ColumnDefinition|null
      */
-    private function parseColumn(string $definition, bool $readOnly): ?ColumnDefinition
+    private function parseColumn(string $definition, bool $floatsNullable): ?ColumnDefinition
     {
         $definition = trim($definition);
         if ($definition === '' || preg_match('/^(INDEX|PROJECTION|CONSTRAINT|PRIMARY\s+KEY)\b/i', $definition) === 1) {
@@ -134,24 +134,27 @@ final class ClickHouseSqlParser implements SqlParser
         }
 
         $type = self::leadingType($match[2]);
-        if (preg_match('/^\s*EPHEMERAL\b/i', substr($match[2], strlen($type))) === 1) {
+        $modifiers = substr($match[2], strlen($type));
+        if (preg_match('/^\s*EPHEMERAL\b/i', $modifiers) === 1) {
             return null;
         }
 
-        [$larastanType, $options, $nullable, $values] = $this->convert($type, $readOnly);
+        [$larastanType, $options, $nullable, $values] = self::convert($type, $floatsNullable);
+        $nullable = $nullable || preg_match('/^\s*(?:MATERIALIZED|ALIAS)\b/i', $modifiers) === 1;
 
         return new ColumnDefinition($this->unquote($match[1]), $larastanType, $options, $nullable, $values);
     }
 
     /**
      * Map a ClickHouse type to the type name, the options and the values that Larastan's converter reads, and
-     * whether the column is nullable.
+     * whether the column is nullable: INT, with the option unsigned for int<0, max>, DOUBLE, BOOLEAN, ENUM, VARCHAR,
+     * or CLICKHOUSE, which Larastan reads as mixed.
      *
-     * @param string $type
-     * @param bool $readOnly
+     * @param string $type The ClickHouse type, such as Nullable(Decimal(10, 2))
+     * @param bool $floatsNullable Whether a floating-point type is nullable (see parseTables())
      * @return array{0: string, 1: list<lowercase-string>, 2: bool, 3: list<string>}
      */
-    private function convert(string $type, bool $readOnly): array
+    public static function convert(string $type, bool $floatsNullable): array
     {
         $nullable = false;
         while (preg_match('/^(Nullable|LowCardinality)\((.*)\)$/s', $type, $match) === 1) {
@@ -162,7 +165,7 @@ final class ClickHouseSqlParser implements SqlParser
         if (preg_match('/^SimpleAggregateFunction\((.*)\)$/s', $type, $match) === 1) {
             $arguments = self::splitTopLevel($match[1], ',');
 
-            return $this->convert(trim($arguments[1] ?? ''), $readOnly);
+            return self::convert(trim($arguments[1] ?? ''), $floatsNullable);
         }
 
         $name = preg_replace('/\(.*$/s', '', $type) ?? $type;
@@ -171,7 +174,7 @@ final class ClickHouseSqlParser implements SqlParser
             in_array($name, ['Int8', 'Int16', 'Int32', 'Int64'], true),
             str_starts_with($name, 'Interval') => ['INT', [], $nullable, []],
             in_array($name, ['UInt8', 'UInt16', 'UInt32'], true) => ['INT', ['unsigned'], $nullable, []],
-            in_array($name, ['Float32', 'Float64', 'BFloat16'], true) => ['DOUBLE', [], $nullable || $readOnly, []],
+            in_array($name, ['Float32', 'Float64', 'BFloat16'], true) => ['DOUBLE', [], $nullable || $floatsNullable, []],
             $name === 'Bool' => ['BOOLEAN', [], $nullable, []],
             in_array($name, ['Enum8', 'Enum16', 'Enum'], true) => ['ENUM', [], $nullable, self::enumValues($type)],
             in_array($name, [

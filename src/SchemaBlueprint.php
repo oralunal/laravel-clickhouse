@@ -34,6 +34,11 @@ use Stringable;
  * data-skipping indexes, such as Memory or Log. drop()->sync() and
  * dropIfExists()->sync() add SYNC to the DROP TABLE statement.
  *
+ * index(), rawIndex(), fullText() and vectorIndex() return a
+ * SchemaIndexDefinition, and drop() and dropIfExists() return a
+ * SchemaDropCommand (see createCommand()). These types name the ClickHouse
+ * modifiers, so that static analysis tools know them.
+ *
  * Schema::table() sends its statements in the order of the calls, with the
  * columns it adds in one ALTER TABLE ... ADD COLUMN statement at the
  * position of the first of them. A dropColumn(), renameColumn() or change()
@@ -98,6 +103,12 @@ use Stringable;
  * @method SchemaColumnDefinition geography(string $column, string|null $subtype = null, int $srid = 4326)
  * @method SchemaColumnDefinition vector(string $column, int|null $dimensions = null)
  * @method SchemaColumnDefinition rawColumn(string $column, string $definition)
+ * @method SchemaIndexDefinition index(string|array $columns, string|null $name = null, string|null $algorithm = null)
+ * @method SchemaIndexDefinition rawIndex(string $expression, string $name)
+ * @method SchemaIndexDefinition fullText(string|array $columns, string|null $name = null, string|null $algorithm = null)
+ * @method SchemaIndexDefinition vectorIndex(string $column, string|null $name = null)
+ * @method SchemaDropCommand drop()
+ * @method SchemaDropCommand dropIfExists()
  */
 class SchemaBlueprint extends Blueprint
 {
@@ -370,5 +381,27 @@ class SchemaBlueprint extends Blueprint
         return $this->addColumnDefinition(new SchemaColumnDefinition(
             array_merge(['type' => $type, 'name' => $name], $parameters)
         ));
+    }
+
+    /**
+     * Create a new command. drop() and dropIfExists() get a SchemaDropCommand,
+     * and the data-skipping indexes of index(), rawIndex(), fullText() and
+     * vectorIndex() get a SchemaIndexDefinition. Laravel's Blueprint gives
+     * them a plain Fluent, also where it declares an IndexDefinition. Other
+     * commands get the Fluent of Laravel.
+     *
+     * @param string $name
+     * @param array<string, mixed> $parameters
+     * @return Fluent
+     */
+    protected function createCommand($name, array $parameters = [])
+    {
+        $attributes = array_merge(['name' => $name], $parameters);
+
+        return match ($name) {
+            'drop', 'dropIfExists' => new SchemaDropCommand($attributes),
+            'index', 'fulltext', 'vectorIndex' => new SchemaIndexDefinition($attributes),
+            default => parent::createCommand($name, $parameters),
+        };
     }
 }
